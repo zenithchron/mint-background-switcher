@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mint-background-switcher"
+version = "0.1.0"
+description = "Linux Mint/Cinnamon wallpaper switcher with per-monitor random rotation and fit-with-black-bars composition."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "zenithchron"}]
+keywords = ["linux-mint", "cinnamon", "wallpaper", "multi-monitor", "desktop"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Desktop Environment",
+]
+dependencies = ["Pillow>=9.0"]
+
+[project.optional-dependencies]
+tray = ["PyGObject>=3.42"]
+dev = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/zenithchron/mint-background-switcher"
+Repository = "https://github.com/zenithchron/mint-background-switcher"
+Issues = "https://github.com/zenithchron/mint-background-switcher/issues"
+Changelog = "https://github.com/zenithchron/mint-background-switcher/blob/main/CHANGELOG.md"
+
+[project.scripts]
+mint-background-switcher = "mint_background_switcher.cli:main"
+
+[tool.setuptools]
+packages = ["mint_background_switcher"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

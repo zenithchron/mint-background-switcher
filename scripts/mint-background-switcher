@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+PYTHON_BIN="${PYTHON:-python3}"
+if [[ "${1:-}" == "tray" ]] && /usr/bin/python3 - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gtk", "3.0")
+try:
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+except Exception:
+    gi.require_version("AppIndicator3", "0.1")
+PY
+then
+  PYTHON_BIN="/usr/bin/python3"
+fi
+
+exec "$PYTHON_BIN" -m mint_background_switcher "$@"
