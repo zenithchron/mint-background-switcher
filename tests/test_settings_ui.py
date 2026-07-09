@@ -1,4 +1,5 @@
 from mint_background_switcher import settings_ui
+from mint_background_switcher.monitor import Monitor
 
 
 class _Var:
@@ -40,7 +41,41 @@ def test_settings_window_geometry_prefers_roomy_desktop_size():
     assert y == (1440 - height) // 3
 
 
-def test_settings_window_geometry_keeps_small_screens_usable():
+def test_settings_window_geometry_centers_inside_selected_monitor():
+    width, _height, x, _y, _min_width, _min_height = settings_ui._settings_window_geometry(
+        5120,
+        1440,
+        942,
+        595,
+        monitor_rect=(0, 0, 2560, 1440),
+    )
+
+    assert x == 720
+    assert x < 2560
+    assert x + width < 2560
+
+
+def test_settings_window_monitor_rect_uses_pointer_then_primary_then_leftmost():
+    left = Monitor("Left", 2560, 1440, 0, 0, logical_width=2560, logical_height=1440)
+    right = Monitor("Right", 2560, 1440, 2560, 0, logical_width=2560, logical_height=1440, logical_x=2560)
+    primary = Monitor(
+        "Primary",
+        2560,
+        1440,
+        2560,
+        0,
+        primary=True,
+        logical_width=2560,
+        logical_height=1440,
+        logical_x=2560,
+    )
+
+    assert settings_ui._monitor_window_rect(5120, 1440, [left, right], 3000, 100) == (2560, 0, 2560, 1440)
+    assert settings_ui._monitor_window_rect(5120, 1440, [left, primary], None, None) == (2560, 0, 2560, 1440)
+    assert settings_ui._monitor_window_rect(5120, 1440, [right, left], None, None) == (0, 0, 2560, 1440)
+
+
+def test_settings_window_geometry_keeps_1024x768_screens_usable():
     width, height, x, y, min_width, min_height = settings_ui._settings_window_geometry(1024, 768, 1200, 900)
 
     assert width == 944

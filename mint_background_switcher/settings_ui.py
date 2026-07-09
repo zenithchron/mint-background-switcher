@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .config import Config, Profile, load_config, save_config
-from .monitor import detect_monitors
+from .monitor import Monitor, detect_monitors
 from .service import black_screen, switch_once
 
 
@@ -18,24 +18,68 @@ SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 
 
+def _monitor_window_rect(
+    screen_width: int,
+    screen_height: int,
+    monitors: list[Monitor] | None = None,
+    pointer_x: int | None = None,
+    pointer_y: int | None = None,
+) -> tuple[int, int, int, int] | None:
+    """Return the monitor rectangle to use for opening the settings window."""
+
+    if not monitors:
+        return None
+
+    choices: list[tuple[int, int, int, int, bool]] = []
+    for monitor in monitors:
+        x, y, width, height = monitor.logical_geometry
+        if width > 0 and height > 0:
+            choices.append((x, y, width, height, monitor.primary))
+    if not choices:
+        return None
+
+    if pointer_x is not None and pointer_y is not None:
+        for x, y, width, height, _primary in choices:
+            if x <= pointer_x < x + width and y <= pointer_y < y + height:
+                return (x, y, width, height)
+
+    for x, y, width, height, primary in choices:
+        if primary:
+            return (x, y, width, height)
+
+    x, y, width, height, _primary = sorted(choices, key=lambda rect: (rect[0], rect[1]))[0]
+    return (x, y, width, height)
+
+
 def _settings_window_geometry(
     screen_width: int,
     screen_height: int,
     requested_width: int = 0,
     requested_height: int = 0,
+    monitor_rect: tuple[int, int, int, int] | None = None,
 ) -> tuple[int, int, int, int, int, int]:
     """Return initial width/height/x/y and safe minimum size for the settings window."""
 
-    usable_width = max(640, screen_width - SETTINGS_WINDOW_SCREEN_MARGIN_X)
-    usable_height = max(480, screen_height - SETTINGS_WINDOW_SCREEN_MARGIN_Y)
+    origin_x = 0
+    origin_y = 0
+    area_width = screen_width
+    area_height = screen_height
+    if monitor_rect is not None:
+        origin_x, origin_y, monitor_width, monitor_height = monitor_rect
+        if monitor_width > 0 and monitor_height > 0:
+            area_width = monitor_width
+            area_height = monitor_height
+
+    usable_width = max(320, area_width - min(SETTINGS_WINDOW_SCREEN_MARGIN_X, max(0, area_width - 320)))
+    usable_height = max(320, area_height - min(SETTINGS_WINDOW_SCREEN_MARGIN_Y, max(0, area_height - 320)))
     target_width = max(SETTINGS_WINDOW_TARGET_WIDTH, requested_width)
     target_height = max(SETTINGS_WINDOW_TARGET_HEIGHT, requested_height)
     min_width = min(SETTINGS_WINDOW_MIN_WIDTH, usable_width)
     min_height = min(SETTINGS_WINDOW_MIN_HEIGHT, usable_height)
     width = max(min(target_width, usable_width), min_width)
     height = max(min(target_height, usable_height), min_height)
-    x = max(0, (screen_width - width) // 2)
-    y = max(0, (screen_height - height) // 3)
+    x = origin_x + max(0, (area_width - width) // 2)
+    y = origin_y + max(0, (area_height - height) // 3)
     return width, height, x, y, min_width, min_height
 
 
@@ -52,17 +96,26 @@ class SettingsApp(tk.Tk):
         self.desktop_var = tk.StringVar()
         self.monitor_folder_var = tk.StringVar()
         self.monitor_folders_data: dict[str, list[str]] = {}
+        self.detected_monitors = detect_monitors()
         self._build()
         self._load_profile(self.profile_var.get())
         self._set_initial_window_geometry()
 
     def _set_initial_window_geometry(self) -> None:
         self.update_idletasks()
+        monitor_rect = _monitor_window_rect(
+            self.winfo_screenwidth(),
+            self.winfo_screenheight(),
+            self._optional_attr("detected_monitors", []),
+            self.winfo_pointerx(),
+            self.winfo_pointery(),
+        )
         width, height, x, y, min_width, min_height = _settings_window_geometry(
             self.winfo_screenwidth(),
             self.winfo_screenheight(),
             self.winfo_reqwidth(),
             self.winfo_reqheight(),
+            monitor_rect,
         )
         self.geometry(f"{width}x{height}+{x}+{y}")
         self.minsize(min_width, min_height)
@@ -107,7 +160,7 @@ class SettingsApp(tk.Tk):
         folders.add(shared_frame, weight=1)
 
         monitor_frame = ttk.LabelFrame(folders, text="Per-monitor folders", padding=8)
-        monitors = detect_monitors()
+        monitors = self.detected_monitors
         self.monitor_names = [m.name for m in monitors]
         if self.monitor_names:
             self.monitor_folder_var.set(self.monitor_names[0])

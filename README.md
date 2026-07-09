@@ -20,7 +20,8 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 ### Unreleased
 
 - Enlarged and centered the settings window so the profile/settings panels are visible without manual resizing on normal desktop resolutions.
-- Added a minimum settings-window size that adapts down for smaller screens instead of opening with clipped controls.
+- Added monitor-aware centering so the settings window does not open split across a multi-monitor seam.
+- Added a minimum settings-window size that adapts down for 1024x768-class screens instead of opening with clipped controls.
 
 ### 0.1.0
 
