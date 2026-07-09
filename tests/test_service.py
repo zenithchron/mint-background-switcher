@@ -134,6 +134,32 @@ def test_live_next_uses_alternating_prebuilt_files(monkeypatch, tmp_path: Path):
     assert load_state().wallpaper_slot == second_state.wallpaper_slot
 
 
+def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "same"
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_per_monitor(monitors, image_by_monitor, output_path):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["image_by_monitor"] = dict(image_by_monitor)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"same")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_per_monitor", fake_compose_per_monitor)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+    state = load_state()
+
+    assert result.action == "next"
+    assert len(result.images) == 1
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["image_by_monitor"] == {"A": result.images[0], "B": result.images[0]}
+    assert "profile:P:same" in state.remaining
+
+
 def test_live_black_screen_stays_paused_until_live_next(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     black_screen("P", dry_run=False)

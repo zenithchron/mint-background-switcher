@@ -113,6 +113,17 @@ def _switch_once_with_state(
             wallpaper = compose_span(monitors, image, wallpaper_path)
             images_used = [image]
             DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+    elif profile.mode == "same":
+        pool = scan_images(profile.shared_folders, profile.recursive)
+        if not pool:
+            wallpaper = _apply_black_fallback(profile, monitors, wallpaper_path, dry_run=dry_run)
+            action = "black-fallback"
+        else:
+            image = draw_one(state, _profile_bucket(profile, "same"), pool, rng=rng)
+            selections = {monitor.name: image for monitor in monitors}
+            images_used = [image]
+            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
+            DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
     elif profile.mode == "shared":
         pool = scan_images(profile.shared_folders, profile.recursive)
         if not pool:

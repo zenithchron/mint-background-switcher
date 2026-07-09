@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from . import __version__
 from .autostart import disable_autostart, enable_autostart, tray_command
 from .config import ensure_config, load_config
 from .hotkeys import register_cinnamon_black_hotkey
@@ -46,6 +47,7 @@ def _print_result(result) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mint-background-switcher")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     init = sub.add_parser("init", help="Create default config")

@@ -140,7 +140,7 @@ class SettingsApp(tk.Tk):
         ttk.Label(form, text="Interval minutes:").grid(row=0, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.interval_var, width=10).grid(row=0, column=1, sticky="w", padx=5)
         ttk.Label(form, text="Mode:").grid(row=0, column=2, sticky="w", padx=(20, 0))
-        ttk.OptionMenu(form, self.mode_var, "shared", "shared", "per-monitor", "span").grid(row=0, column=3, sticky="w", padx=5)
+        ttk.OptionMenu(form, self.mode_var, "shared", "shared", "same", "per-monitor", "span").grid(row=0, column=3, sticky="w", padx=5)
         ttk.Checkbutton(form, text="Scan folders recursively", variable=self.recursive_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
         ttk.Label(form, text="Black screen hotkey:").grid(row=1, column=2, sticky="w", padx=(20, 0))
         ttk.Entry(form, textvariable=self.hotkey_var, width=22).grid(row=1, column=3, sticky="w", padx=5)

@@ -14,6 +14,11 @@ def test_config_roundtrip():
     assert profile.folders_for_monitor("missing") == ["/pics"]
 
 
+def test_same_mode_is_valid():
+    cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "same"}}})
+    assert cfg.get_profile().mode == "same"
+
+
 def test_invalid_mode_falls_back_to_shared():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "crop"}}})
     assert cfg.get_profile().mode == "shared"

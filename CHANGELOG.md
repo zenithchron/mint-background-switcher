@@ -4,10 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
-## [Unreleased]
+## [0.1.1] - 2026-07-09
+
+### Added
+
+- `same` wallpaper mode, which picks one shared image and fits it independently on every monitor.
+- `mint-background-switcher --version` for reporting the installed package version.
 
 ### Changed
 
+- Bumped the package version to `0.1.1`.
 - Enlarged and centered the settings window so the profile/settings panels are visible without manual resizing on normal desktop resolutions.
 - Added monitor-aware centering so the settings window does not open split across a multi-monitor seam.
 - Added a minimum settings-window size that adapts down for 1024x768-class screens instead of opening with clipped controls.

@@ -10,7 +10,7 @@ from .paths import config_file, xdg_config_dir
 from .storage import locked_read_json, locked_write_json
 
 CONFIG_VERSION = 1
-VALID_MODES = {"shared", "per-monitor", "span"}
+VALID_MODES = {"shared", "same", "per-monitor", "span"}
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:

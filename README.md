@@ -6,7 +6,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 - Local image folders with recursive scanning.
 - Random no-repeat rotation until each pool is exhausted.
-- Shared, per-monitor, and spanned wallpaper modes.
+- Shared, same-image, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Settings editor for profiles, shared folders, and per-monitor folders.
@@ -17,8 +17,10 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 ## Change log
 
-### Unreleased
+### 0.1.1 - 2026-07-09
 
+- Added `same` mode, which picks one image and fits that same image independently on every monitor.
+- Added `mint-background-switcher --version` and bumped the package version to `0.1.1`.
 - Enlarged and centered the settings window so the profile/settings panels are visible without manual resizing on normal desktop resolutions.
 - Added monitor-aware centering so the settings window does not open split across a multi-monitor seam.
 - Added a minimum settings-window size that adapts down for 1024x768-class screens instead of opening with clipped controls.
@@ -98,6 +100,9 @@ To use the tray as the login entry instead of safe-start, use the expert option 
 # Create default config, optionally using a folder for the shared pool
 mint-background-switcher init --folder ~/Pictures
 
+# Show installed version
+mint-background-switcher --version
+
 # Generate and apply one rotation now
 mint-background-switcher next
 
@@ -155,6 +160,7 @@ export MBS_CACHE_DIR=/tmp/mbs-cache
 Each profile has a mode:
 
 - `shared`: all monitors draw from one shared image pool, without duplicates within the same rotation when possible.
+- `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
 - `span`: one image is fit with black bars across the full virtual desktop canvas.
 
@@ -206,6 +212,10 @@ Before submitting changes, run:
 git diff --check
 python -m pytest -q
 ```
+
+## Versioning
+
+Releases use semantic version numbers. The package version lives in `pyproject.toml` and `mint_background_switcher/__init__.py`, and public releases are tagged as `vMAJOR.MINOR.PATCH`.
 
 ## License
 
