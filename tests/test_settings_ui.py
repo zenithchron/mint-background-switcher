@@ -31,6 +31,25 @@ class _Combo:
         pass
 
 
+def test_settings_window_geometry_prefers_roomy_desktop_size():
+    width, height, x, y, min_width, min_height = settings_ui._settings_window_geometry(2560, 1440, 850, 600)
+
+    assert (width, height) == (settings_ui.SETTINGS_WINDOW_TARGET_WIDTH, settings_ui.SETTINGS_WINDOW_TARGET_HEIGHT)
+    assert (min_width, min_height) == (settings_ui.SETTINGS_WINDOW_MIN_WIDTH, settings_ui.SETTINGS_WINDOW_MIN_HEIGHT)
+    assert x == (2560 - width) // 2
+    assert y == (1440 - height) // 3
+
+
+def test_settings_window_geometry_keeps_small_screens_usable():
+    width, height, x, y, min_width, min_height = settings_ui._settings_window_geometry(1024, 768, 1200, 900)
+
+    assert width == 944
+    assert height == 668
+    assert (min_width, min_height) == (944, 668)
+    assert x == 40
+    assert y == 33
+
+
 def test_save_current_returns_false_on_validation_failure(monkeypatch):
     errors = []
     monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message: errors.append((title, message)))

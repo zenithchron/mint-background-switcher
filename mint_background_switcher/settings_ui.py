@@ -10,11 +10,39 @@ from .monitor import detect_monitors
 from .service import black_screen, switch_once
 
 
+SETTINGS_WINDOW_TARGET_WIDTH = 1120
+SETTINGS_WINDOW_TARGET_HEIGHT = 760
+SETTINGS_WINDOW_MIN_WIDTH = 980
+SETTINGS_WINDOW_MIN_HEIGHT = 680
+SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
+SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
+
+
+def _settings_window_geometry(
+    screen_width: int,
+    screen_height: int,
+    requested_width: int = 0,
+    requested_height: int = 0,
+) -> tuple[int, int, int, int, int, int]:
+    """Return initial width/height/x/y and safe minimum size for the settings window."""
+
+    usable_width = max(640, screen_width - SETTINGS_WINDOW_SCREEN_MARGIN_X)
+    usable_height = max(480, screen_height - SETTINGS_WINDOW_SCREEN_MARGIN_Y)
+    target_width = max(SETTINGS_WINDOW_TARGET_WIDTH, requested_width)
+    target_height = max(SETTINGS_WINDOW_TARGET_HEIGHT, requested_height)
+    min_width = min(SETTINGS_WINDOW_MIN_WIDTH, usable_width)
+    min_height = min(SETTINGS_WINDOW_MIN_HEIGHT, usable_height)
+    width = max(min(target_width, usable_width), min_width)
+    height = max(min(target_height, usable_height), min_height)
+    x = max(0, (screen_width - width) // 2)
+    y = max(0, (screen_height - height) // 3)
+    return width, height, x, y, min_width, min_height
+
+
 class SettingsApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Mint Background Switcher Settings")
-        self.geometry("780x620")
         self.config_data: Config = load_config()
         self.profile_var = tk.StringVar(value=self.config_data.active_profile)
         self.interval_var = tk.StringVar()
@@ -26,6 +54,18 @@ class SettingsApp(tk.Tk):
         self.monitor_folders_data: dict[str, list[str]] = {}
         self._build()
         self._load_profile(self.profile_var.get())
+        self._set_initial_window_geometry()
+
+    def _set_initial_window_geometry(self) -> None:
+        self.update_idletasks()
+        width, height, x, y, min_width, min_height = _settings_window_geometry(
+            self.winfo_screenwidth(),
+            self.winfo_screenheight(),
+            self.winfo_reqwidth(),
+            self.winfo_reqheight(),
+        )
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(min_width, min_height)
 
     def _build(self) -> None:
         root = ttk.Frame(self, padding=10)

@@ -4,6 +4,13 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [Unreleased]
+
+### Changed
+
+- Enlarged and centered the settings window so the profile/settings panels are visible without manual resizing on normal desktop resolutions.
+- Added a minimum settings-window size that adapts down for smaller screens instead of opening with clipped controls.
+
 ## [0.1.0] - 2026-07-06
 
 ### Added

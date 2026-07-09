@@ -15,6 +15,17 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
+## Change log
+
+### Unreleased
+
+- Enlarged and centered the settings window so the profile/settings panels are visible without manual resizing on normal desktop resolutions.
+- Added a minimum settings-window size that adapts down for smaller screens instead of opening with clipped controls.
+
+### 0.1.0
+
+- Initial public release with multi-monitor wallpaper rotation, profiles, per-monitor folders, safe autostart, tray support, black-screen mode, and rescue tooling.
+
 ## Requirements
 
 - Linux Mint Cinnamon on X11 is the primary target.
