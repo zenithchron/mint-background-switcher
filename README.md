@@ -11,11 +11,17 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Named profiles for different folder/layout setups.
 - Settings editor for profiles, shared folders, and per-monitor folders.
 - Optional tray menu for quick actions.
+- Save the current generated multi-monitor background to a PNG file.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.2 - 2026-07-10
+
+- Added `save-current`, which copies the current generated background to a PNG file without changing the wallpaper or advancing the rotation.
+- Bumped the package version to `0.1.2`.
 
 ### 0.1.1 - 2026-07-09
 
@@ -115,6 +121,12 @@ mint-background-switcher black-screen
 # Resume scheduled rotation and immediately show a new wallpaper
 mint-background-switcher resume
 
+# Save the current generated multi-monitor background (refuses to overwrite by default)
+mint-background-switcher save-current ~/Pictures/current-background.png
+
+# Explicitly replace an existing saved copy
+mint-background-switcher save-current ~/Pictures/current-background.png --force
+
 # Run the background loop without tray UI
 mint-background-switcher run
 
@@ -182,6 +194,8 @@ Add `@150%`, `@1.25`, etc. when you want the test geometry to simulate Cinnamon 
 ## Switching behavior
 
 Live wallpaper changes are rendered to an off-screen active file first, then applied by switching the desktop URI. The app alternates between two active files so the image currently displayed by Cinnamon/GNOME is not overwritten in place. Normal Cinnamon wallpaper changes only update the desktop background URI/options; they do not modify Muffin/Nemo transition or panel settings automatically.
+
+`save-current` copies that generated PNG, including the complete multi-monitor composition, without selecting new source images or changing runtime state. The destination must end in `.png`; existing files are protected unless `--force` is supplied.
 
 Black-screen mode uses Cinnamon/GNOME solid-black color mode before doing monitor detection or fallback PNG work, so the visible switch should be near-instant. If a configured image folder is empty or temporarily unavailable, normal rotation applies a non-sticky black fallback instead of erroring, then retries on the next rotation.
 

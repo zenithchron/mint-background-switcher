@@ -12,7 +12,7 @@ from .hotkeys import register_cinnamon_black_hotkey
 from .monitor import detect_monitors
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
-from .service import black_screen, pause, resume, run_loop, switch_once
+from .service import black_screen, pause, resume, run_loop, save_current_wallpaper, switch_once
 from .startup import safe_start
 from .state import load_state
 
@@ -65,6 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     resume_p = sub.add_parser("resume", help="Resume rotation and immediately advance")
     resume_p.add_argument("--profile")
     resume_p.add_argument("--dry-run", action="store_true")
+
+    save_current = sub.add_parser("save-current", help="Save a copy of the current generated background")
+    save_current.add_argument("destination", help="Output PNG path, or an existing directory")
+    save_current.add_argument("--force", action="store_true", help="Overwrite an existing output file")
 
     run = sub.add_parser("run", help="Run background loop without tray")
     run.add_argument("--profile")
@@ -123,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "resume":
         _print_result(resume(args.profile, dry_run=args.dry_run))
+        return 0
+    if args.command == "save-current":
+        print(save_current_wallpaper(args.destination, overwrite=args.force))
         return 0
     if args.command == "run":
         run_loop(

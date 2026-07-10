@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -198,6 +199,36 @@ def pause() -> RuntimeState:
     with state_transaction() as state:
         state.paused = True
         return RuntimeState.from_dict(state.to_dict())
+
+
+def save_current_wallpaper(destination: str | Path, *, overwrite: bool = False) -> Path:
+    """Copy the current generated wallpaper to a user-selected PNG file."""
+    state = load_state()
+    if not state.last_wallpaper:
+        raise RuntimeError("No current wallpaper is available; run 'next' first")
+
+    source = Path(state.last_wallpaper).expanduser()
+    if not source.is_file():
+        raise FileNotFoundError(f"Current wallpaper file is missing: {source}")
+
+    output = Path(destination).expanduser()
+    if output.is_dir():
+        output = output / source.name
+    if output.suffix.lower() != ".png":
+        raise ValueError("Saved wallpaper destination must use a .png extension")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() == output.resolve():
+        raise ValueError("Saved wallpaper destination must differ from the current cache file")
+    if overwrite:
+        shutil.copyfile(source, output)
+    else:
+        try:
+            with source.open("rb") as source_file, output.open("xb") as output_file:
+                shutil.copyfileobj(source_file, output_file)
+        except FileExistsError as exc:
+            raise FileExistsError(f"Destination already exists: {output}") from exc
+    return output.resolve()
 
 
 def resume(profile_name: str | None = None, *, dry_run: bool = False) -> SwitchResult:

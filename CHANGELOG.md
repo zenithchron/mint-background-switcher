@@ -4,6 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.2] - 2026-07-10
+
+### Added
+
+- `save-current` command for copying the current generated multi-monitor background to a PNG file without advancing the rotation.
+
+### Changed
+
+- Bumped the package version to `0.1.2`.
+
 ## [0.1.1] - 2026-07-09
 
 ### Added

@@ -1,11 +1,12 @@
 import random
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from mint_background_switcher import service
 from mint_background_switcher.config import Config, Profile, save_config
-from mint_background_switcher.service import black_screen, resume, switch_once
+from mint_background_switcher.service import black_screen, resume, save_current_wallpaper, switch_once
 from mint_background_switcher.state import RuntimeState, load_state, save_state
 
 
@@ -132,6 +133,50 @@ def test_live_next_uses_alternating_prebuilt_files(monkeypatch, tmp_path: Path):
     assert second_state.wallpaper_slot == 0
     assert preview.wallpaper.name == "P-dry-run.png"
     assert load_state().wallpaper_slot == second_state.wallpaper_slot
+
+
+def test_save_current_wallpaper_copies_composite_without_changing_state(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    current = switch_once("P", dry_run=False, rng=random.Random(3))
+    before = load_state().to_dict()
+    destination = tmp_path / "saved" / "desktop.png"
+
+    saved = save_current_wallpaper(destination)
+
+    assert saved == destination.resolve()
+    assert saved.read_bytes() == current.wallpaper.read_bytes()
+    assert load_state().to_dict() == before
+
+
+def test_save_current_wallpaper_requires_force_to_overwrite(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    current = switch_once("P", dry_run=False, rng=random.Random(3))
+    destination = tmp_path / "desktop.png"
+    destination.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="Destination already exists"):
+        save_current_wallpaper(destination)
+
+    saved = save_current_wallpaper(destination, overwrite=True)
+    assert saved.read_bytes() == current.wallpaper.read_bytes()
+
+
+def test_save_current_wallpaper_rejects_cache_file_as_destination(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    current = switch_once("P", dry_run=False, rng=random.Random(3))
+    before = current.wallpaper.read_bytes()
+
+    with pytest.raises(ValueError, match="must differ from the current cache file"):
+        save_current_wallpaper(current.wallpaper, overwrite=True)
+
+    assert current.wallpaper.read_bytes() == before
+
+
+def test_save_current_wallpaper_requires_live_wallpaper(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    with pytest.raises(RuntimeError, match="run 'next' first"):
+        save_current_wallpaper(tmp_path / "desktop.png")
 
 
 def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path: Path):
