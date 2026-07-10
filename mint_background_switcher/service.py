@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import random
+import secrets
 import shutil
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -174,25 +177,37 @@ def black_screen(profile_name: str | None = None, *, dry_run: bool = False) -> S
     setter = DesktopSetter(dry_run=dry_run)
     wallpaper_path = generated_wallpaper_path(profile.name, suffix="dry-run-black" if dry_run else "black")
 
-    if not dry_run and setter.supports_solid_black(profile.desktop):
-        # Put the screen into solid black before doing monitor detection or PNG work.
-        # The fallback PNG is generated afterward for status/fallback backends.
-        setter.apply_black(None, profile.desktop)
-        monitors = detect_monitors()
-        wallpaper = compose_black(monitors, wallpaper_path)
-    else:
+    if dry_run:
         monitors = detect_monitors()
         wallpaper = compose_black(monitors, wallpaper_path)
         setter.apply_black(wallpaper, profile.desktop)
+        return SwitchResult(profile.name, wallpaper, [], monitors, applied=False, action="black-screen")
 
-    if not dry_run:
-        with state_transaction() as state:
-            state.active_profile = profile.name
-            state.black_screen = True
-            state.paused = True
-            state.last_wallpaper = str(wallpaper)
-            state.last_images = []
-    return SwitchResult(profile.name, wallpaper, [], monitors, applied=not dry_run, action="black-screen")
+    supports_solid_black = setter.supports_solid_black(profile.desktop)
+    if supports_solid_black:
+        # Privacy action first: do not wait behind a slow save-current copy. Reapply
+        # after taking the lock so this also wins against an in-flight rotation.
+        setter.apply_black(None, profile.desktop)
+
+    # Hold the state lock before touching the live black cache file. This keeps
+    # save-current snapshots stable and serializes black-screen with rotations.
+    with state_transaction() as state:
+        if supports_solid_black:
+            setter.apply_black(None, profile.desktop)
+            monitors = detect_monitors()
+            wallpaper = compose_black(monitors, wallpaper_path)
+        else:
+            monitors = detect_monitors()
+            wallpaper = compose_black(monitors, wallpaper_path)
+            setter.apply_black(wallpaper, profile.desktop)
+
+        state.active_profile = profile.name
+        state.black_screen = True
+        state.paused = True
+        state.last_wallpaper = str(wallpaper)
+        state.last_images = []
+
+    return SwitchResult(profile.name, wallpaper, [], monitors, applied=True, action="black-screen")
 
 
 def pause() -> RuntimeState:
@@ -201,34 +216,83 @@ def pause() -> RuntimeState:
         return RuntimeState.from_dict(state.to_dict())
 
 
+def _create_staged_output(output: Path) -> tuple[int, Path]:
+    """Create a same-directory staging file while honoring the caller's umask."""
+    for _ in range(100):
+        staged = output.with_name(f".{output.name}.{secrets.token_hex(8)}.tmp")
+        try:
+            fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        except FileExistsError:
+            continue
+        return fd, staged
+    raise FileExistsError(f"Could not create a staging file beside: {output}")
+
+
 def save_current_wallpaper(destination: str | Path, *, overwrite: bool = False) -> Path:
-    """Copy the current generated wallpaper to a user-selected PNG file."""
-    state = load_state()
-    if not state.last_wallpaper:
-        raise RuntimeError("No current wallpaper is available; run 'next' first")
-
-    source = Path(state.last_wallpaper).expanduser()
-    if not source.is_file():
-        raise FileNotFoundError(f"Current wallpaper file is missing: {source}")
-
+    """Atomically copy a stable snapshot of the current wallpaper to a PNG file."""
     output = Path(destination).expanduser()
-    if output.is_dir():
-        output = output / source.name
     if output.suffix.lower() != ".png":
         raise ValueError("Saved wallpaper destination must use a .png extension")
-
     output.parent.mkdir(parents=True, exist_ok=True)
-    if source.resolve() == output.resolve():
-        raise ValueError("Saved wallpaper destination must differ from the current cache file")
-    if overwrite:
-        shutil.copyfile(source, output)
+    destination_mode: int | None = None
+    try:
+        destination_info = output.lstat()
+    except FileNotFoundError:
+        pass
     else:
+        if stat.S_ISDIR(destination_info.st_mode):
+            raise ValueError("Saved wallpaper destination must be a PNG file path, not a directory")
+        if stat.S_ISLNK(destination_info.st_mode):
+            raise ValueError("Saved wallpaper destination must not be a symbolic link")
+        if not stat.S_ISREG(destination_info.st_mode):
+            raise ValueError("Saved wallpaper destination must be a regular file")
+        if not overwrite:
+            raise FileExistsError(f"Destination already exists: {output}")
+        destination_mode = stat.S_IMODE(destination_info.st_mode) & 0o777
+
+    staged: Path | None = None
+    try:
+        # Live rotations hold this same lock while composing the alternating cache
+        # slots. Keep it until the snapshot is fully staged so neither slot can be
+        # overwritten midway through this copy.
+        with state_transaction() as state:
+            if not state.last_wallpaper:
+                raise RuntimeError("No current wallpaper is available; run 'next' first")
+
+            source = Path(state.last_wallpaper).expanduser()
+            if not source.is_file():
+                raise FileNotFoundError(f"Current wallpaper file is missing: {source}")
+            if source.resolve() == output.resolve():
+                raise ValueError("Saved wallpaper destination must differ from the current cache file")
+
+            with source.open("rb") as source_file:
+                fd, staged = _create_staged_output(output)
+                with os.fdopen(fd, "wb") as staged_file:
+                    if destination_mode is not None:
+                        os.fchmod(staged_file.fileno(), destination_mode)
+                    shutil.copyfileobj(source_file, staged_file)
+                    staged_file.flush()
+                    os.fsync(staged_file.fileno())
+
+        if overwrite:
+            # Replace the completed snapshot atomically. If a symlink is created in
+            # the narrow race after validation, os.replace replaces the link itself
+            # rather than following its target.
+            os.replace(staged, output)
+        else:
+            # The staging file lives beside the output, so this hard link is an
+            # atomic no-clobber install on the same filesystem.
+            try:
+                os.link(staged, output)
+            except FileExistsError as exc:
+                raise FileExistsError(f"Destination already exists: {output}") from exc
+        return output.resolve()
+    finally:
         try:
-            with source.open("rb") as source_file, output.open("xb") as output_file:
-                shutil.copyfileobj(source_file, output_file)
-        except FileExistsError as exc:
-            raise FileExistsError(f"Destination already exists: {output}") from exc
-    return output.resolve()
+            if staged is not None:
+                staged.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def resume(profile_name: str | None = None, *, dry_run: bool = False) -> SwitchResult:

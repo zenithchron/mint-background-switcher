@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Bumped the package version to `0.1.2`.
+- `save-current` now requires an explicit `.png` file path, stages a stable snapshot under the shared wallpaper-state lock, installs it atomically without following destination symbolic links, preserves existing file permissions while new files honor the caller's umask, and does not delay the immediate solid-black privacy action.
 
 ## [0.1.1] - 2026-07-09
 

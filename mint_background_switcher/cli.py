@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     resume_p.add_argument("--dry-run", action="store_true")
 
     save_current = sub.add_parser("save-current", help="Save a copy of the current generated background")
-    save_current.add_argument("destination", help="Output PNG path, or an existing directory")
+    save_current.add_argument("destination", help="Output PNG file path")
     save_current.add_argument("--force", action="store_true", help="Overwrite an existing output file")
 
     run = sub.add_parser("run", help="Run background loop without tray")

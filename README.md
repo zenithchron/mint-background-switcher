@@ -121,10 +121,10 @@ mint-background-switcher black-screen
 # Resume scheduled rotation and immediately show a new wallpaper
 mint-background-switcher resume
 
-# Save the current generated multi-monitor background (refuses to overwrite by default)
+# Atomically save the current generated multi-monitor background (requires a .png file path)
 mint-background-switcher save-current ~/Pictures/current-background.png
 
-# Explicitly replace an existing saved copy
+# Explicitly replace an existing regular-file copy; symbolic-link destinations are rejected
 mint-background-switcher save-current ~/Pictures/current-background.png --force
 
 # Run the background loop without tray UI

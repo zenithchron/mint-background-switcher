@@ -1,4 +1,6 @@
+import os
 import random
+import threading
 from pathlib import Path
 
 import pytest
@@ -107,8 +109,9 @@ def test_solid_black_applies_before_generating_fallback(monkeypatch, tmp_path: P
 
     result = black_screen("P", dry_run=False)
 
-    assert calls[:4] == [
+    assert calls[:5] == [
         ("supports", "unknown"),
+        ("apply_black", None, "unknown"),
         ("apply_black", None, "unknown"),
         ("detect_monitors",),
         ("compose_black", 1, "P-black.png"),
@@ -153,12 +156,232 @@ def test_save_current_wallpaper_requires_force_to_overwrite(monkeypatch, tmp_pat
     current = switch_once("P", dry_run=False, rng=random.Random(3))
     destination = tmp_path / "desktop.png"
     destination.write_bytes(b"existing")
+    destination.chmod(0o600)
 
     with pytest.raises(FileExistsError, match="Destination already exists"):
         save_current_wallpaper(destination)
 
+    staged_modes = []
+    original_copyfileobj = service.shutil.copyfileobj
+
+    def observe_staged_mode(source_file, destination_file):
+        staged_modes.append(os.fstat(destination_file.fileno()).st_mode & 0o777)
+        original_copyfileobj(source_file, destination_file)
+
+    monkeypatch.setattr(service.shutil, "copyfileobj", observe_staged_mode)
     saved = save_current_wallpaper(destination, overwrite=True)
+    assert staged_modes == [0o600]
     assert saved.read_bytes() == current.wallpaper.read_bytes()
+    assert saved.stat().st_mode & 0o777 == 0o600
+
+
+def test_save_current_wallpaper_new_file_respects_umask(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    switch_once("P", dry_run=False, rng=random.Random(3))
+    destination = tmp_path / "desktop.png"
+
+    previous_umask = os.umask(0o077)
+    try:
+        saved = save_current_wallpaper(destination)
+    finally:
+        os.umask(previous_umask)
+
+    assert saved.stat().st_mode & 0o777 == 0o600
+
+
+def test_save_current_wallpaper_requires_explicit_png_file(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    switch_once("P", dry_run=False, rng=random.Random(3))
+    directory = tmp_path / "exports.png"
+    directory.mkdir()
+
+    with pytest.raises(ValueError, match="must use a .png extension"):
+        save_current_wallpaper(tmp_path / "desktop.jpg")
+    with pytest.raises(ValueError, match="not a directory"):
+        save_current_wallpaper(directory)
+
+
+def test_save_current_wallpaper_rejects_symlink_without_touching_target(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    switch_once("P", dry_run=False, rng=random.Random(3))
+    target = tmp_path / "unrelated.png"
+    target.write_bytes(b"unrelated")
+    destination = tmp_path / "desktop.png"
+    destination.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symbolic link"):
+        save_current_wallpaper(destination, overwrite=True)
+
+    assert destination.is_symlink()
+    assert target.read_bytes() == b"unrelated"
+
+
+def test_save_current_wallpaper_copy_failure_preserves_destination(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    switch_once("P", dry_run=False, rng=random.Random(3))
+    destination = tmp_path / "desktop.png"
+    destination.write_bytes(b"existing")
+
+    def fail_mid_copy(source_file, destination_file):
+        destination_file.write(source_file.read(8))
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(service.shutil, "copyfileobj", fail_mid_copy)
+
+    with pytest.raises(OSError, match="simulated copy failure"):
+        save_current_wallpaper(destination, overwrite=True)
+
+    assert destination.read_bytes() == b"existing"
+    assert list(tmp_path.glob(".desktop.png.*.tmp")) == []
+
+
+def test_save_current_wallpaper_holds_rotation_lock_until_snapshot_is_staged(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    current = switch_once("P", dry_run=False, rng=random.Random(3))
+    expected = current.wallpaper.read_bytes()
+    destination = tmp_path / "desktop.png"
+    copy_started = threading.Event()
+    allow_copy_to_finish = threading.Event()
+    rotation_started = threading.Event()
+    rotation_finished = threading.Event()
+    errors: list[BaseException] = []
+    original_copyfileobj = service.shutil.copyfileobj
+
+    def delayed_copy(source_file, destination_file):
+        destination_file.write(source_file.read(8))
+        copy_started.set()
+        if not allow_copy_to_finish.wait(timeout=2):
+            raise TimeoutError("test did not release staged copy")
+        original_copyfileobj(source_file, destination_file)
+
+    def save_worker():
+        try:
+            save_current_wallpaper(destination)
+        except BaseException as exc:  # pragma: no cover - assertion reports thread failures
+            errors.append(exc)
+
+    def rotate_worker():
+        rotation_started.set()
+        try:
+            switch_once("P", dry_run=False, rng=random.Random(4))
+            switch_once("P", dry_run=False, rng=random.Random(5))
+        except BaseException as exc:  # pragma: no cover - assertion reports thread failures
+            errors.append(exc)
+        finally:
+            rotation_finished.set()
+
+    monkeypatch.setattr(service.shutil, "copyfileobj", delayed_copy)
+    save_thread = threading.Thread(target=save_worker)
+    rotate_thread = threading.Thread(target=rotate_worker)
+    save_thread.start()
+    assert copy_started.wait(timeout=2)
+    rotate_thread.start()
+    assert rotation_started.wait(timeout=2)
+
+    assert not rotation_finished.wait(timeout=0.1)
+    allow_copy_to_finish.set()
+    save_thread.join(timeout=3)
+    rotate_thread.join(timeout=3)
+
+    assert not save_thread.is_alive()
+    assert not rotate_thread.is_alive()
+    assert errors == []
+    assert destination.read_bytes() == expected
+
+
+def test_save_current_wallpaper_serializes_with_black_screen(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    current = black_screen("P", dry_run=False)
+    expected = current.wallpaper.read_bytes()
+    destination = tmp_path / "desktop.png"
+    copy_started = threading.Event()
+    allow_copy_to_finish = threading.Event()
+    black_invoked = threading.Event()
+    solid_black_applied = threading.Event()
+    compose_started = threading.Event()
+    errors: list[BaseException] = []
+    solid_black_calls = []
+    original_copyfileobj = service.shutil.copyfileobj
+
+    class _SolidBlackSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def supports_solid_black(self, desktop: str = "auto") -> bool:
+            return True
+
+        def apply_black(self, image_path=None, desktop: str = "auto"):
+            solid_black_calls.append((image_path, desktop))
+            if image_path is None:
+                solid_black_applied.set()
+            return ["solid-black"]
+
+    def delayed_copy(source_file, destination_file):
+        destination_file.write(source_file.read(8))
+        copy_started.set()
+        if not allow_copy_to_finish.wait(timeout=2):
+            raise TimeoutError("test did not release staged copy")
+        original_copyfileobj(source_file, destination_file)
+
+    def replacement_black(monitors, output_path):
+        compose_started.set()
+        Path(output_path).write_bytes(b"replacement-black-wallpaper")
+        return Path(output_path)
+
+    def save_worker():
+        try:
+            save_current_wallpaper(destination)
+        except BaseException as exc:  # pragma: no cover - assertion reports thread failures
+            errors.append(exc)
+
+    def black_worker():
+        black_invoked.set()
+        try:
+            black_screen("P", dry_run=False)
+        except BaseException as exc:  # pragma: no cover - assertion reports thread failures
+            errors.append(exc)
+
+    monkeypatch.setattr(service.shutil, "copyfileobj", delayed_copy)
+    monkeypatch.setattr(service, "compose_black", replacement_black)
+    monkeypatch.setattr(service, "DesktopSetter", _SolidBlackSetter)
+    save_thread = threading.Thread(target=save_worker)
+    black_thread = threading.Thread(target=black_worker)
+    save_thread.start()
+    assert copy_started.wait(timeout=2)
+    black_thread.start()
+    assert black_invoked.wait(timeout=2)
+    assert solid_black_applied.wait(timeout=0.5)
+
+    assert solid_black_calls == [(None, "unknown")]
+    assert not compose_started.wait(timeout=0.1)
+    allow_copy_to_finish.set()
+    save_thread.join(timeout=3)
+    black_thread.join(timeout=3)
+
+    assert not save_thread.is_alive()
+    assert not black_thread.is_alive()
+    assert errors == []
+    assert solid_black_calls == [(None, "unknown"), (None, "unknown")]
+    assert destination.read_bytes() == expected
+
+
+def test_save_current_wallpaper_rejects_missing_source(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    missing = tmp_path / "missing.png"
+    save_state(RuntimeState(last_wallpaper=str(missing)))
+
+    with pytest.raises(FileNotFoundError, match="Current wallpaper file is missing"):
+        save_current_wallpaper(tmp_path / "desktop.png")
+
+
+def test_save_current_wallpaper_rejects_special_destination(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    switch_once("P", dry_run=False, rng=random.Random(3))
+    destination = tmp_path / "desktop.png"
+    os.mkfifo(destination)
+
+    with pytest.raises(ValueError, match="must be a regular file"):
+        save_current_wallpaper(destination, overwrite=True)
 
 
 def test_save_current_wallpaper_rejects_cache_file_as_destination(monkeypatch, tmp_path: Path):
