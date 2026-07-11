@@ -12,11 +12,17 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Settings editor for profiles, shared folders, and per-monitor folders.
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file.
+- Optional per-profile grayscale wallpaper effect.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.3 - 2026-07-11
+
+- Added an optional grayscale effect that post-processes the complete wallpaper in every layout mode.
+- Bumped the package version to `0.1.3`.
 
 ### 0.1.2 - 2026-07-10
 
@@ -177,6 +183,8 @@ Each profile has a mode:
 - `span`: one image is fit with black bars across the full virtual desktop canvas.
 
 All modes keep the full image visible. The app never uses a fill/crop resize path for wallpaper generation. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
+
+Each profile can optionally apply a `grayscale` effect after composing the complete multi-monitor wallpaper. Choose **Effect: grayscale** in the settings editor, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
 
 ## Monitor names
 

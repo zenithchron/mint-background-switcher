@@ -94,6 +94,7 @@ class SettingsApp(tk.Tk):
         self.recursive_var = tk.BooleanVar()
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
+        self.effect_var = tk.StringVar()
         self.monitor_folder_var = tk.StringVar()
         self.monitor_folders_data: dict[str, list[str]] = {}
         self.detected_monitors = detect_monitors()
@@ -146,6 +147,8 @@ class SettingsApp(tk.Tk):
         ttk.Entry(form, textvariable=self.hotkey_var, width=22).grid(row=1, column=3, sticky="w", padx=5)
         ttk.Label(form, text="Desktop:").grid(row=2, column=0, sticky="w")
         ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(row=2, column=1, sticky="w", padx=5)
+        ttk.Label(form, text="Effect:").grid(row=2, column=2, sticky="w", padx=(20, 0))
+        ttk.OptionMenu(form, self.effect_var, "none", "none", "grayscale").grid(row=2, column=3, sticky="w", padx=5)
 
         folders = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
         folders.pack(fill=tk.BOTH, expand=True, pady=8)
@@ -199,6 +202,7 @@ class SettingsApp(tk.Tk):
         self.recursive_var.set(profile.recursive)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
+        self.effect_var.set(profile.effect)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
@@ -237,6 +241,7 @@ class SettingsApp(tk.Tk):
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",
             desktop=self.desktop_var.get(),
+            effect=self.effect_var.get(),
         )
 
     def _save_current(self, show_success: bool = True) -> bool:

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from mint_background_switcher.images import compose_black, compose_per_monitor, fit_with_black_bars, scan_images
+from mint_background_switcher.images import apply_effect, compose_black, compose_per_monitor, fit_with_black_bars, scan_images
 from mint_background_switcher.monitor import Monitor
 
 
@@ -31,6 +31,27 @@ def test_scan_images_recursive(tmp_path: Path):
     (nested / "b.png").write_bytes(b"not-real-but-extension-counts")
     assert len(scan_images([str(tmp_path)], recursive=False)) == 1
     assert len(scan_images([str(tmp_path)], recursive=True)) == 2
+
+
+def test_apply_grayscale_effect_removes_color_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "color.png"
+    Image.new("RGB", (8, 6), (200, 40, 10)).save(path)
+
+    assert apply_effect(path, "grayscale") == path
+
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.getchannel("R").tobytes() == processed.getchannel("G").tobytes()
+        assert processed.getchannel("G").tobytes() == processed.getchannel("B").tobytes()
+
+
+def test_none_effect_leaves_composite_unchanged(tmp_path: Path):
+    path = tmp_path / "color.png"
+    Image.new("RGB", (2, 2), (200, 40, 10)).save(path)
+    before = path.read_bytes()
+
+    assert apply_effect(path, "none") == path
+    assert path.read_bytes() == before
 
 
 def test_compose_per_monitor_and_black(tmp_path: Path):

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import Config, Profile, load_config
 from .desktop import DesktopSetter
-from .images import compose_black, compose_per_monitor, compose_span, scan_images
+from .images import apply_effect, compose_black, compose_per_monitor, compose_span, scan_images
 from .monitor import Monitor, detect_monitors
 from .paths import generated_wallpaper_path
 from .state import RuntimeState, draw_many, draw_one, load_state, state_transaction
@@ -62,6 +62,11 @@ def _apply_black_fallback(
     wallpaper = compose_black(monitors, wallpaper_path)
     DesktopSetter(dry_run=dry_run).apply_black(wallpaper, profile.desktop)
     return wallpaper
+
+
+def _apply_composed_wallpaper(profile: Profile, wallpaper: Path, *, dry_run: bool) -> None:
+    apply_effect(wallpaper, profile.effect)
+    DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
 
 
 def switch_once(
@@ -116,7 +121,7 @@ def _switch_once_with_state(
             image = draw_one(state, _profile_bucket(profile, "span"), pool, rng=rng)
             wallpaper = compose_span(monitors, image, wallpaper_path)
             images_used = [image]
-            DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     elif profile.mode == "same":
         pool = scan_images(profile.shared_folders, profile.recursive)
         if not pool:
@@ -127,7 +132,7 @@ def _switch_once_with_state(
             selections = {monitor.name: image for monitor in monitors}
             images_used = [image]
             wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
-            DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     elif profile.mode == "shared":
         pool = scan_images(profile.shared_folders, profile.recursive)
         if not pool:
@@ -139,7 +144,7 @@ def _switch_once_with_state(
                 selections[monitor.name] = image
             images_used = chosen
             wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
-            DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     else:
         pools_by_monitor: dict[str, list[str]] = {}
         missing_monitors: list[str] = []
@@ -159,7 +164,7 @@ def _switch_once_with_state(
                 selections[monitor.name] = image
                 images_used.append(image)
             wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
-            DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
 
     if next_slot is not None:
         state.wallpaper_slot = next_slot

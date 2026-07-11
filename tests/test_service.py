@@ -428,6 +428,20 @@ def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path
     assert "profile:P:same" in state.remaining
 
 
+def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").effect = "grayscale"
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.mode == "RGB"
+        assert wallpaper.getchannel("R").tobytes() == wallpaper.getchannel("G").tobytes()
+        assert wallpaper.getchannel("G").tobytes() == wallpaper.getchannel("B").tobytes()
+
+
 def test_live_black_screen_stays_paused_until_live_next(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     black_screen("P", dry_run=False)

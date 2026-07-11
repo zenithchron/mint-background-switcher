@@ -19,6 +19,15 @@ def test_same_mode_is_valid():
     assert cfg.get_profile().mode == "same"
 
 
+def test_grayscale_effect_roundtrips_and_invalid_effect_falls_back():
+    cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "GRAYSCALE"}}})
+    assert cfg.get_profile().effect == "grayscale"
+    assert cfg.to_dict()["profiles"]["P"]["effect"] == "grayscale"
+
+    invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "sepia"}}})
+    assert invalid.get_profile().effect == "none"
+
+
 def test_invalid_mode_falls_back_to_shared():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "crop"}}})
     assert cfg.get_profile().mode == "shared"

@@ -11,6 +11,7 @@ from .storage import locked_read_json, locked_write_json
 
 CONFIG_VERSION = 1
 VALID_MODES = {"shared", "same", "per-monitor", "span"}
+VALID_EFFECTS = {"none", "grayscale"}
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:
@@ -47,12 +48,16 @@ class Profile:
     monitor_folders: dict[str, list[str]] = field(default_factory=dict)
     black_hotkey: str = "<Primary><Alt>b"
     desktop: str = "auto"
+    effect: str = "none"
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
         mode = str(data.get("mode", "shared")).strip().lower()
         if mode not in VALID_MODES:
             mode = "shared"
+        effect = str(data.get("effect", "none")).strip().lower()
+        if effect not in VALID_EFFECTS:
+            effect = "none"
         return cls(
             name=name,
             interval_minutes=_coerce_interval(data.get("interval_minutes", 10.0)),
@@ -62,6 +67,7 @@ class Profile:
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
             desktop=str(data.get("desktop", "auto")),
+            effect=effect,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,6 +79,7 @@ class Profile:
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,
             "desktop": self.desktop,
+            "effect": self.effect,
         }
 
     def folders_for_monitor(self, monitor_name: str) -> list[str]:

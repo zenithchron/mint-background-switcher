@@ -77,6 +77,19 @@ def fit_with_black_bars(image: Image.Image, size: tuple[int, int]) -> Image.Imag
     return canvas
 
 
+def apply_effect(image_path: str | Path, effect: str) -> Path:
+    """Apply a configured post-processing effect to a composed wallpaper."""
+    path = Path(image_path)
+    if effect == "none":
+        return path
+    if effect != "grayscale":
+        raise ValueError(f"Unsupported wallpaper effect: {effect}")
+    with Image.open(path) as source:
+        processed = ImageOps.grayscale(source).convert("RGB")
+        processed.save(path, format="PNG")
+    return path
+
+
 def compose_per_monitor(monitors: list[Monitor], image_by_monitor: dict[str, str], output_path: str | Path) -> Path:
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
