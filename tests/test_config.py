@@ -19,12 +19,16 @@ def test_same_mode_is_valid():
     assert cfg.get_profile().mode == "same"
 
 
-def test_grayscale_effect_roundtrips_and_invalid_effect_falls_back():
+def test_effects_roundtrip_and_invalid_effect_falls_back():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "GRAYSCALE"}}})
     assert cfg.get_profile().effect == "grayscale"
     assert cfg.to_dict()["profiles"]["P"]["effect"] == "grayscale"
 
-    invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "sepia"}}})
+    sepia = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "SEPIA"}}})
+    assert sepia.get_profile().effect == "sepia"
+    assert sepia.to_dict()["profiles"]["P"]["effect"] == "sepia"
+
+    invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "blur"}}})
     assert invalid.get_profile().effect == "none"
 
 

@@ -442,6 +442,25 @@ def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Pat
         assert wallpaper.getchannel("G").tobytes() == wallpaper.getchannel("B").tobytes()
 
 
+def test_sepia_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").effect = "sepia"
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    with Image.open(result.wallpaper) as wallpaper:
+        for y in range(wallpaper.height):
+            for x in range(wallpaper.width):
+                pixel = wallpaper.getpixel((x, y))
+                if isinstance(pixel, tuple) and pixel != (0, 0, 0):
+                    red, green, blue = pixel[:3]
+                    assert red > green > blue
+                    return
+    raise AssertionError("sepia wallpaper has no colored pixels")
+
+
 def test_live_black_screen_stays_paused_until_live_next(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     black_screen("P", dry_run=False)

@@ -4,6 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.4] - 2026-07-12
+
+### Added
+
+- Optional sepia post-processing for every wallpaper mode, configurable per profile in the settings editor.
+
+### Changed
+
+- Bumped the package version to `0.1.4`.
+
 ## [0.1.3] - 2026-07-11
 
 ### Added

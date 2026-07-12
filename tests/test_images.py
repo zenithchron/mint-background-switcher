@@ -45,6 +45,20 @@ def test_apply_grayscale_effect_removes_color_and_preserves_rgb(tmp_path: Path):
         assert processed.getchannel("G").tobytes() == processed.getchannel("B").tobytes()
 
 
+def test_apply_sepia_effect_adds_warm_tone_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "color.png"
+    Image.new("RGB", (8, 6), (200, 40, 10)).save(path)
+
+    assert apply_effect(path, "sepia") == path
+
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        pixel = processed.getpixel((0, 0))
+        assert isinstance(pixel, tuple)
+        red, green, blue = pixel[:3]
+        assert red > green > blue
+
+
 def test_none_effect_leaves_composite_unchanged(tmp_path: Path):
     path = tmp_path / "color.png"
     Image.new("RGB", (2, 2), (200, 40, 10)).save(path)

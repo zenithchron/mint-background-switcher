@@ -82,10 +82,14 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
     path = Path(image_path)
     if effect == "none":
         return path
-    if effect != "grayscale":
+    if effect not in {"grayscale", "sepia"}:
         raise ValueError(f"Unsupported wallpaper effect: {effect}")
     with Image.open(path) as source:
-        processed = ImageOps.grayscale(source).convert("RGB")
+        grayscale = ImageOps.grayscale(source)
+        if effect == "sepia":
+            processed = ImageOps.colorize(grayscale, black=(0, 0, 0), white=(255, 240, 192))
+        else:
+            processed = grayscale.convert("RGB")
         processed.save(path, format="PNG")
     return path
 

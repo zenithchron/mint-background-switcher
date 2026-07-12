@@ -11,7 +11,7 @@ from .storage import locked_read_json, locked_write_json
 
 CONFIG_VERSION = 1
 VALID_MODES = {"shared", "same", "per-monitor", "span"}
-VALID_EFFECTS = {"none", "grayscale"}
+VALID_EFFECTS = {"none", "grayscale", "sepia"}
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:

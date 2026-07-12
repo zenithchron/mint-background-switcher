@@ -148,7 +148,7 @@ class SettingsApp(tk.Tk):
         ttk.Label(form, text="Desktop:").grid(row=2, column=0, sticky="w")
         ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(row=2, column=1, sticky="w", padx=5)
         ttk.Label(form, text="Effect:").grid(row=2, column=2, sticky="w", padx=(20, 0))
-        ttk.OptionMenu(form, self.effect_var, "none", "none", "grayscale").grid(row=2, column=3, sticky="w", padx=5)
+        ttk.OptionMenu(form, self.effect_var, "none", "none", "grayscale", "sepia").grid(row=2, column=3, sticky="w", padx=5)
 
         folders = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
         folders.pack(fill=tk.BOTH, expand=True, pady=8)
