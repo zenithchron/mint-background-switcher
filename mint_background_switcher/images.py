@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 
 from .monitor import Monitor, normalized_position, virtual_canvas
 from .paths import xdg_cache_dir
@@ -64,11 +64,25 @@ def open_image(path: str | Path) -> Image.Image:
     return img.convert("RGB")
 
 
-def fit_with_black_bars(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+def automatic_bar_color(image: Image.Image) -> tuple[int, int, int]:
+    """Return a representative RGB color for an image's letterbox bars."""
+    sample = image.convert("RGB")
+    sample.thumbnail((64, 64), Image.Resampling.LANCZOS)
+    mean = ImageStat.Stat(sample).mean
+    return (int(round(mean[0])), int(round(mean[1])), int(round(mean[2])))
+
+
+def fit_with_black_bars(image: Image.Image, size: tuple[int, int], bar_color: str = "black") -> Image.Image:
     target_w, target_h = size
     if target_w <= 0 or target_h <= 0:
         raise ValueError(f"Invalid target size: {size}")
-    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    if bar_color == "auto":
+        fill = automatic_bar_color(image)
+    elif bar_color == "black":
+        fill = (0, 0, 0)
+    else:
+        raise ValueError(f"Unsupported letterbox bar color: {bar_color}")
+    canvas = Image.new("RGB", (target_w, target_h), fill)
     working = image.copy()
     working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
     x = (target_w - working.width) // 2
@@ -94,7 +108,13 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
     return path
 
 
-def compose_per_monitor(monitors: list[Monitor], image_by_monitor: dict[str, str], output_path: str | Path) -> Path:
+def compose_per_monitor(
+    monitors: list[Monitor],
+    image_by_monitor: dict[str, str],
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+) -> Path:
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
     width, height, min_x, min_y = virtual_canvas(monitors)
@@ -103,7 +123,7 @@ def compose_per_monitor(monitors: list[Monitor], image_by_monitor: dict[str, str
         image_path = image_by_monitor.get(monitor.name)
         if not image_path:
             continue
-        panel = fit_with_black_bars(open_image(image_path), (monitor.width, monitor.height))
+        panel = fit_with_black_bars(open_image(image_path), (monitor.width, monitor.height), bar_color)
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -111,9 +131,15 @@ def compose_per_monitor(monitors: list[Monitor], image_by_monitor: dict[str, str
     return output
 
 
-def compose_span(monitors: list[Monitor], image_path: str, output_path: str | Path) -> Path:
+def compose_span(
+    monitors: list[Monitor],
+    image_path: str,
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+) -> Path:
     width, height, _, _ = virtual_canvas(monitors)
-    fitted = fit_with_black_bars(open_image(image_path), (width, height))
+    fitted = fit_with_black_bars(open_image(image_path), (width, height), bar_color)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     fitted.save(output, format="PNG")

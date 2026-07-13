@@ -99,6 +99,7 @@ def test_save_current_returns_false_on_validation_failure(monkeypatch):
     setattr(dummy, "hotkey_var", _Var("<Primary><Alt>b"))
     setattr(dummy, "desktop_var", _Var("auto"))
     setattr(dummy, "effect_var", _Var("none"))
+    setattr(dummy, "bar_color_var", _Var("black"))
     setattr(dummy, "shared_text", _Text("/tmp/images"))
     setattr(dummy, "monitor_text", _Text(""))
     setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
@@ -259,6 +260,7 @@ def test_rename_profile_preserves_current_form_settings_and_saves(monkeypatch):
     setattr(dummy, "hotkey_var", _Var("<Primary><Alt>x"))
     setattr(dummy, "desktop_var", _Var("mate"))
     setattr(dummy, "effect_var", _Var("grayscale"))
+    setattr(dummy, "bar_color_var", _Var("auto"))
     setattr(dummy, "shared_text", _Text("/new-shared\n"))
     setattr(dummy, "monitor_text", _Text(""))
     setattr(dummy, "monitor_folders_data", {"HDMI-1": ["/new-monitor"]})
@@ -279,6 +281,7 @@ def test_rename_profile_preserves_current_form_settings_and_saves(monkeypatch):
     assert renamed.black_hotkey == "<Primary><Alt>x"
     assert renamed.desktop == "mate"
     assert renamed.effect == "grayscale"
+    assert renamed.bar_color == "auto"
     assert dummy.profile_var.get() == "Travel"
     assert saved == ["Travel"]
     assert loaded == ["Travel"]

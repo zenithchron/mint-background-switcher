@@ -39,7 +39,7 @@ MBS_CONFIG_DIR=/tmp/mbs-config MBS_CACHE_DIR=/tmp/mbs-cache \
 
 ## Design constraints
 
-- Never crop wallpapers. Preserve the full source image and use black bars as needed.
+- Never crop wallpapers. Preserve the full source image and use the configured letterbox bars as needed.
 - Keep dry-runs side-effect free.
 - Avoid touching Cinnamon/Muffin/Nemo settings beyond the wallpaper keys needed for the requested action.
 - Treat login autostart as safety-critical: startup should wait for Cinnamon readiness and should not immediately mutate desktop state.

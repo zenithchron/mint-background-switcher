@@ -24,6 +24,15 @@ def test_fit_with_black_bars_preserves_whole_tall_image():
     assert fitted.getpixel((190, 100)) == (0, 0, 0)
 
 
+def test_fit_with_automatic_bars_uses_image_average_color():
+    img = Image.new("RGB", (100, 50), (120, 60, 30))
+    fitted = fit_with_black_bars(img, (200, 200), bar_color="auto")
+
+    assert fitted.getpixel((10, 10)) == (120, 60, 30)
+    assert fitted.getpixel((100, 100)) == (120, 60, 30)
+    assert fitted.getpixel((10, 190)) == (120, 60, 30)
+
+
 def test_scan_images_recursive(tmp_path: Path):
     nested = tmp_path / "nested"
     nested.mkdir()

@@ -119,7 +119,7 @@ def _switch_once_with_state(
             action = "black-fallback"
         else:
             image = draw_one(state, _profile_bucket(profile, "span"), pool, rng=rng)
-            wallpaper = compose_span(monitors, image, wallpaper_path)
+            wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color)
             images_used = [image]
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     elif profile.mode == "same":
@@ -131,7 +131,7 @@ def _switch_once_with_state(
             image = draw_one(state, _profile_bucket(profile, "same"), pool, rng=rng)
             selections = {monitor.name: image for monitor in monitors}
             images_used = [image]
-            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
+            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     elif profile.mode == "shared":
         pool = scan_images(profile.shared_folders, profile.recursive)
@@ -143,7 +143,7 @@ def _switch_once_with_state(
             for monitor, image in zip(monitors, chosen):
                 selections[monitor.name] = image
             images_used = chosen
-            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
+            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     else:
         pools_by_monitor: dict[str, list[str]] = {}
@@ -163,7 +163,7 @@ def _switch_once_with_state(
                 image = draw_one(state, _profile_bucket(profile, f"monitor:{monitor.name}"), pools_by_monitor[monitor.name], rng=rng)
                 selections[monitor.name] = image
                 images_used.append(image)
-            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path)
+            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
 
     if next_slot is not None:

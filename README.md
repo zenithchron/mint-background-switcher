@@ -1,6 +1,6 @@
 # Mint Background Switcher
 
-Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-monitor desktops. It rotates local image folders, supports one shared image pool or per-monitor folders, and fits each whole image inside its monitor with black bars instead of cropping.
+Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-monitor desktops. It rotates local image folders, supports one shared image pool or per-monitor folders, and fits each whole image inside its monitor with black or automatically color-matched bars instead of cropping.
 
 ## Features
 
@@ -13,11 +13,17 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file.
 - Optional per-profile grayscale and sepia wallpaper effects.
+- Optional automatic letterbox-bar colors matched to each source image.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.5 - 2026-07-13
+
+- Added an optional automatic letterbox-bar color that uses each source image's average color while preserving the complete image.
+- Bumped the package version to `0.1.5`.
 
 ### 0.1.4 - 2026-07-12
 
@@ -185,9 +191,9 @@ Each profile has a mode:
 - `shared`: all monitors draw from one shared image pool, without duplicates within the same rotation when possible.
 - `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
-- `span`: one image is fit with black bars across the full virtual desktop canvas.
+- `span`: one image is fit with configured letterbox bars across the full virtual desktop canvas.
 
-All modes keep the full image visible. The app never uses a fill/crop resize path for wallpaper generation. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
+All modes keep the full image visible. The app never uses a fill/crop resize path for wallpaper generation. Letterbox bars are black by default; choose `auto` in the settings editor to match each panel's bars to the average color of its source image. In `span` mode, the single source image determines the color for the full canvas. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
 
 Each profile can optionally apply a `grayscale` or warm, vintage-style `sepia` effect after composing the complete multi-monitor wallpaper. Choose the effect in the settings editor, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
 

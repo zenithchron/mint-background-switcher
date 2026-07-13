@@ -95,6 +95,7 @@ class SettingsApp(tk.Tk):
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
+        self.bar_color_var = tk.StringVar()
         self.monitor_folder_var = tk.StringVar()
         self.monitor_folders_data: dict[str, list[str]] = {}
         self.detected_monitors = detect_monitors()
@@ -149,6 +150,8 @@ class SettingsApp(tk.Tk):
         ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(row=2, column=1, sticky="w", padx=5)
         ttk.Label(form, text="Effect:").grid(row=2, column=2, sticky="w", padx=(20, 0))
         ttk.OptionMenu(form, self.effect_var, "none", "none", "grayscale", "sepia").grid(row=2, column=3, sticky="w", padx=5)
+        ttk.Label(form, text="Letterbox bars:").grid(row=3, column=0, sticky="w", pady=(5, 0))
+        ttk.OptionMenu(form, self.bar_color_var, "black", "black", "auto").grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
 
         folders = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
         folders.pack(fill=tk.BOTH, expand=True, pady=8)
@@ -203,6 +206,7 @@ class SettingsApp(tk.Tk):
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
+        self.bar_color_var.set(profile.bar_color)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
@@ -242,6 +246,7 @@ class SettingsApp(tk.Tk):
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",
             desktop=self.desktop_var.get(),
             effect=self.effect_var.get(),
+            bar_color=self.bar_color_var.get(),
         )
 
     def _save_current(self, show_success: bool = True) -> bool:

@@ -32,6 +32,15 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert invalid.get_profile().effect == "none"
 
 
+def test_automatic_bar_color_roundtrips_and_invalid_value_falls_back():
+    cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"bar_color": "AUTO"}}})
+    assert cfg.get_profile().bar_color == "auto"
+    assert cfg.to_dict()["profiles"]["P"]["bar_color"] == "auto"
+
+    invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"bar_color": "rainbow"}}})
+    assert invalid.get_profile().bar_color == "black"
+
+
 def test_invalid_mode_falls_back_to_shared():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "crop"}}})
     assert cfg.get_profile().mode == "shared"
