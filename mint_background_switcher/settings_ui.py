@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from . import APP_NAME, __version__
 from .config import Config, Profile, load_config, save_config
 from .monitor import Monitor, detect_monitors
-from .service import black_screen, switch_once
+from .service import black_screen, save_current_wallpaper, switch_once
 
 
 SETTINGS_WINDOW_TARGET_WIDTH = 1120
@@ -16,6 +18,7 @@ SETTINGS_WINDOW_MIN_WIDTH = 980
 SETTINGS_WINDOW_MIN_HEIGHT = 680
 SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
+PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 
 
 def _monitor_window_rect(
@@ -86,7 +89,7 @@ def _settings_window_geometry(
 class SettingsApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Mint Background Switcher Settings")
+        self.title(f"{APP_NAME} Settings — {__version__}")
         self.config_data: Config = load_config()
         self.profile_var = tk.StringVar(value=self.config_data.active_profile)
         self.interval_var = tk.StringVar()
@@ -196,7 +199,12 @@ class SettingsApp(tk.Tk):
         bottom.pack(fill=tk.X)
         ttk.Button(bottom, text="Apply Next Now", command=self._apply_next).pack(side=tk.LEFT, padx=3)
         ttk.Button(bottom, text="Black Screen", command=self._black_screen).pack(side=tk.LEFT, padx=3)
+        ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper).pack(
+            side=tk.LEFT, padx=3
+        )
         ttk.Button(bottom, text="Close", command=self.destroy).pack(side=tk.RIGHT, padx=3)
+        ttk.Button(bottom, text="About", command=self._show_about).pack(side=tk.RIGHT, padx=3)
+        ttk.Label(bottom, text=f"Version {__version__}").pack(side=tk.RIGHT, padx=(3, 10))
 
     def _load_profile(self, name: str) -> None:
         profile = self.config_data.get_profile(name)
@@ -530,6 +538,53 @@ class SettingsApp(tk.Tk):
             self.monitor_folder_var.set(monitor)
         except Exception as exc:
             messagebox.showerror("Could not add folder", str(exc))
+
+    def _export_current_wallpaper(self) -> None:
+        selected = filedialog.asksaveasfilename(
+            parent=self,
+            title="Save current wallpaper",
+            defaultextension=".png",
+            initialfile="current-background.png",
+            filetypes=(("PNG image", "*.png"), ("All files", "*.*")),
+            confirmoverwrite=False,
+        )
+        if not selected:
+            return
+
+        destination = Path(selected).expanduser()
+        try:
+            try:
+                saved = save_current_wallpaper(destination)
+            except FileExistsError:
+                if not destination.exists() and not destination.is_symlink():
+                    raise
+                if not messagebox.askyesno(
+                    "Replace existing file?",
+                    f"A file already exists at:\n{destination}\n\nReplace it?",
+                    parent=self,
+                ):
+                    return
+                saved = save_current_wallpaper(destination, overwrite=True)
+            messagebox.showinfo(
+                "Wallpaper saved",
+                f"Saved the current wallpaper to:\n{saved}",
+                parent=self,
+            )
+        except Exception as exc:
+            messagebox.showerror("Save current wallpaper failed", str(exc), parent=self)
+
+    def _show_about(self) -> None:
+        messagebox.showinfo(
+            f"About {APP_NAME}",
+            (
+                f"{APP_NAME}\n"
+                f"Version {__version__}\n\n"
+                "A local-first Linux Mint/Cinnamon wallpaper switcher "
+                "for multi-monitor desktops.\n\n"
+                f"MIT License\n{PROJECT_URL}"
+            ),
+            parent=self,
+        )
 
     def _apply_next(self) -> None:
         if not self._save_current(show_success=False):

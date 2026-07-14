@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.6] - 2026-07-14
+
+### Added
+
+- **Save Current Wallpaper...** in Settings, backed by the same atomic snapshot service as the `save-current` CLI command and explicit confirmation before replacing an existing file.
+- A visible installed-version label and versioned Settings window title.
+- An **About** dialog with the installed version, project description, MIT license, and repository URL.
+
+### Changed
+
+- Bumped the package version to `0.1.6`.
+
 ## [0.1.5] - 2026-07-13
 
 ### Added

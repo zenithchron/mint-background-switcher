@@ -9,9 +9,9 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
-- Settings editor for profiles, shared folders, and per-monitor folders.
+- Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
 - Optional tray menu for quick actions.
-- Save the current generated multi-monitor background to a PNG file.
+- Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
 - Optional per-profile grayscale and sepia wallpaper effects.
 - Optional automatic letterbox-bar colors matched to each source image.
 - Safe login autostart that waits for Cinnamon before rotating.
@@ -19,6 +19,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.6 - 2026-07-14
+
+- Added **Save Current Wallpaper...** to Settings so the generated background can be exported without using the CLI.
+- Added the installed version directly to the Settings window and title.
+- Added an **About** dialog with the installed version, project description, license, and repository URL.
+- Bumped the package version to `0.1.6`.
 
 ### 0.1.5 - 2026-07-13
 
@@ -96,6 +103,8 @@ From the repository checkout:
 ./scripts/mint-background-switcher next --dry-run
 ./scripts/mint-background-switcher next
 ```
+
+The Settings window exposes user-facing wallpaper controls, including **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL.
 
 After manual commands work, enable safe login autostart:
 
@@ -214,7 +223,7 @@ Add `@150%`, `@1.25`, etc. when you want the test geometry to simulate Cinnamon 
 
 Live wallpaper changes are rendered to an off-screen active file first, then applied by switching the desktop URI. The app alternates between two active files so the image currently displayed by Cinnamon/GNOME is not overwritten in place. Normal Cinnamon wallpaper changes only update the desktop background URI/options; they do not modify Muffin/Nemo transition or panel settings automatically.
 
-`save-current` copies that generated PNG, including the complete multi-monitor composition, without selecting new source images or changing runtime state. The destination must end in `.png`; existing files are protected unless `--force` is supplied.
+`save-current` copies that generated PNG, including the complete multi-monitor composition, without selecting new source images or changing runtime state. In Settings, choose **Save Current Wallpaper...** and select a PNG destination; Settings asks before replacing an existing file. From the CLI, the destination must end in `.png` and existing files are protected unless `--force` is supplied.
 
 Black-screen mode uses Cinnamon/GNOME solid-black color mode before doing monitor detection or fallback PNG work, so the visible switch should be near-instant. If a configured image folder is empty or temporarily unavailable, normal rotation applies a non-sticky black fallback instead of erroring, then retries on the next rotation.
 

@@ -126,6 +126,151 @@ def test_apply_next_aborts_when_save_fails(monkeypatch):
     assert called is False
 
 
+def test_export_current_wallpaper_uses_png_dialog_and_service(monkeypatch, tmp_path):
+    destination = tmp_path / "current-background.png"
+    dialogs = []
+    saves = []
+    messages = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+
+    monkeypatch.setattr(
+        settings_ui.filedialog,
+        "asksaveasfilename",
+        lambda **kwargs: dialogs.append(kwargs) or str(destination),
+    )
+    monkeypatch.setattr(
+        settings_ui,
+        "save_current_wallpaper",
+        lambda path, *, overwrite=False: saves.append((path, overwrite)) or destination,
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._export_current_wallpaper(dummy)
+
+    assert dialogs[0]["parent"] is dummy
+    assert dialogs[0]["defaultextension"] == ".png"
+    assert dialogs[0]["initialfile"].endswith(".png")
+    assert dialogs[0]["confirmoverwrite"] is False
+    assert ("PNG image", "*.png") in dialogs[0]["filetypes"]
+    assert saves == [(destination, False)]
+    assert messages and messages[0][0] == "Wallpaper saved"
+    assert str(destination) in messages[0][1]
+
+
+def test_export_current_wallpaper_confirms_file_created_after_dialog(monkeypatch, tmp_path):
+    destination = tmp_path / "raced.png"
+    saves = []
+    confirmations = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+
+    def fake_save(path, *, overwrite=False):
+        saves.append((path, overwrite))
+        if not overwrite:
+            destination.write_bytes(b"created after the dialog returned")
+            raise FileExistsError(f"Destination already exists: {destination}")
+        destination.write_bytes(b"replacement")
+        return destination
+
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: str(destination))
+    monkeypatch.setattr(settings_ui, "save_current_wallpaper", fake_save)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: confirmations.append((title, message, kwargs)) or True,
+    )
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+
+    settings_ui.SettingsApp._export_current_wallpaper(dummy)
+
+    assert saves == [(destination, False), (destination, True)]
+    assert confirmations and confirmations[0][0] == "Replace existing file?"
+    assert str(destination) in confirmations[0][1]
+    assert confirmations[0][2]["parent"] is dummy
+    assert destination.read_bytes() == b"replacement"
+
+
+def test_export_current_wallpaper_declining_overwrite_preserves_file(monkeypatch, tmp_path):
+    destination = tmp_path / "existing.png"
+    destination.write_bytes(b"keep me")
+    saves = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+
+    def fake_save(path, *, overwrite=False):
+        saves.append((path, overwrite))
+        if overwrite:
+            raise AssertionError("declining replacement must not force an overwrite")
+        raise FileExistsError(f"Destination already exists: {destination}")
+
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: str(destination))
+    monkeypatch.setattr(settings_ui, "save_current_wallpaper", fake_save)
+    monkeypatch.setattr(settings_ui.messagebox, "askyesno", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("declined replacement is not a save")),
+    )
+
+    settings_ui.SettingsApp._export_current_wallpaper(dummy)
+
+    assert saves == [(destination, False)]
+    assert destination.read_bytes() == b"keep me"
+
+
+def test_export_current_wallpaper_cancel_is_side_effect_free(monkeypatch):
+    dummy = object.__new__(settings_ui.SettingsApp)
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: "")
+    monkeypatch.setattr(
+        settings_ui,
+        "save_current_wallpaper",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cancel must not export")),
+    )
+
+    settings_ui.SettingsApp._export_current_wallpaper(dummy)
+
+
+def test_export_current_wallpaper_reports_service_errors(monkeypatch, tmp_path):
+    destination = tmp_path / "current.png"
+    errors = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: str(destination))
+    monkeypatch.setattr(
+        settings_ui,
+        "save_current_wallpaper",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("nothing to save")),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._export_current_wallpaper(dummy)
+
+    assert errors and errors[0][0] == "Save current wallpaper failed"
+    assert "nothing to save" in errors[0][1]
+
+
+def test_about_dialog_reports_version_and_project(monkeypatch):
+    messages = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._show_about(dummy)
+
+    assert messages and messages[0][0] == "About Mint Background Switcher"
+    assert f"Version {settings_ui.__version__}" in messages[0][1]
+    assert settings_ui.PROJECT_URL in messages[0][1]
+    assert messages[0][2]["parent"] is dummy
+
+
 def test_shared_hard_drive_browse_adds_unique_folder():
     calls = []
 
