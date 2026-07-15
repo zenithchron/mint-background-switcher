@@ -28,7 +28,11 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert sepia.get_profile().effect == "sepia"
     assert sepia.to_dict()["profiles"]["P"]["effect"] == "sepia"
 
-    invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "blur"}}})
+    blur = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "BLUR"}}})
+    assert blur.get_profile().effect == "blur"
+    assert blur.to_dict()["profiles"]["P"]["effect"] == "blur"
+
+    invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "posterize"}}})
     assert invalid.get_profile().effect == "none"
 
 

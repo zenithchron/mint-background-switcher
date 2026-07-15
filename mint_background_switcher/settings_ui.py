@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from . import APP_NAME, __version__
-from .config import Config, Profile, load_config, save_config
+from .config import EFFECT_CHOICES, Config, Profile, load_config, save_config
 from .monitor import Monitor, detect_monitors
 from .service import black_screen, save_current_wallpaper, switch_once
 
@@ -152,7 +152,8 @@ class SettingsApp(tk.Tk):
         ttk.Label(form, text="Desktop:").grid(row=2, column=0, sticky="w")
         ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(row=2, column=1, sticky="w", padx=5)
         ttk.Label(form, text="Effect:").grid(row=2, column=2, sticky="w", padx=(20, 0))
-        ttk.OptionMenu(form, self.effect_var, "none", "none", "grayscale", "sepia").grid(row=2, column=3, sticky="w", padx=5)
+        self.effect_menu = ttk.OptionMenu(form, self.effect_var, EFFECT_CHOICES[0], *EFFECT_CHOICES)
+        self.effect_menu.grid(row=2, column=3, sticky="w", padx=5)
         ttk.Label(form, text="Letterbox bars:").grid(row=3, column=0, sticky="w", pady=(5, 0))
         ttk.OptionMenu(form, self.bar_color_var, "black", "black", "auto").grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
 

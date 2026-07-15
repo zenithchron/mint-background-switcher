@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image, ImageOps, ImageStat
+from PIL import Image, ImageFilter, ImageOps, ImageStat
 
 from .monitor import Monitor, normalized_position, virtual_canvas
 from .paths import xdg_cache_dir
@@ -96,14 +96,17 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
     path = Path(image_path)
     if effect == "none":
         return path
-    if effect not in {"grayscale", "sepia"}:
-        raise ValueError(f"Unsupported wallpaper effect: {effect}")
     with Image.open(path) as source:
-        grayscale = ImageOps.grayscale(source)
-        if effect == "sepia":
+        if effect == "blur":
+            processed = source.convert("RGB").filter(ImageFilter.GaussianBlur(radius=4))
+        elif effect == "sepia":
+            grayscale = ImageOps.grayscale(source)
             processed = ImageOps.colorize(grayscale, black=(0, 0, 0), white=(255, 240, 192))
-        else:
+        elif effect == "grayscale":
+            grayscale = ImageOps.grayscale(source)
             processed = grayscale.convert("RGB")
+        else:
+            raise ValueError(f"Unsupported wallpaper effect: {effect}")
         processed.save(path, format="PNG")
     return path
 

@@ -28,7 +28,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk x11-xserver-utils
+          sudo apt-get install -y python3-tk x11-xserver-utils xvfb
 
       - name: Install package
         run: |
@@ -50,4 +50,4 @@ jobs:
           fi
 
       - name: Run tests
-        run: python -m pytest -q
+        run: xvfb-run -a python -m pytest -q

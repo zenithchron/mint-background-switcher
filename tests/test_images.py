@@ -68,6 +68,26 @@ def test_apply_sepia_effect_adds_warm_tone_and_preserves_rgb(tmp_path: Path):
         assert red > green > blue
 
 
+def test_apply_blur_effect_softens_sharp_edges_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "edge.png"
+    source = Image.new("RGB", (21, 9), (0, 0, 0))
+    for x in range(11, source.width):
+        for y in range(source.height):
+            source.putpixel((x, y), (255, 255, 255))
+    source.save(path)
+    before = path.read_bytes()
+
+    assert apply_effect(path, "blur") == path
+
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        edge = processed.getpixel((10, 4))
+        assert isinstance(edge, tuple)
+        assert 0 < edge[0] < 255
+        assert edge[0] == edge[1] == edge[2]
+    assert path.read_bytes() != before
+
+
 def test_none_effect_leaves_composite_unchanged(tmp_path: Path):
     path = tmp_path / "color.png"
     Image.new("RGB", (2, 2), (200, 40, 10)).save(path)

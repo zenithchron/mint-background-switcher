@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 from mint_background_switcher import settings_ui
 from mint_background_switcher.monitor import Monitor
 
@@ -83,6 +87,42 @@ def test_settings_window_geometry_keeps_1024x768_screens_usable():
     assert (min_width, min_height) == (944, 668)
     assert x == 40
     assert y == 33
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_effect_menu_exposes_blur_and_is_visible(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.effect_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_effects = []
+        messages = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_effects.append(config.get_profile("Default").effect),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+
+        assert "blur" in labels
+        assert app.effect_menu.winfo_ismapped()
+        assert app.effect_menu.winfo_width() > 1
+        menu.invoke(labels.index("blur"))
+        assert app.effect_var.get() == "blur"
+        assert app._save_current() is True
+        assert saved_effects == ["blur"]
+        assert messages and messages[-1][0] == "Saved"
+    finally:
+        app.destroy()
 
 
 def test_save_current_returns_false_on_validation_failure(monkeypatch):

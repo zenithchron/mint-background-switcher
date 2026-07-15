@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.7] - 2026-07-15
+
+### Added
+
+- An optional soft-focus blur effect for the complete generated wallpaper, available under **Settings → Profile settings → Effect → blur** with the existing Save and **Apply Next Now** feedback.
+- An Xvfb-backed Settings test that verifies the blur control is present and visible in a real Tk window.
+
+### Changed
+
+- Bumped the package version to `0.1.7`.
+
 ## [0.1.6] - 2026-07-14
 
 ### Added
