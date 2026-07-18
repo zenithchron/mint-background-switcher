@@ -90,7 +90,7 @@ def test_settings_window_geometry_keeps_1024x768_screens_usable():
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
-def test_settings_effect_menu_exposes_blur_and_is_visible(monkeypatch, tmp_path):
+def test_settings_effect_menu_exposes_vignette_and_is_visible(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
@@ -113,13 +113,13 @@ def test_settings_effect_menu_exposes_blur_and_is_visible(monkeypatch, tmp_path)
             lambda title, message, **_kwargs: messages.append((title, message)),
         )
 
-        assert "blur" in labels
+        assert "vignette" in labels
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
-        menu.invoke(labels.index("blur"))
-        assert app.effect_var.get() == "blur"
+        menu.invoke(labels.index("vignette"))
+        assert app.effect_var.get() == "vignette"
         assert app._save_current() is True
-        assert saved_effects == ["blur"]
+        assert saved_effects == ["vignette"]
         assert messages and messages[-1][0] == "Saved"
     finally:
         app.destroy()

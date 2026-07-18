@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.8] - 2026-07-18
+
+### Added
+
+- An optional vignette effect that gently darkens the edges of the complete generated wallpaper, available under **Settings → Profile settings → Effect → vignette** with Save and **Apply Next Now** success/error feedback.
+- An Xvfb-backed Settings test that verifies the vignette control is present and visible in a real Tk window.
+
+### Changed
+
+- Bumped the package version to `0.1.8`.
+- Raised the minimum Pillow version to 9.1 to match the image-resampling API used by wallpaper composition and effects.
+
 ## [0.1.7] - 2026-07-15
 
 ### Added

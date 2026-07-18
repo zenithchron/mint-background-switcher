@@ -88,6 +88,23 @@ def test_apply_blur_effect_softens_sharp_edges_and_preserves_rgb(tmp_path: Path)
     assert path.read_bytes() != before
 
 
+def test_apply_vignette_effect_darkens_edges_and_preserves_center(tmp_path: Path):
+    path = tmp_path / "white.png"
+    Image.new("RGB", (41, 41), (255, 255, 255)).save(path)
+
+    assert apply_effect(path, "vignette") == path
+
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        center = processed.getpixel((20, 20))
+        corner = processed.getpixel((0, 0))
+        assert isinstance(center, tuple)
+        assert isinstance(corner, tuple)
+        assert center[0] > 240
+        assert corner[0] < center[0]
+        assert corner[0] == corner[1] == corner[2]
+
+
 def test_none_effect_leaves_composite_unchanged(tmp_path: Path):
     path = tmp_path / "color.png"
     Image.new("RGB", (2, 2), (200, 40, 10)).save(path)

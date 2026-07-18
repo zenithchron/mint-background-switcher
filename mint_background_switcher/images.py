@@ -99,6 +99,11 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
     with Image.open(path) as source:
         if effect == "blur":
             processed = source.convert("RGB").filter(ImageFilter.GaussianBlur(radius=4))
+        elif effect == "vignette":
+            rgb_source = source.convert("RGB")
+            radial_mask = Image.radial_gradient("L").resize(rgb_source.size, Image.Resampling.LANCZOS)
+            darkening_mask = radial_mask.point([round(level * 0.55) for level in range(256)])
+            processed = Image.composite(Image.new("RGB", rgb_source.size, (0, 0, 0)), rgb_source, darkening_mask)
         elif effect == "sepia":
             grayscale = ImageOps.grayscale(source)
             processed = ImageOps.colorize(grayscale, black=(0, 0, 0), white=(255, 240, 192))

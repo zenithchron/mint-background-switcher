@@ -32,6 +32,10 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert blur.get_profile().effect == "blur"
     assert blur.to_dict()["profiles"]["P"]["effect"] == "blur"
 
+    vignette = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "VIGNETTE"}}})
+    assert vignette.get_profile().effect == "vignette"
+    assert vignette.to_dict()["profiles"]["P"]["effect"] == "vignette"
+
     invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "posterize"}}})
     assert invalid.get_profile().effect == "none"
 
