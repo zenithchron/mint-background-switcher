@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.9] - 2026-07-19
+
+### Added
+
+- An optional three-month calendar overlay showing the previous, current, and next months with today highlighted, inspired by John’s Background Switcher and available under **Settings → Profile settings → Effect → calendar** with Save and **Apply Next Now** success/error feedback.
+- An Xvfb-backed Settings test that verifies the calendar control is present, visible, and saveable in a real Tk window.
+
+### Changed
+
+- Bumped the package version to `0.1.9`.
+
 ## [0.1.8] - 2026-07-18
 
 ### Added

@@ -12,13 +12,19 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
-- Optional per-profile grayscale, sepia, soft-focus blur, and vignette wallpaper effects.
+- Optional per-profile grayscale, sepia, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Optional automatic letterbox-bar colors matched to each source image.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.9 - 2026-07-19
+
+- Added an optional three-month calendar overlay showing the previous, current, and next months with today highlighted.
+- Added **calendar** under **Settings → Profile settings → Effect**; save the profile or choose **Apply Next Now** for success/error feedback.
+- Bumped the package version to `0.1.9`.
 
 ### 0.1.8 - 2026-07-18
 
@@ -116,7 +122,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including profile effects such as **vignette**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL.
+The Settings window exposes user-facing wallpaper controls, including profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL.
 
 After manual commands work, enable safe login autostart:
 
@@ -216,7 +222,7 @@ Each profile has a mode:
 
 All modes keep the full image visible. The app never uses a fill/crop resize path for wallpaper generation. Letterbox bars are black by default; choose `auto` in the settings editor to match each panel's bars to the average color of its source image. In `span` mode, the single source image determines the color for the full canvas. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
 
-Each profile can optionally apply a `grayscale`, warm vintage-style `sepia`, soft-focus `blur`, or edge-darkening `vignette` effect after composing the complete multi-monitor wallpaper. Choose the effect under **Settings → Profile settings → Effect**, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
+Each profile can optionally apply a `grayscale`, warm vintage-style `sepia`, soft-focus `blur`, edge-darkening `vignette`, or three-month `calendar` effect after composing the complete multi-monitor wallpaper. The calendar shows the previous, current, and next months near the bottom of the wallpaper and highlights today. Choose the effect under **Settings → Profile settings → Effect**, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
 
 ## Monitor names
 

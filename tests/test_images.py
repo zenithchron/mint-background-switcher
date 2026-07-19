@@ -1,8 +1,17 @@
+from datetime import date
 from pathlib import Path
 
 from PIL import Image
 
-from mint_background_switcher.images import apply_effect, compose_black, compose_per_monitor, fit_with_black_bars, scan_images
+from mint_background_switcher.images import (
+    CALENDAR_HIGHLIGHT_COLOR,
+    add_three_month_calendar,
+    apply_effect,
+    compose_black,
+    compose_per_monitor,
+    fit_with_black_bars,
+    scan_images,
+)
 from mint_background_switcher.monitor import Monitor
 
 
@@ -103,6 +112,37 @@ def test_apply_vignette_effect_darkens_edges_and_preserves_center(tmp_path: Path
         assert center[0] > 240
         assert corner[0] < center[0]
         assert corner[0] == corner[1] == corner[2]
+
+
+def test_three_month_calendar_overlay_is_deterministic_and_highlights_today():
+    source = Image.new("RGB", (1200, 700), (80, 120, 160))
+    today = date(2026, 7, 19)
+
+    first = add_three_month_calendar(source, today=today)
+    second = add_three_month_calendar(source, today=today)
+
+    assert first.mode == "RGB"
+    assert first.size == source.size
+    assert first.tobytes() == second.tobytes()
+    assert first.tobytes() != source.tobytes()
+    expected_highlight = CALENDAR_HIGHLIGHT_COLOR[:3]
+    colors = first.getcolors(maxcolors=first.width * first.height) or []
+    assert expected_highlight in {color for _count, color in colors}
+
+
+def test_apply_calendar_effect_writes_overlay_to_wallpaper(tmp_path: Path):
+    path = tmp_path / "calendar.png"
+    Image.new("RGB", (900, 500), (120, 80, 40)).save(path)
+    before = path.read_bytes()
+
+    assert apply_effect(path, "calendar") == path
+
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.size == (900, 500)
+        colors = processed.getcolors(maxcolors=processed.width * processed.height) or []
+        assert CALENDAR_HIGHLIGHT_COLOR[:3] in {color for _count, color in colors}
+    assert path.read_bytes() != before
 
 
 def test_none_effect_leaves_composite_unchanged(tmp_path: Path):

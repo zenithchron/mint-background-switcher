@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -121,6 +122,49 @@ def test_settings_effect_menu_exposes_vignette_and_is_visible(monkeypatch, tmp_p
         assert app._save_current() is True
         assert saved_effects == ["vignette"]
         assert messages and messages[-1][0] == "Saved"
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_effect_menu_exposes_calendar_and_applies_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.effect_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_effects = []
+        applied_profiles = []
+        messages = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_effects.append(config.get_profile("Default").effect),
+        )
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile: applied_profiles.append(profile) or SimpleNamespace(wallpaper="/tmp/calendar-preview.png"),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+
+        assert "calendar" in labels
+        assert app.effect_menu.winfo_ismapped()
+        assert app.effect_menu.winfo_width() > 1
+        menu.invoke(labels.index("calendar"))
+        assert app.effect_var.get() == "calendar"
+        app._apply_next()
+        assert saved_effects == ["calendar"]
+        assert applied_profiles == ["Default"]
+        assert messages and messages[-1][0] == "Applied"
     finally:
         app.destroy()
 

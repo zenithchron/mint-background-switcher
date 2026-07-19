@@ -36,6 +36,10 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert vignette.get_profile().effect == "vignette"
     assert vignette.to_dict()["profiles"]["P"]["effect"] == "vignette"
 
+    calendar = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "CALENDAR"}}})
+    assert calendar.get_profile().effect == "calendar"
+    assert calendar.to_dict()["profiles"]["P"]["effect"] == "calendar"
+
     invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "posterize"}}})
     assert invalid.get_profile().effect == "none"
 
