@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.10] - 2026-07-20
+
+### Added
+
+- A local 2x2 montage mode inspired by John’s Background Switcher, using four fitted, uncropped images per monitor from the profile's shared folders.
+- **montage** under **Settings → Profile settings → Mode**, with Save and **Apply Next Now** success/error feedback.
+- An Xvfb-backed Settings test that verifies the montage control is present, visible, saveable, and immediately applicable in a real Tk window.
+
+### Changed
+
+- Bumped the package version to `0.1.10`.
+
 ## [0.1.9] - 2026-07-19
 
 ### Added

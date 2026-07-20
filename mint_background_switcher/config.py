@@ -10,7 +10,7 @@ from .paths import config_file, xdg_config_dir
 from .storage import locked_read_json, locked_write_json
 
 CONFIG_VERSION = 1
-VALID_MODES = {"shared", "same", "per-monitor", "span"}
+VALID_MODES = {"shared", "same", "montage", "per-monitor", "span"}
 EFFECT_CHOICES = ("none", "grayscale", "sepia", "blur", "vignette", "calendar")
 VALID_EFFECTS = set(EFFECT_CHOICES)
 VALID_BAR_COLORS = {"black", "auto"}

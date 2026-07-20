@@ -8,6 +8,7 @@ from mint_background_switcher.images import (
     add_three_month_calendar,
     apply_effect,
     compose_black,
+    compose_montage,
     compose_per_monitor,
     fit_with_black_bars,
     scan_images,
@@ -152,6 +153,26 @@ def test_none_effect_leaves_composite_unchanged(tmp_path: Path):
 
     assert apply_effect(path, "none") == path
     assert path.read_bytes() == before
+
+
+def test_compose_montage_places_four_fitted_images_on_each_monitor(tmp_path: Path):
+    colors = ((255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0))
+    paths = []
+    for index, color in enumerate(colors):
+        path = tmp_path / f"montage-{index}.png"
+        Image.new("RGB", (100, 100), color).save(path)
+        paths.append(str(path))
+    monitors = [Monitor("A", 200, 120, 0, 0)]
+
+    output = compose_montage(monitors, {"A": paths}, tmp_path / "montage.png")
+
+    with Image.open(output) as montage:
+        assert montage.size == (200, 120)
+        assert montage.getpixel((5, 30)) == (0, 0, 0)
+        assert montage.getpixel((50, 30)) == colors[0]
+        assert montage.getpixel((150, 30)) == colors[1]
+        assert montage.getpixel((50, 90)) == colors[2]
+        assert montage.getpixel((150, 90)) == colors[3]
 
 
 def test_compose_per_monitor_and_black(tmp_path: Path):

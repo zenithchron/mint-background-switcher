@@ -430,6 +430,35 @@ def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path
     assert "profile:P:same" in state.remaining
 
 
+def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "montage"
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_montage(monitors, images_by_monitor, output_path, *, bar_color="black"):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
+        captured["bar_color"] = bar_color
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"montage")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_montage", fake_compose_montage)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+    state = load_state()
+
+    assert result.action == "next"
+    assert len(result.images) == 8
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
+    assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
+    assert captured["bar_color"] == "black"
+    assert "profile:P:montage" in state.remaining
+
+
 def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

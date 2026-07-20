@@ -169,6 +169,64 @@ def test_settings_effect_menu_exposes_calendar_and_applies_selection(monkeypatch
         app.destroy()
 
 
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_mode_menu_exposes_montage_and_applies_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.mode_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_modes = []
+        applied_profiles = []
+        messages = []
+        errors = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_modes.append(config.get_profile("Default").mode),
+        )
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile: applied_profiles.append(profile) or SimpleNamespace(wallpaper="/tmp/montage-preview.png"),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        assert "montage" in labels
+        assert app.mode_menu.winfo_ismapped()
+        assert app.mode_menu.winfo_width() > 1
+        menu.invoke(labels.index("montage"))
+        assert app.mode_var.get() == "montage"
+        app._apply_next()
+        assert saved_modes == ["montage"]
+        assert applied_profiles == ["Default"]
+        assert messages and messages[-1][0] == "Applied"
+
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda _profile: (_ for _ in ()).throw(RuntimeError("preview failed")),
+        )
+        app._apply_next()
+        assert saved_modes == ["montage", "montage"]
+        assert errors == [("Apply failed", "preview failed")]
+    finally:
+        app.destroy()
+
+
 def test_save_current_returns_false_on_validation_failure(monkeypatch):
     errors = []
     monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message: errors.append((title, message)))

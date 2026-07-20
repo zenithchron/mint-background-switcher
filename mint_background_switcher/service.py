@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import Config, Profile, load_config
 from .desktop import DesktopSetter
-from .images import apply_effect, compose_black, compose_per_monitor, compose_span, scan_images
+from .images import apply_effect, compose_black, compose_montage, compose_per_monitor, compose_span, scan_images
 from .monitor import Monitor, detect_monitors
 from .paths import generated_wallpaper_path
 from .state import RuntimeState, draw_many, draw_one, load_state, state_transaction
@@ -121,6 +121,20 @@ def _switch_once_with_state(
             image = draw_one(state, _profile_bucket(profile, "span"), pool, rng=rng)
             wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color)
             images_used = [image]
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
+    elif profile.mode == "montage":
+        pool = scan_images(profile.shared_folders, profile.recursive)
+        if not pool:
+            wallpaper = _apply_black_fallback(profile, monitors, wallpaper_path, dry_run=dry_run)
+            action = "black-fallback"
+        else:
+            chosen = draw_many(state, _profile_bucket(profile, "montage"), pool, len(monitors) * 4, rng=rng)
+            montage_by_monitor = {
+                monitor.name: chosen[index * 4 : (index + 1) * 4]
+                for index, monitor in enumerate(monitors)
+            }
+            images_used = chosen
+            wallpaper = compose_montage(monitors, montage_by_monitor, wallpaper_path, bar_color=profile.bar_color)
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     elif profile.mode == "same":
         pool = scan_images(profile.shared_folders, profile.recursive)

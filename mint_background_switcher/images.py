@@ -288,6 +288,46 @@ def compose_per_monitor(
     return output
 
 
+def compose_montage(
+    monitors: list[Monitor],
+    images_by_monitor: dict[str, list[str]],
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+) -> Path:
+    """Compose a 2x2 local-image montage independently on each monitor."""
+
+    if not monitors:
+        raise ValueError("Cannot compose wallpaper without monitors")
+    width, height, min_x, min_y = virtual_canvas(monitors)
+    combined = Image.new("RGB", (width, height), (0, 0, 0))
+    for monitor in monitors:
+        image_paths = images_by_monitor.get(monitor.name, [])
+        if not image_paths:
+            continue
+        panel = Image.new("RGB", (monitor.width, monitor.height), (0, 0, 0))
+        split_x = monitor.width // 2
+        split_y = monitor.height // 2
+        cells = (
+            (0, 0, split_x, split_y),
+            (split_x, 0, monitor.width, split_y),
+            (0, split_y, split_x, monitor.height),
+            (split_x, split_y, monitor.width, monitor.height),
+        )
+        for image_path, (left, top, right, bottom) in zip(image_paths, cells):
+            cell_width = right - left
+            cell_height = bottom - top
+            if cell_width <= 0 or cell_height <= 0:
+                continue
+            tile = fit_with_black_bars(open_image(image_path), (cell_width, cell_height), bar_color)
+            panel.paste(tile, (left, top))
+        combined.paste(panel, normalized_position(monitor, min_x, min_y))
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    combined.save(output, format="PNG")
+    return output
+
+
 def compose_span(
     monitors: list[Monitor],
     image_path: str,
