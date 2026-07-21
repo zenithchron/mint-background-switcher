@@ -13,7 +13,16 @@ from pathlib import Path
 
 from .config import Config, Profile, load_config
 from .desktop import DesktopSetter
-from .images import apply_effect, compose_black, compose_montage, compose_per_monitor, compose_span, scan_images
+from .images import (
+    apply_effect,
+    compose_black,
+    compose_montage,
+    compose_per_monitor,
+    compose_postcard,
+    compose_span,
+    is_usable_image,
+    scan_images,
+)
 from .monitor import Monitor, detect_monitors
 from .paths import generated_wallpaper_path
 from .state import RuntimeState, draw_many, draw_one, load_state, state_transaction
@@ -31,6 +40,29 @@ class SwitchResult:
 
 def _profile_bucket(profile: Profile, suffix: str) -> str:
     return f"profile:{profile.name}:{suffix}"
+
+
+def _draw_usable_many(
+    state: RuntimeState,
+    bucket: str,
+    pool: list[str],
+    count: int,
+    *,
+    rng: random.Random | None,
+) -> list[str]:
+    """Draw images while discarding selected files that Pillow cannot decode."""
+
+    candidates = list(pool)
+    verified: set[str] = set()
+    selected: list[str] = []
+    while candidates and len(selected) < count:
+        image = draw_one(state, bucket, candidates, rng=rng)
+        if image in verified or is_usable_image(image):
+            verified.add(image)
+            selected.append(image)
+        else:
+            candidates.remove(image)
+    return selected
 
 
 def _next_wallpaper_path(profile: Profile, state: RuntimeState, *, dry_run: bool) -> tuple[Path, int | None]:
@@ -136,6 +168,30 @@ def _switch_once_with_state(
             images_used = chosen
             wallpaper = compose_montage(monitors, montage_by_monitor, wallpaper_path, bar_color=profile.bar_color)
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
+    elif profile.mode == "postcard":
+        pool = scan_images(profile.shared_folders, profile.recursive)
+        if not pool:
+            wallpaper = _apply_black_fallback(profile, monitors, wallpaper_path, dry_run=dry_run)
+            action = "black-fallback"
+        else:
+            chosen = _draw_usable_many(
+                state,
+                _profile_bucket(profile, "postcard"),
+                pool,
+                len(monitors) * 4,
+                rng=rng,
+            )
+            if not chosen:
+                wallpaper = _apply_black_fallback(profile, monitors, wallpaper_path, dry_run=dry_run)
+                action = "black-fallback"
+            else:
+                postcard_by_monitor = {
+                    monitor.name: chosen[index * 4 : (index + 1) * 4]
+                    for index, monitor in enumerate(monitors)
+                }
+                images_used = chosen
+                wallpaper = compose_postcard(monitors, postcard_by_monitor, wallpaper_path, bar_color=profile.bar_color)
+                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run)
     elif profile.mode == "same":
         pool = scan_images(profile.shared_folders, profile.recursive)
         if not pool:

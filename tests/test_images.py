@@ -5,12 +5,17 @@ from PIL import Image
 
 from mint_background_switcher.images import (
     CALENDAR_HIGHLIGHT_COLOR,
+    POSTCARD_BACKGROUND_COLOR,
+    POSTCARD_PIN_COLOR,
+    _postcard_tile,
     add_three_month_calendar,
     apply_effect,
     compose_black,
     compose_montage,
     compose_per_monitor,
+    compose_postcard,
     fit_with_black_bars,
+    is_usable_image,
     scan_images,
 )
 from mint_background_switcher.monitor import Monitor
@@ -50,6 +55,16 @@ def test_scan_images_recursive(tmp_path: Path):
     (nested / "b.png").write_bytes(b"not-real-but-extension-counts")
     assert len(scan_images([str(tmp_path)], recursive=False)) == 1
     assert len(scan_images([str(tmp_path)], recursive=True)) == 2
+
+
+def test_is_usable_image_rejects_files_pillow_cannot_decode(tmp_path: Path):
+    valid = tmp_path / "valid.png"
+    broken = tmp_path / "broken.jpg"
+    Image.new("RGB", (20, 10), (12, 34, 56)).save(valid)
+    broken.write_bytes(b"not a decodable image")
+
+    assert is_usable_image(valid) is True
+    assert is_usable_image(broken) is False
 
 
 def test_apply_grayscale_effect_removes_color_and_preserves_rgb(tmp_path: Path):
@@ -173,6 +188,55 @@ def test_compose_montage_places_four_fitted_images_on_each_monitor(tmp_path: Pat
         assert montage.getpixel((150, 30)) == colors[1]
         assert montage.getpixel((50, 90)) == colors[2]
         assert montage.getpixel((150, 90)) == colors[3]
+
+
+def test_compose_postcard_frames_four_uncropped_images_on_each_monitor(tmp_path: Path):
+    colors = ((40, 180, 80), (40, 80, 220), (220, 200, 40), (40, 200, 200))
+    paths = []
+    for index, color in enumerate(colors):
+        path = tmp_path / f"postcard-{index}.png"
+        Image.new("RGB", (120, 80), color).save(path)
+        paths.append(str(path))
+    monitors = [Monitor("A", 240, 160, 0, 0)]
+
+    output = compose_postcard(monitors, {"A": paths}, tmp_path / "postcard.png")
+
+    with Image.open(output) as postcard:
+        assert postcard.mode == "RGB"
+        assert postcard.size == (240, 160)
+        assert postcard.getpixel((0, 0)) == POSTCARD_BACKGROUND_COLOR
+        rendered_colors = {
+            color
+            for _count, color in postcard.getcolors(maxcolors=postcard.width * postcard.height) or []
+            if isinstance(color, tuple) and len(color) == 3
+        }
+        assert set(colors).issubset(rendered_colors)
+        pin_red, pin_green, pin_blue = POSTCARD_PIN_COLOR[:3]
+        assert any(
+            abs(red - pin_red) < 30 and abs(green - pin_green) < 30 and abs(blue - pin_blue) < 30
+            for red, green, blue in rendered_colors
+        )
+        assert (248, 246, 238) in rendered_colors
+
+
+def test_postcard_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (90, 90, 90))
+    marker_colors = ((250, 20, 20), (20, 250, 20), (20, 20, 250), (250, 220, 20))
+    marker_boxes = ((0, 0, 11, 11), (108, 0, 119, 11), (0, 68, 11, 79), (108, 68, 119, 79))
+    for color, (left, top, right, bottom) in zip(marker_colors, marker_boxes):
+        for x in range(left, right + 1):
+            for y in range(top, bottom + 1):
+                source.putpixel((x, y), color)
+    path = tmp_path / "edge-markers.png"
+    source.save(path)
+
+    straight = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black")
+    straight_colors = {color for _count, color in straight.getcolors(maxcolors=straight.width * straight.height) or []}
+    assert {(*color, 255) for color in marker_colors}.issubset(straight_colors)
+
+    ultrawide = _postcard_tile(str(path), (1920, 540), -8.0, bar_color="black")
+    assert ultrawide.width <= 1920
+    assert ultrawide.height <= 540
 
 
 def test_compose_per_monitor_and_black(tmp_path: Path):

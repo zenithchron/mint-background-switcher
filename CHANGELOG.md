@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.11] - 2026-07-21
+
+### Added
+
+- A local postcard mode inspired by John’s Background Switcher, arranging four uncropped photos in angled white frames with pushpins on a corkboard-colored background for each monitor.
+- **postcard** under **Settings → Profile settings → Mode**, with Save and **Apply Next Now** success/error feedback.
+- An Xvfb-backed Settings test that verifies the postcard control is present, visible, saveable, and immediately applicable in a real Tk window.
+
+### Changed
+
+- Bumped the package version to `0.1.11`.
+
 ## [0.1.10] - 2026-07-20
 
 ### Added

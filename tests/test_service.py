@@ -459,6 +459,83 @@ def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     assert "profile:P:montage" in state.remaining
 
 
+def test_postcard_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "postcard"
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_postcard(monitors, images_by_monitor, output_path, *, bar_color="black"):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
+        captured["bar_color"] = bar_color
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"postcard")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_postcard", fake_compose_postcard)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+    state = load_state()
+
+    assert result.action == "next"
+    assert len(result.images) == 8
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
+    assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
+    assert captured["bar_color"] == "black"
+    assert "profile:P:postcard" in state.remaining
+
+
+def test_postcard_dry_run_skips_malformed_images_without_changing_state(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "postcard"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    (image_dir / "img3.png").unlink()
+    broken = image_dir / "broken.jpg"
+    broken.write_bytes(b"not a decodable image")
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:postcard": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert len(result.images) == 8
+    assert str(broken.resolve()) not in result.images
+    assert result.wallpaper.exists()
+    assert load_state().to_dict() == before
+
+
+def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "postcard"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    for image_path in image_dir.glob("*.png"):
+        image_path.unlink()
+    (image_dir / "broken.jpg").write_bytes(b"not a decodable image")
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "black-fallback"
+    assert result.applied is False
+    assert result.images == []
+    assert result.wallpaper.exists()
+
+
 def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

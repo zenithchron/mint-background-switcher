@@ -6,7 +6,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 - Local image folders with recursive scanning.
 - Random no-repeat rotation until each pool is exhausted.
-- Shared, same-image, 2x2 montage, per-monitor, and spanned wallpaper modes.
+- Shared, same-image, 2x2 montage, postcard, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
@@ -19,6 +19,12 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.11 - 2026-07-21
+
+- Added a local postcard mode that arranges four uncropped photos in angled white frames with pushpins on a corkboard-colored background for each monitor.
+- Added **postcard** under **Settings → Profile settings → Mode**; save the profile or choose **Apply Next Now** for success/error feedback.
+- Bumped the package version to `0.1.11`.
 
 ### 0.1.10 - 2026-07-20
 
@@ -128,7 +134,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **montage** mode, profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL.
+The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL.
 
 After manual commands work, enable safe login autostart:
 
@@ -224,6 +230,7 @@ Each profile has a mode:
 - `shared`: all monitors draw from one shared image pool, without duplicates within the same rotation when possible.
 - `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `montage`: four images from the shared pool are arranged in a 2x2 grid on each monitor, with every complete image fitted inside its tile instead of cropped.
+- `postcard`: four images from the shared pool are fitted without cropping, placed in angled white frames with pushpins, and arranged on a corkboard-colored background independently for each monitor.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
 - `span`: one image is fit with configured letterbox bars across the full virtual desktop canvas.
 

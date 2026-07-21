@@ -152,6 +152,7 @@ class SettingsApp(tk.Tk):
             "shared",
             "same",
             "montage",
+            "postcard",
             "per-monitor",
             "span",
         )

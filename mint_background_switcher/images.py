@@ -15,6 +15,8 @@ from .paths import xdg_cache_dir
 
 SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff")
 CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
+POSTCARD_BACKGROUND_COLOR = (112, 78, 46)
+POSTCARD_PIN_COLOR = (188, 42, 42, 255)
 _MONTH_NAMES = (
     "",
     "January",
@@ -81,6 +83,18 @@ def open_image(path: str | Path) -> Image.Image:
         bg.paste(img, mask=img.getchannel("A"))
         return bg
     return img.convert("RGB")
+
+
+def is_usable_image(path: str | Path) -> bool:
+    """Return whether Pillow can fully decode and orient an image path."""
+
+    try:
+        with Image.open(path) as image:
+            image.load()
+            ImageOps.exif_transpose(image)
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
+        return False
+    return True
 
 
 def automatic_bar_color(image: Image.Image) -> tuple[int, int, int]:
@@ -321,6 +335,80 @@ def compose_montage(
                 continue
             tile = fit_with_black_bars(open_image(image_path), (cell_width, cell_height), bar_color)
             panel.paste(tile, (left, top))
+        combined.paste(panel, normalized_position(monitor, min_x, min_y))
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    combined.save(output, format="PNG")
+    return output
+
+
+def _postcard_tile(
+    image_path: str,
+    cell_size: tuple[int, int],
+    angle: float,
+    *,
+    bar_color: str,
+) -> Image.Image:
+    """Return one uncropped, framed photo sized to remain inside a pile cell."""
+
+    cell_width, cell_height = cell_size
+    photo_width = max(1, round(cell_width * 0.68))
+    photo_height = max(1, round(cell_height * 0.58))
+    border = max(1, min(cell_width, cell_height) // 30)
+    fitted = fit_with_black_bars(open_image(image_path), (photo_width, photo_height), bar_color)
+    card = Image.new(
+        "RGBA",
+        (photo_width + 2 * border, photo_height + 4 * border),
+        (248, 246, 238, 255),
+    )
+    card.paste(fitted, (border, border))
+    draw = ImageDraw.Draw(card)
+    pin_radius = max(1, border // 2)
+    pin_x = card.width // 2
+    pin_y = max(pin_radius + 1, border // 2)
+    draw.ellipse(
+        (pin_x - pin_radius, pin_y - pin_radius, pin_x + pin_radius, pin_y + pin_radius),
+        fill=POSTCARD_PIN_COLOR,
+    )
+    rotated = card.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+    rotated.thumbnail((cell_width, cell_height), Image.Resampling.LANCZOS)
+    return rotated
+
+
+def compose_postcard(
+    monitors: list[Monitor],
+    images_by_monitor: dict[str, list[str]],
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+) -> Path:
+    """Compose four locally selected photos as a framed postcard pile per monitor."""
+
+    if not monitors:
+        raise ValueError("Cannot compose wallpaper without monitors")
+    width, height, min_x, min_y = virtual_canvas(monitors)
+    combined = Image.new("RGB", (width, height), (0, 0, 0))
+    angles = (-8.0, 7.0, 5.0, -6.0)
+    for monitor in monitors:
+        panel = Image.new("RGB", (monitor.width, monitor.height), POSTCARD_BACKGROUND_COLOR)
+        split_x = monitor.width // 2
+        split_y = monitor.height // 2
+        cells = (
+            (0, 0, split_x, split_y),
+            (split_x, 0, monitor.width, split_y),
+            (0, split_y, split_x, monitor.height),
+            (split_x, split_y, monitor.width, monitor.height),
+        )
+        image_paths = images_by_monitor.get(monitor.name, [])
+        for image_path, angle, (left, top, right, bottom) in zip(image_paths, angles, cells):
+            cell_width = right - left
+            cell_height = bottom - top
+            if cell_width <= 0 or cell_height <= 0:
+                continue
+            card = _postcard_tile(image_path, (cell_width, cell_height), angle, bar_color=bar_color)
+            x = left + (cell_width - card.width) // 2
+            y = top + (cell_height - card.height) // 2
+            panel.paste(card, (x, y), card)
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
