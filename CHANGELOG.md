@@ -4,6 +4,31 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.12] - 2026-07-22
+
+### Added
+
+- **Check for Updates...** in Settings for user-triggered stable-release checks, current/new version confirmation, first-time managed-install setup, responsive background work, and clear failure feedback.
+- **Roll Back...** in Settings when a previous valid managed release exists.
+- Explicit Settings status for an active managed version, a managed version awaiting restart, or an unmanaged copy.
+- Versioned per-user installations under `~/.local/share/mint-background-switcher/versions/`, an atomic `current` link, and a stable `~/.local/bin/mint-background-switcher` launcher.
+- Install receipts containing the release version, commit, timestamp, and downloaded archive SHA-256 digest.
+
+### Changed
+
+- Bumped the package version to `0.1.12`.
+- Added `tomli` on Python 3.10 so release metadata validation remains compatible with every supported Python version.
+- Managed updates preserve safe-start/tray autostart mode and delay, rebind an existing black-screen hotkey to the stable launcher, and leave profiles, state, cache, source checkouts, and system-package-managed files untouched.
+- Settings now warns that restarting into an activated version discards unsaved profile edits and explains that an already-running tray changes version only after restart or next login.
+- Settings keeps update workers alive and blocks Close/window-manager shutdown until active check, install, or rollback work finishes.
+
+### Security
+
+- Release checks accept only stable semantic-version tags from the public repository, peel annotated tags to commits, pin archive downloads to the resolved commit, reject rewrites against any retained installation of the same version, and recheck the tag after download and immediately before activation.
+- Source downloads require trusted GitHub/codeload HTTPS hosts and bounded response sizes; raw and canonical tar paths, duplicate extraction destinations, member types, expanded size, package name, metadata version, and runtime version are validated before installation. The confirmed pip phase may use the configured Python package index for declared build/runtime dependencies.
+- Managed installs use a nonblocking update lock, build directly at an unreferenced permanent version path so venv shebangs remain valid, probe the staged command and runtime, and atomically activate only the `current` link.
+- Failed installs and activation failures preserve or restore the working active version, stable launcher, and autostart files. Normal installation rejects downgrades and same-version tag rewrites; intentional downgrades use the explicit rollback path.
+
 ## [0.1.11] - 2026-07-21
 
 ### Added

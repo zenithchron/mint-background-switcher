@@ -10,6 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
+- User-triggered managed updates from Settings with versioned per-user installs, atomic activation, restart, and rollback.
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
 - Optional per-profile grayscale, sepia, soft-focus blur, vignette, and three-month calendar wallpaper effects.
@@ -19,6 +20,15 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.12 - 2026-07-22
+
+- Added **Check for Updates...** and **Roll Back...** to Settings with responsive background checking and installation status.
+- Added versioned per-user managed installations, commit-pinned release downloads, archive validation, atomic activation, stable launchers, and previous-version rollback.
+- Preserved existing configuration, runtime state, safe-start/tray autostart mode and delay, and registered black-screen hotkeys across managed updates.
+- Added explicit managed-install status and restart guidance; no update is downloaded or installed without confirmation.
+- Hardened tag-rewrite, archive-path, and in-progress window-close handling around activation.
+- Bumped the package version to `0.1.12`.
 
 ### 0.1.11 - 2026-07-21
 
@@ -92,7 +102,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 ## Requirements
 
 - Linux Mint Cinnamon on X11 is the primary target.
-- Python 3.10 or newer.
+- Python 3.10 or newer, including the `venv` module for managed installations.
 - Pillow 9.1 or newer for image composition and effects.
 - `xrandr` and `gsettings` for monitor detection and desktop wallpaper application.
 - Tkinter for the settings editor.
@@ -102,26 +112,23 @@ On Linux Mint or Ubuntu, install the usual system packages with:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pil python3-tk python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1
+sudo apt install -y python3-venv python3-pil python3-tk python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1
 ```
 
 ## Install from GitHub
 
 ```bash
-git clone https://github.com/zenithchron/mint-background-switcher.git
-cd mint-background-switcher
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-python -m pytest -q
+git clone https://github.com/zenithchron/mint-background-switcher.git "$HOME/mint-background-switcher"
+cd "$HOME/mint-background-switcher" &&
+python3 -m venv --system-site-packages .venv &&
+.venv/bin/python -m pip install --upgrade pip &&
+.venv/bin/python -m pip install -e ".[dev]" &&
+.venv/bin/python -m pytest -q &&
+.venv/bin/mint-background-switcher --version &&
+.venv/bin/mint-background-switcher settings
 ```
 
-If you prefer a user install instead of a project virtual environment:
-
-```bash
-python3 -m pip install --user -e .
-```
+The checkout and its virtual environment bootstrap the first installation. In Settings, find **Application updates**, choose **Check for Updates...**, and confirm **Set up managed updates**. The app then downloads the current tagged release into its versioned per-user installation and offers to restart Settings from the stable managed launcher. No `sudo` is used, and the source checkout is left intact as a manual recovery path.
 
 ## Quick start
 
@@ -134,7 +141,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL.
+The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -155,6 +162,34 @@ To use the tray as the login entry instead of safe-start, use the expert option 
 ```bash
 ./scripts/mint-background-switcher autostart --enable --tray --delay-seconds 90
 ```
+
+## Managed updates and rollback
+
+Managed updates are strictly user-triggered. Settings does not check, download, or install releases in the background. Choose **Check for Updates...**; if a newer stable release exists, Settings shows both versions and asks before downloading. A network or validation failure is reported as an error and is never presented as “up to date.”
+
+If the running copy came from a checkout, editable install, or another unmanaged location and is already current, the same button offers to install a managed copy. Managed files live at:
+
+- Versioned installations: `~/.local/share/mint-background-switcher/versions/`
+- Atomic active-version link: `~/.local/share/mint-background-switcher/current`
+- Stable user command: `~/.local/bin/mint-background-switcher`
+
+An existing file or link at the stable user-command path is renamed to a timestamped `mint-background-switcher.pre-managed-*` backup before the managed launcher is created. System-wide or package-manager-owned files are not modified.
+
+The updater resolves the latest `vMAJOR.MINOR.PATCH` tag through GitHub, pins the download to that tag's commit, accepts source downloads only from GitHub/codeload over HTTPS, limits response sizes, rejects unsafe tar members, checks the package and runtime version, records the archive SHA-256 digest, and rechecks that the tag still names the same commit before activation. A candidate gets its receipt only after its venv, command, Tk/Pillow runtime, and any preserved tray runtime pass validation. The active `current` link changes atomically only after all those checks succeed.
+
+Creating the candidate venv invokes `pip`. If required packages are not already cached or available from system site packages, pip may contact your configured Python package index for build requirements and dependencies such as setuptools, wheel, Pillow, and Python 3.10's tomli. See [SECURITY.md](SECURITY.md) for the complete network and trust boundary.
+
+Profiles, runtime state, generated wallpapers, and other user data remain under `~/.config` and `~/.cache`, outside the managed installation. Existing safe-start/tray autostart mode and delay are rewritten to the stable launcher. A registered Mint Background Switcher black-screen hotkey is rebound to the same stable launcher. The currently running tray process keeps running its old code until it is restarted or the next login.
+
+After two managed versions have been installed, **Roll Back...** activates the previous valid managed version without using the network and retains the newer version. During the first migration there is no previous managed version to roll back to, so the original source checkout is intentionally left untouched as the recovery path. Restarting Settings warns before discarding unsaved profile edits.
+
+If Settings cannot be opened from a desktop shortcut, try the stable command directly:
+
+```bash
+$HOME/.local/bin/mint-background-switcher settings
+```
+
+A versioned launcher can also be run directly from its directory under `~/.local/share/mint-background-switcher/versions/`. See [SECURITY.md](SECURITY.md) for the updater's trust boundary.
 
 ## Common commands
 
@@ -214,6 +249,8 @@ mint-background-switcher register-hotkey --binding '<Primary><Alt>b'
 - Runtime state: `~/.config/mint-background-switcher/state.json`
 - Startup guard: `~/.config/mint-background-switcher/startup-guard.json`
 - Generated wallpapers and startup log: `~/.cache/mint-background-switcher/`
+- Managed versions and active-version link: `~/.local/share/mint-background-switcher/`
+- Stable managed launcher: `~/.local/bin/mint-background-switcher`
 - Autostart entry: `~/.config/autostart/mint-background-switcher.desktop`
 
 For tests or experimentation, override paths with:
@@ -221,6 +258,8 @@ For tests or experimentation, override paths with:
 ```bash
 export MBS_CONFIG_DIR=/tmp/mbs-config
 export MBS_CACHE_DIR=/tmp/mbs-cache
+export MBS_INSTALL_ROOT=/tmp/mbs-managed
+export MBS_USER_BIN_DIR=/tmp/mbs-bin
 ```
 
 ## Profile modes

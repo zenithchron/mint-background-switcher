@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import queue
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+from typing import Any, Callable
 
-from . import APP_NAME, __version__
+from . import APP_NAME, __version__, updater
 from .config import EFFECT_CHOICES, Config, Profile, load_config, save_config
 from .monitor import Monitor, detect_monitors
 from .service import black_screen, save_current_wallpaper, switch_once
@@ -100,11 +103,19 @@ class SettingsApp(tk.Tk):
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
         self.monitor_folder_var = tk.StringVar()
+        self.update_status_var = tk.StringVar()
         self.monitor_folders_data: dict[str, list[str]] = {}
+        self._update_busy = False
+        self._update_worker: threading.Thread | None = None
+        self._update_results: queue.Queue[
+            tuple[Callable[[Any], None] | None, Any, str, Exception | None]
+        ] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
+        self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._load_profile(self.profile_var.get())
         self._set_initial_window_geometry()
+        self.after(100, self._poll_update_results)
 
     def _set_initial_window_geometry(self) -> None:
         self.update_idletasks()
@@ -207,6 +218,15 @@ class SettingsApp(tk.Tk):
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
         folders.add(monitor_frame, weight=1)
 
+        maintenance = ttk.Frame(root)
+        maintenance.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(maintenance, text="Application updates:").pack(side=tk.LEFT, padx=(3, 6))
+        self.update_button = ttk.Button(maintenance, text="Check for Updates...", command=self._check_for_updates)
+        self.update_button.pack(side=tk.LEFT, padx=3)
+        self.rollback_button = ttk.Button(maintenance, text="Roll Back...", command=self._rollback_update)
+        self.rollback_button.pack(side=tk.LEFT, padx=3)
+        ttk.Label(maintenance, textvariable=self.update_status_var).pack(side=tk.LEFT, padx=(8, 3))
+
         bottom = ttk.Frame(root)
         bottom.pack(fill=tk.X)
         ttk.Button(bottom, text="Apply Next Now", command=self._apply_next).pack(side=tk.LEFT, padx=3)
@@ -214,9 +234,12 @@ class SettingsApp(tk.Tk):
         ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper).pack(
             side=tk.LEFT, padx=3
         )
-        ttk.Button(bottom, text="Close", command=self.destroy).pack(side=tk.RIGHT, padx=3)
+        self.close_button = ttk.Button(bottom, text="Close", command=self._request_close)
+        self.close_button.pack(side=tk.RIGHT, padx=3)
         ttk.Button(bottom, text="About", command=self._show_about).pack(side=tk.RIGHT, padx=3)
         ttk.Label(bottom, text=f"Version {__version__}").pack(side=tk.RIGHT, padx=(3, 10))
+        self._refresh_rollback_button()
+        self._refresh_update_status()
 
     def _load_profile(self, name: str) -> None:
         profile = self.config_data.get_profile(name)
@@ -597,6 +620,223 @@ class SettingsApp(tk.Tk):
             ),
             parent=self,
         )
+
+    def _refresh_rollback_button(self) -> None:
+        try:
+            available = updater.rollback_candidate() is not None
+        except Exception:
+            available = False
+        if self._optional_attr("_update_busy", False):
+            available = False
+        self.rollback_button.state(["!disabled"] if available else ["disabled"])
+
+    def _refresh_update_status(self) -> None:
+        try:
+            active = updater.active_install()
+            managed_runtime = updater.is_managed_runtime()
+        except Exception:
+            active = None
+            managed_runtime = False
+        if active is not None and managed_runtime:
+            status = f"Managed updates active (version {active.version})"
+        elif active is not None:
+            status = f"Managed version {active.version} ready after restart"
+        else:
+            status = "Managed updates not set up"
+        self.update_status_var.set(status)
+
+    def _set_update_busy(self, busy: bool, label: str = "Check for Updates...") -> None:
+        self._update_busy = busy
+        self.update_button.configure(text=label if busy else "Check for Updates...")
+        self.update_button.state(["disabled"] if busy else ["!disabled"])
+        self.close_button.state(["disabled"] if busy else ["!disabled"])
+        if busy:
+            self.rollback_button.state(["disabled"])
+            self.update_status_var.set(label)
+        else:
+            self._refresh_rollback_button()
+            self._refresh_update_status()
+
+    def _request_close(self) -> None:
+        if self._optional_attr("_update_busy", False):
+            messagebox.showinfo(
+                "Update in progress",
+                "Keep Settings open until the current update operation finishes.",
+                parent=self,
+            )
+            return
+        self.destroy()
+
+    def _start_update_task(
+        self,
+        label: str,
+        work: Callable[[], Any],
+        on_success: Callable[[Any], None],
+        error_title: str,
+    ) -> None:
+        if self._optional_attr("_update_busy", False):
+            return
+        self._set_update_busy(True, label)
+
+        def run() -> None:
+            try:
+                result = work()
+            except Exception as exc:
+                self._update_results.put((None, None, error_title, exc))
+            else:
+                self._update_results.put((on_success, result, error_title, None))
+
+        worker = threading.Thread(target=run, name="mbs-update-worker", daemon=False)
+        self._update_worker = worker
+        try:
+            worker.start()
+        except Exception:
+            self._update_worker = None
+            self._set_update_busy(False)
+            raise
+
+    def _poll_update_results(self) -> None:
+        try:
+            while True:
+                on_success, result, error_title, error = self._update_results.get_nowait()
+                self._update_worker = None
+                self._set_update_busy(False)
+                if error is not None:
+                    messagebox.showerror(error_title, str(error), parent=self)
+                elif on_success is not None:
+                    on_success(result)
+        except queue.Empty:
+            pass
+        try:
+            self.after(100, self._poll_update_results)
+        except tk.TclError:
+            pass
+
+    def _check_for_updates(self) -> None:
+        self._start_update_task(
+            "Checking...",
+            lambda: updater.check_for_updates(__version__),
+            self._handle_update_check,
+            "Update check failed",
+        )
+
+    def _handle_update_check(self, check: updater.UpdateCheck) -> None:
+        if check.update_available:
+            install = messagebox.askyesno(
+                "Update available",
+                (
+                    f"Version {check.latest.version} is available.\n"
+                    f"You are running version {check.current_version}.\n\n"
+                    "Download, verify, and install it for your user account now?"
+                ),
+                parent=self,
+            )
+            if install:
+                self._install_checked_release(check.latest)
+            return
+
+        if updater.version_key(check.current_version) > updater.version_key(check.latest.version):
+            messagebox.showinfo(
+                "No update installed",
+                (
+                    f"This copy is version {check.current_version}, newer than the latest public "
+                    f"release ({check.latest.version})."
+                ),
+                parent=self,
+            )
+            return
+
+        if not updater.is_managed_runtime():
+            install = messagebox.askyesno(
+                "Set up managed updates",
+                (
+                    f"Version {check.current_version} is up to date.\n\n"
+                    "This copy is not running from the managed installation. Install a managed copy "
+                    "now so future releases can be installed from Settings?"
+                ),
+                parent=self,
+            )
+            if install:
+                self._install_checked_release(check.latest)
+            return
+
+        messagebox.showinfo(
+            "Up to date",
+            f"Mint Background Switcher {check.current_version} is the latest public release.",
+            parent=self,
+        )
+
+    def _install_checked_release(self, release: updater.ReleaseInfo) -> None:
+        self._start_update_task(
+            "Installing...",
+            lambda: updater.install_release(release),
+            self._handle_install_success,
+            "Update failed",
+        )
+
+    def _handle_install_success(self, result: updater.InstallResult) -> None:
+        self._handle_activation_success(
+            result,
+            title="Update installed",
+            summary=f"Mint Background Switcher {result.record.version} is installed and activated.",
+        )
+
+    def _handle_rollback_success(self, result: updater.InstallResult) -> None:
+        self._handle_activation_success(
+            result,
+            title="Rollback activated",
+            summary=f"Mint Background Switcher was rolled back to version {result.record.version}.",
+        )
+
+    def _handle_activation_success(self, result: updater.InstallResult, *, title: str, summary: str) -> None:
+        self._refresh_rollback_button()
+        self._refresh_update_status()
+        warning_text = ""
+        if result.warnings:
+            warning_text = "\n\n" + "\n".join(result.warnings)
+        restart = messagebox.askyesno(
+            title,
+            (
+                f"{summary}\n\n"
+                "Restart Settings into the managed installation now? The running tray process will "
+                "use the activated version after it is restarted or at your next login.\n\n"
+                "Unsaved profile changes in this Settings window will be lost."
+                f"{warning_text}"
+            ),
+            parent=self,
+        )
+        if restart:
+            self._restart_managed_settings()
+
+    def _rollback_update(self) -> None:
+        candidate = updater.rollback_candidate()
+        if candidate is None:
+            messagebox.showinfo(
+                "No rollback available",
+                "No previous managed version is available yet.",
+                parent=self,
+            )
+            return
+        if not messagebox.askyesno(
+            "Roll back",
+            f"Roll back to Mint Background Switcher {candidate.version}?",
+            parent=self,
+        ):
+            return
+        self._start_update_task(
+            "Rolling Back...",
+            updater.rollback_install,
+            self._handle_rollback_success,
+            "Rollback failed",
+        )
+
+    def _restart_managed_settings(self) -> None:
+        try:
+            updater.restart_settings()
+        except Exception as exc:
+            messagebox.showerror("Restart failed", str(exc), parent=self)
+            return
+        self.destroy()
 
     def _apply_next(self) -> None:
         if not self._save_current(show_success=False):

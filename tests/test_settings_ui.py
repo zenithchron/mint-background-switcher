@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -658,3 +660,267 @@ def test_blank_or_duplicate_profile_name_is_rejected(monkeypatch):
     assert settings_ui.SettingsApp._validated_profile_name(dummy, "  ") is None
     assert settings_ui.SettingsApp._validated_profile_name(dummy, "A") is None
     assert [title for title, _message in errors] == ["Invalid profile name", "Profile exists"]
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_exposes_update_and_rollback_controls(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.update_button.cget("text") == "Check for Updates..."
+        assert app.update_button.winfo_ismapped()
+        assert app.rollback_button.cget("text") == "Roll Back..."
+        assert app.rollback_button.winfo_ismapped()
+        assert "disabled" in app.rollback_button.state()
+        assert "managed updates" in app.update_status_var.get().lower()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_update_worker_keeps_tk_responsive_and_reports_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    gate = threading.Event()
+    errors = []
+    infos = []
+
+    def fail_after_release():
+        assert gate.wait(timeout=2)
+        raise settings_ui.updater.UpdateError("network unavailable")
+
+    monkeypatch.setattr(settings_ui.updater, "check_for_updates", lambda _version: fail_after_release())
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: infos.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app._check_for_updates()
+        app.update()
+        assert app.update_button.cget("text") == "Checking..."
+        assert "disabled" in app.update_button.state()
+        gate.set()
+        deadline = time.monotonic() + 3
+        while app._update_busy and time.monotonic() < deadline:
+            app.update()
+            time.sleep(0.01)
+        assert app._update_busy is False
+        assert "disabled" not in app.update_button.state()
+        assert errors and errors[0][0] == "Update check failed"
+        assert errors[0][1] == "network unavailable"
+        assert infos == []
+    finally:
+        gate.set()
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_blocks_close_until_non_daemon_update_worker_finishes(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    gate = threading.Event()
+    messages = []
+    closed = []
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    real_destroy = app.destroy
+    monkeypatch.setattr(app, "destroy", lambda: closed.append(True))
+    try:
+        app._start_update_task(
+            "Installing...",
+            lambda: gate.wait(timeout=2),
+            lambda _result: None,
+            "Update failed",
+        )
+        worker = app._update_worker
+        assert worker is not None
+        assert worker.daemon is False
+        assert worker.is_alive()
+        assert "disabled" in app.close_button.state()
+
+        app._request_close()
+
+        assert closed == []
+        assert messages and messages[0][0] == "Update in progress"
+        assert messages[0][2]["parent"] is app
+
+        gate.set()
+        deadline = time.monotonic() + 3
+        while app._update_busy and time.monotonic() < deadline:
+            app.update()
+            time.sleep(0.01)
+        worker.join(timeout=1)
+        assert app._update_busy is False
+        assert app._update_worker is None
+        assert "disabled" not in app.close_button.state()
+
+        app._request_close()
+        assert closed == [True]
+    finally:
+        gate.set()
+        real_destroy()
+
+
+def test_update_check_prompts_to_install_newer_release(monkeypatch):
+    release = settings_ui.updater.ReleaseInfo(
+        "0.1.12",
+        "v0.1.12",
+        "a" * 40,
+        "https://github.com/example/archive.tar.gz",
+    )
+    check = settings_ui.updater.UpdateCheck("0.1.11", release)
+    prompts = []
+    installs = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_install_checked_release", lambda selected: installs.append(selected))
+    monkeypatch.setattr(settings_ui.updater, "is_managed_runtime", lambda: True)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: prompts.append((title, message, kwargs)) or True,
+    )
+
+    settings_ui.SettingsApp._handle_update_check(dummy, check)
+
+    assert prompts and prompts[0][0] == "Update available"
+    assert "0.1.11" in prompts[0][1] and "0.1.12" in prompts[0][1]
+    assert prompts[0][2]["parent"] is dummy
+    assert installs == [release]
+
+
+def test_update_check_cancel_does_not_install(monkeypatch):
+    release = settings_ui.updater.ReleaseInfo(
+        "0.1.12",
+        "v0.1.12",
+        "a" * 40,
+        "https://github.com/example/archive.tar.gz",
+    )
+    check = settings_ui.updater.UpdateCheck("0.1.11", release)
+    installs = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_install_checked_release", lambda selected: installs.append(selected))
+    monkeypatch.setattr(settings_ui.updater, "is_managed_runtime", lambda: True)
+    monkeypatch.setattr(settings_ui.messagebox, "askyesno", lambda *_args, **_kwargs: False)
+
+    settings_ui.SettingsApp._handle_update_check(dummy, check)
+
+    assert installs == []
+
+
+def test_up_to_date_unmanaged_copy_offers_managed_install(monkeypatch):
+    release = settings_ui.updater.ReleaseInfo(
+        settings_ui.__version__,
+        f"v{settings_ui.__version__}",
+        "b" * 40,
+        "https://github.com/example/archive.tar.gz",
+    )
+    check = settings_ui.updater.UpdateCheck(settings_ui.__version__, release)
+    prompts = []
+    installs = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_install_checked_release", lambda selected: installs.append(selected))
+    monkeypatch.setattr(settings_ui.updater, "is_managed_runtime", lambda: False)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: prompts.append((title, message, kwargs)) or True,
+    )
+
+    settings_ui.SettingsApp._handle_update_check(dummy, check)
+
+    assert prompts and prompts[0][0] == "Set up managed updates"
+    assert "managed copy" in prompts[0][1]
+    assert installs == [release]
+
+
+def test_up_to_date_managed_copy_reports_current_without_install(monkeypatch):
+    release = settings_ui.updater.ReleaseInfo(
+        settings_ui.__version__,
+        f"v{settings_ui.__version__}",
+        "c" * 40,
+        "https://github.com/example/archive.tar.gz",
+    )
+    check = settings_ui.updater.UpdateCheck(settings_ui.__version__, release)
+    messages = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(
+        dummy,
+        "_install_checked_release",
+        lambda _selected: (_ for _ in ()).throw(AssertionError("up-to-date managed copy must not install")),
+    )
+    monkeypatch.setattr(settings_ui.updater, "is_managed_runtime", lambda: True)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._handle_update_check(dummy, check)
+
+    assert messages and messages[0][0] == "Up to date"
+    assert settings_ui.__version__ in messages[0][1]
+    assert messages[0][2]["parent"] is dummy
+
+
+def test_successful_install_can_restart_into_managed_settings(monkeypatch, tmp_path):
+    record = settings_ui.updater.InstallRecord("0.1.12", "d" * 40, "e" * 64, "2026-07-21T20:00:00+00:00", tmp_path)
+    result = settings_ui.updater.InstallResult(record, None, tmp_path / "launcher")
+    restarts = []
+    prompts = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_refresh_rollback_button", lambda: None)
+    setattr(dummy, "_refresh_update_status", lambda: None)
+    setattr(dummy, "_restart_managed_settings", lambda: restarts.append(True))
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: prompts.append((title, message, kwargs)) or True,
+    )
+
+    settings_ui.SettingsApp._handle_install_success(dummy, result)
+
+    assert restarts == [True]
+    assert prompts[0][0] == "Update installed"
+    assert "unsaved profile changes" in prompts[0][1].lower()
+
+
+def test_successful_rollback_reports_rollback_before_restart(monkeypatch, tmp_path):
+    record = settings_ui.updater.InstallRecord("0.1.11", "f" * 40, "a" * 64, "2026-07-21T20:00:00+00:00", tmp_path)
+    previous = settings_ui.updater.InstallRecord("0.1.12", "e" * 40, "b" * 64, "2026-07-21T21:00:00+00:00", tmp_path / "new")
+    result = settings_ui.updater.InstallResult(record, previous, tmp_path / "launcher")
+    prompts = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_refresh_rollback_button", lambda: None)
+    setattr(dummy, "_refresh_update_status", lambda: None)
+    setattr(dummy, "_restart_managed_settings", lambda: None)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: prompts.append((title, message, kwargs)) or False,
+    )
+
+    settings_ui.SettingsApp._handle_rollback_success(dummy, result)
+
+    assert prompts[0][0] == "Rollback activated"
+    assert "rolled back" in prompts[0][1].lower()
+    assert "0.1.11" in prompts[0][1]
