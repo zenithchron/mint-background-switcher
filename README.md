@@ -21,7 +21,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 ## Change log
 
-### 0.1.12 - 2026-07-22
+### 0.1.12 - 2026-07-21
 
 - Added **Check for Updates...** and **Roll Back...** to Settings with responsive background checking and installation status.
 - Added versioned per-user managed installations, commit-pinned release downloads, archive validation, atomic activation, stable launchers, and previous-version rollback.

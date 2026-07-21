@@ -4,7 +4,7 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
-## [0.1.12] - 2026-07-22
+## [0.1.12] - 2026-07-21
 
 ### Added
 
