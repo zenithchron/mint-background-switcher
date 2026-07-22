@@ -975,12 +975,12 @@ def test_apply_next_runs_off_tk_thread(monkeypatch, tmp_path):
     app = settings_ui.SettingsApp()
     try:
         app._apply_next()
+        assert app.apply_button.cget("text") == "Applying..."
         app.update()
         assert app._apply_busy is True
         assert app._apply_worker is not None
         assert app._apply_worker.daemon is False
         assert app._apply_worker.is_alive()
-        assert app.apply_button.cget("text") == "Applying..."
         for button in (
             app.apply_button,
             app.black_button,
