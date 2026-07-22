@@ -10,6 +10,7 @@ from mint_background_switcher import service
 from mint_background_switcher.config import Config, Profile, save_config
 from mint_background_switcher.service import black_screen, resume, save_current_wallpaper, switch_once
 from mint_background_switcher.state import RuntimeState, load_state, save_state
+from mint_background_switcher.working_storage import WorkingDirectoryError, prepare_working_directory
 
 
 def _write_images(folder: Path, count: int = 4) -> None:
@@ -75,6 +76,19 @@ def test_dry_run_next_black_and_resume_do_not_persist_state(monkeypatch, tmp_pat
     resume_result = resume("P", dry_run=True)
     assert resume_result.applied is False
     assert load_state().to_dict() == before
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+
+def test_black_screen_honors_cancellation_before_side_effects(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    original = RuntimeState(paused=False, black_screen=False, last_wallpaper="sentinel.png")
+    save_state(original)
+
+    with pytest.raises(service.SwitchCancelled, match="cancelled"):
+        black_screen("P", cancelled=lambda: True)
+
+    assert load_state().to_dict() == original.to_dict()
+    assert not (tmp_path / "cache" / "P-black.png").exists()
 
 
 def test_solid_black_applies_before_generating_fallback(monkeypatch, tmp_path: Path):
@@ -136,6 +150,86 @@ def test_live_next_uses_alternating_prebuilt_files(monkeypatch, tmp_path: Path):
     assert second_state.wallpaper_slot == 0
     assert preview.wallpaper.name == "P-dry-run.png"
     assert load_state().wallpaper_slot == second_state.wallpaper_slot
+
+
+def test_live_next_uses_configured_working_directory(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    custom = tmp_path / "external" / "MBS Working Files"
+    custom.parent.mkdir()
+    custom.mkdir()
+    prepare_working_directory(custom, cfg)
+    cfg.working_directory = str(custom)
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(3))
+
+    assert result.wallpaper.parent == custom.resolve()
+    assert result.wallpaper.exists()
+    assert not (tmp_path / "cache" / result.wallpaper.name).exists()
+    assert (custom / "library-index.sqlite3").is_file()
+
+
+def test_first_indexed_rotation_clears_all_legacy_path_pools(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    legacy_paths = [f"/legacy/library/image-{index:05d}.jpg" for index in range(5000)]
+    save_state(
+        RuntimeState(
+            remaining={
+                "profile:P:shared": list(legacy_paths),
+                "profile:Other:postcard": list(legacy_paths),
+            }
+        )
+    )
+
+    switch_once("P", dry_run=False, rng=random.Random(3))
+
+    assert load_state().remaining == {}
+    assert (tmp_path / "config" / "state.json").stat().st_size < 2_000
+
+
+def test_missing_custom_working_directory_fails_closed(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.working_directory = str(tmp_path / "unmounted" / "MBS")
+    save_config(cfg)
+
+    with pytest.raises(WorkingDirectoryError, match="does not exist"):
+        switch_once("P", dry_run=False, rng=random.Random(3))
+
+    assert list((tmp_path / "cache").glob("P-*.png")) == []
+
+
+def test_cancelled_rotation_does_not_apply_or_commit_state(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "span"
+    save_config(cfg)
+    before = load_state().to_dict()
+    cancelled = False
+
+    def compose_then_cancel(_monitors, _image, output_path, *, bar_color="black"):
+        nonlocal cancelled
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"completed inactive wallpaper")
+        cancelled = True
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_span", compose_then_cancel)
+    monkeypatch.setattr(
+        service.DesktopSetter,
+        "apply",
+        lambda *_args, **_kwargs: pytest.fail("cancelled wallpaper was applied"),
+    )
+
+    with pytest.raises(service.SwitchCancelled, match="cancelled"):
+        switch_once("P", dry_run=False, cancelled=lambda: cancelled)
+
+    assert load_state().to_dict() == before
+    profile = cfg.get_profile("P")
+    index = service.LibraryIndex(tmp_path / "cache")
+    snapshot = index.ensure(profile.shared_folders, recursive=profile.recursive)
+    assert index.remaining_count(snapshot.signature, "profile:P:span") == 0
 
 
 def test_save_current_wallpaper_copies_composite_without_changing_state(monkeypatch, tmp_path: Path):
@@ -427,7 +521,7 @@ def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path
     assert captured["monitors"] == ["A", "B"]
     assert captured["image_by_monitor"] == {"A": result.images[0], "B": result.images[0]}
     assert captured["bar_color"] == "black"
-    assert "profile:P:same" in state.remaining
+    assert "profile:P:same" not in state.remaining
 
 
 def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
@@ -456,7 +550,7 @@ def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
     assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
-    assert "profile:P:montage" in state.remaining
+    assert "profile:P:montage" not in state.remaining
 
 
 def test_postcard_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
@@ -475,6 +569,14 @@ def test_postcard_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path)
         return Path(output_path)
 
     monkeypatch.setattr(service, "compose_postcard", fake_compose_postcard)
+    draw_counts = []
+    original_draw = service.LibrarySelection.draw
+
+    def observed_draw(selection, signature, bucket, count, *, rng=None):
+        draw_counts.append((bucket, count))
+        return original_draw(selection, signature, bucket, count, rng=rng)
+
+    monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
     result = switch_once("P", dry_run=False, rng=random.Random(7))
     state = load_state()
@@ -485,7 +587,8 @@ def test_postcard_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path)
     assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
     assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
-    assert "profile:P:postcard" in state.remaining
+    assert "profile:P:postcard" not in state.remaining
+    assert draw_counts == [("profile:P:postcard", 8)]
 
 
 def test_postcard_dry_run_skips_malformed_images_without_changing_state(monkeypatch, tmp_path: Path):
@@ -516,6 +619,7 @@ def test_postcard_dry_run_skips_malformed_images_without_changing_state(monkeypa
     assert str(broken.resolve()) not in result.images
     assert result.wallpaper.exists()
     assert load_state().to_dict() == before
+    assert not (tmp_path / "cache" / "library-index.sqlite3").exists()
 
 
 def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeypatch, tmp_path: Path):

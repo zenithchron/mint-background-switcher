@@ -32,9 +32,15 @@ def state_file() -> Path:
     return xdg_config_dir() / "state.json"
 
 
-def generated_wallpaper_path(profile_name: str, suffix: str = "active") -> Path:
+def generated_wallpaper_path(
+    profile_name: str,
+    suffix: str = "active",
+    *,
+    base_dir: str | Path | None = None,
+) -> Path:
     safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in profile_name).strip("._") or "profile"
-    return xdg_cache_dir() / f"{safe}-{suffix}.png"
+    directory = Path(base_dir).expanduser() if base_dir is not None else xdg_cache_dir()
+    return directory / f"{safe}-{suffix}.png"
 
 
 def startup_log_file() -> Path:

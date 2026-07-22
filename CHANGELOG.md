@@ -4,6 +4,30 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.13] - 2026-07-22
+
+### Added
+
+- A persistent SQLite image-library index and database-backed no-repeat pools for responsive rotation with tens of thousands of local images.
+- **Working files** controls in Settings to browse for, explicitly create, validate, and activate a dedicated folder for generated wallpapers and the image-library index.
+- Verified, cancellable working-folder migration that serializes with rotations, revalidates concurrent profile changes, stages managed files, rejects collisions, updates the active wallpaper path, switches configuration only after successful copy, and retains the previous files for recovery.
+- Ownership markers and actionable validation for foreign/nonempty folders, source-folder overlap, nested working folders, symbolic-link hazards, unavailable volumes, permissions, and file collisions.
+
+### Changed
+
+- Bumped the package version to `0.1.13`.
+- Tray rotations and Settings **Apply Next Now** / **Black Screen** actions now run in non-daemon background workers; repeated tray **Next** requests coalesce and Settings opens in its own process instead of sharing GTK's event loop.
+- Image discovery is cached for five minutes between refreshes, expensive scans are transactional and cancellable, no-repeat pools refill near-linearly once per cycle and use bounded draws between refills, and postcard/montage choices are drawn in one batch.
+- Pillow validation uses lightweight `verify()` before the single composition decode instead of loading selected postcard images twice.
+- Legacy path-heavy no-repeat lists are removed from `state.json`; profiles, runtime state, startup logs, updater installations, autostart entries, hotkeys, and source folders remain in their established locations.
+- Rescue now recognizes and backs up a marker-validated custom working folder without touching source-image folders.
+
+### Security
+
+- A configured custom working folder never silently falls back to the default cache when unavailable.
+- Working-folder migration copies only recognized generated PNGs and image-index files, verifies SHA-256 content before activation, never overwrites destination files, and never deletes the old files.
+- Source-image directories remain read-only inputs; MBS creates no persistent source thumbnails or resized source copies.
+
 ## [0.1.12] - 2026-07-21
 
 ### Added

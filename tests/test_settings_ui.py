@@ -1,3 +1,4 @@
+import gc
 import os
 import threading
 import time
@@ -7,6 +8,14 @@ import pytest
 
 from mint_background_switcher import settings_ui
 from mint_background_switcher.monitor import Monitor
+
+
+@pytest.fixture(autouse=True)
+def _collect_destroyed_tk_objects_on_main_thread():
+    """Keep repeated test-only Tk roots from being finalized by a worker thread."""
+
+    yield
+    gc.collect()
 
 
 class _Var:
@@ -37,6 +46,14 @@ class _Text:
 class _Combo:
     def configure(self, **_kwargs):
         pass
+
+
+def _pump_until(app, predicate, timeout=3):
+    deadline = time.monotonic() + timeout
+    while not predicate() and time.monotonic() < deadline:
+        app.update()
+        time.sleep(0.01)
+    assert predicate()
 
 
 def test_settings_window_geometry_prefers_roomy_desktop_size():
@@ -150,7 +167,8 @@ def test_settings_effect_menu_exposes_calendar_and_applies_selection(monkeypatch
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
-            lambda profile: applied_profiles.append(profile) or SimpleNamespace(wallpaper="/tmp/calendar-preview.png"),
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="/tmp/calendar-preview.png"),
         )
         monkeypatch.setattr(
             settings_ui.messagebox,
@@ -164,6 +182,7 @@ def test_settings_effect_menu_exposes_calendar_and_applies_selection(monkeypatch
         menu.invoke(labels.index("calendar"))
         assert app.effect_var.get() == "calendar"
         app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
         assert saved_effects == ["calendar"]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
@@ -194,7 +213,8 @@ def test_settings_mode_menu_exposes_montage_and_applies_selection(monkeypatch, t
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
-            lambda profile: applied_profiles.append(profile) or SimpleNamespace(wallpaper="/tmp/montage-preview.png"),
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="/tmp/montage-preview.png"),
         )
         monkeypatch.setattr(
             settings_ui.messagebox,
@@ -213,6 +233,7 @@ def test_settings_mode_menu_exposes_montage_and_applies_selection(monkeypatch, t
         menu.invoke(labels.index("montage"))
         assert app.mode_var.get() == "montage"
         app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["montage"]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
@@ -220,11 +241,110 @@ def test_settings_mode_menu_exposes_montage_and_applies_selection(monkeypatch, t
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
-            lambda _profile: (_ for _ in ()).throw(RuntimeError("preview failed")),
+            lambda _profile, **_kwargs: (_ for _ in ()).throw(RuntimeError("preview failed")),
         )
         app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["montage", "montage"]
         assert errors == [("Apply failed", "preview failed")]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_black_screen_worker_keeps_tk_responsive_and_reports_on_tk_thread(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    release = threading.Event()
+    try:
+        monkeypatch.setattr(app, "_save_current", lambda show_success=True: True)
+        started = threading.Event()
+        worker_threads = []
+        messages = []
+        errors = []
+        main_thread = threading.get_ident()
+
+        def delayed_black(_profile, *, cancelled):
+            worker_threads.append(threading.get_ident())
+            started.set()
+            while not release.wait(0.01):
+                if cancelled():
+                    raise settings_ui.SwitchCancelled("cancelled")
+            return SimpleNamespace(wallpaper="/tmp/black.png")
+
+        monkeypatch.setattr(settings_ui, "black_screen", delayed_black)
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append(
+                (title, message, threading.get_ident())
+            ),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        app._black_screen()
+        assert started.wait(2)
+        heartbeat = []
+        app.after(20, lambda: heartbeat.append(time.monotonic()))
+        _pump_until(app, lambda: bool(heartbeat), timeout=1)
+        assert app._apply_busy is True
+        assert len(worker_threads) == 1
+        assert worker_threads[0] != main_thread
+
+        release.set()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert errors == []
+        assert messages[-1][0] == "Black screen"
+        assert messages[-1][2] == main_thread
+        assert app._apply_worker is None
+    finally:
+        release.set()
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_black_screen_close_requests_cancellation_and_joins_worker(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        monkeypatch.setattr(app, "_save_current", lambda show_success=True: True)
+        started = threading.Event()
+        cancellation_seen = threading.Event()
+        errors = []
+
+        def cancellable_black(_profile, *, cancelled):
+            started.set()
+            while True:
+                if cancelled():
+                    cancellation_seen.set()
+                    raise settings_ui.SwitchCancelled("cancelled")
+                time.sleep(0.01)
+
+        monkeypatch.setattr(settings_ui, "black_screen", cancellable_black)
+        monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        app._black_screen()
+        assert started.wait(2)
+        app._request_close()
+        _pump_until(app, lambda: not app._apply_busy)
+
+        assert cancellation_seen.is_set()
+        assert errors == []
+        assert app._apply_worker is None
+        assert app.winfo_exists()
     finally:
         app.destroy()
 
@@ -252,7 +372,8 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
-            lambda profile: applied_profiles.append(profile) or SimpleNamespace(wallpaper="/tmp/postcard-preview.png"),
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="/tmp/postcard-preview.png"),
         )
         monkeypatch.setattr(
             settings_ui.messagebox,
@@ -271,6 +392,7 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         menu.invoke(labels.index("postcard"))
         assert app.mode_var.get() == "postcard"
         app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard"]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
@@ -278,9 +400,10 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
-            lambda _profile: (_ for _ in ()).throw(RuntimeError("postcard preview failed")),
+            lambda _profile, **_kwargs: (_ for _ in ()).throw(RuntimeError("postcard preview failed")),
         )
         app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard", "postcard"]
         assert errors == [("Apply failed", "postcard preview failed")]
     finally:
@@ -660,6 +783,228 @@ def test_blank_or_duplicate_profile_name_is_rejected(monkeypatch):
     assert settings_ui.SettingsApp._validated_profile_name(dummy, "  ") is None
     assert settings_ui.SettingsApp._validated_profile_name(dummy, "A") is None
     assert [title for title, _message in errors] == ["Invalid profile name", "Profile exists"]
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_exposes_working_folder_controls_at_1024x768(monkeypatch, tmp_path):
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(cache))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+
+        assert app.working_directory_var.get() == str(cache.absolute())
+        for widget in (
+            app.working_directory_entry,
+            app.working_browse_button,
+            app.working_create_button,
+            app.working_use_button,
+            app.working_cancel_button,
+            app.apply_button,
+            app.black_button,
+            app.export_button,
+            app.about_button,
+            app.close_button,
+        ):
+            assert widget.winfo_ismapped()
+            assert widget.winfo_width() > 1
+        assert "source images remain" in app.working_status_var.get().lower()
+        assert app.winfo_x() >= 0
+        assert app.winfo_y() >= 0
+        assert app.winfo_x() + app.winfo_width() <= app.winfo_screenwidth()
+        assert app.winfo_y() + app.winfo_height() <= app.winfo_screenheight()
+        assert app.winfo_reqwidth() <= app.winfo_width()
+        assert app.winfo_reqheight() <= app.winfo_height()
+        assert app.close_button.winfo_rooty() + app.close_button.winfo_height() <= app.winfo_rooty() + app.winfo_height()
+    finally:
+        app.destroy()
+
+
+def test_create_working_folder_explicitly_creates_one_child(monkeypatch, tmp_path):
+    parent = tmp_path / "external"
+    parent.mkdir()
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "config_data", settings_ui.Config())
+    setattr(dummy, "working_directory_var", _Var(""))
+    setattr(dummy, "working_status_var", _Var(""))
+    setattr(dummy, "_ask_folder", lambda **_kwargs: str(parent))
+    monkeypatch.setattr(settings_ui.simpledialog, "askstring", lambda *_args, **_kwargs: "MBS Working Files")
+
+    settings_ui.SettingsApp._create_working_directory(dummy)
+
+    created = parent / "MBS Working Files"
+    assert created.is_dir()
+    assert (created / settings_ui.MARKER_FILENAME).is_file()
+    assert dummy.working_directory_var.get() == str(created.resolve())
+    assert "created" in dummy.working_status_var.get().lower()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_typed_missing_working_folder_requires_confirmation_and_existing_parent(monkeypatch, tmp_path):
+    source = tmp_path / "cache"
+    parent = tmp_path / "external"
+    parent.mkdir()
+    target = parent / "Typed MBS Working Files"
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(source))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    confirmations = []
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: confirmations.append((title, message, kwargs)) or True,
+    )
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+    try:
+        app.working_directory_var.set(str(target))
+        app._use_working_directory()
+        _pump_until(app, lambda: not app._migration_busy)
+
+        assert target.is_dir()
+        assert (target / settings_ui.MARKER_FILENAME).is_file()
+        assert settings_ui.load_config().working_directory == str(target.resolve())
+        assert len(confirmations) == 1
+        assert "will be created" in confirmations[0][1]
+    finally:
+        app.destroy()
+
+
+def test_typed_working_folder_with_missing_parent_is_rejected_without_confirmation(monkeypatch, tmp_path):
+    target = tmp_path / "missing-parent" / "MBS"
+    errors = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "config_data", settings_ui.Config())
+    setattr(dummy, "working_directory_var", _Var(str(target)))
+    setattr(dummy, "working_status_var", _Var(""))
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("missing parent must not prompt")),
+    )
+
+    settings_ui.SettingsApp._use_working_directory(dummy)
+
+    assert not target.exists()
+    assert errors and errors[0][0] == "Working folder parent missing"
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_working_folder_migration_runs_off_tk_thread_and_retains_source(monkeypatch, tmp_path):
+    source = tmp_path / "cache"
+    source.mkdir()
+    active = source / "Default-active-0.png"
+    active.write_bytes(b"generated wallpaper")
+    target = tmp_path / "external" / "MBS"
+    target.parent.mkdir()
+    target.mkdir()
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(source))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    gate = threading.Event()
+    real_migrate = settings_ui.migrate_working_directory
+    messages = []
+
+    def delayed_migration(*args, **kwargs):
+        assert gate.wait(timeout=2)
+        return real_migrate(*args, **kwargs)
+
+    monkeypatch.setattr(settings_ui, "migrate_working_directory", delayed_migration)
+    monkeypatch.setattr(settings_ui.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.working_directory_var.set(str(target))
+        app._use_working_directory()
+        app.update()
+
+        assert app._migration_busy is True
+        assert app._migration_worker is not None
+        assert app._migration_worker.daemon is False
+        assert app._migration_worker.is_alive()
+        assert app.update_button.winfo_exists()
+
+        gate.set()
+        _pump_until(app, lambda: not app._migration_busy)
+
+        assert settings_ui.load_config().working_directory == str(target.resolve())
+        assert active.read_bytes() == b"generated wallpaper"
+        assert (target / active.name).read_bytes() == b"generated wallpaper"
+        assert messages and messages[-1][0] == "Working folder changed"
+        assert "retained" in messages[-1][1].lower()
+    finally:
+        gate.set()
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_apply_next_runs_off_tk_thread(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    gate = threading.Event()
+    infos = []
+
+    def delayed_apply(_profile, **kwargs):
+        kwargs["progress"](500, "/photos/500.jpg")
+        assert gate.wait(timeout=2)
+        return SimpleNamespace(wallpaper="/tmp/background.png")
+
+    monkeypatch.setattr(settings_ui, "switch_once", delayed_apply)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: infos.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app._apply_next()
+        app.update()
+        assert app._apply_busy is True
+        assert app._apply_worker is not None
+        assert app._apply_worker.daemon is False
+        assert app._apply_worker.is_alive()
+        assert app.apply_button.cget("text") == "Applying..."
+        for button in (
+            app.apply_button,
+            app.black_button,
+            app.export_button,
+            app.profile_save_button,
+            app.working_use_button,
+            app.close_button,
+        ):
+            assert "disabled" in button.state()
+
+        _pump_until(app, lambda: app.apply_button.cget("text") == "Scanning... 500")
+
+        app._request_close()
+        assert app._apply_cancel.is_set()
+        assert app.winfo_exists()
+        assert infos and infos[-1][0] == "Operation in progress"
+
+        gate.set()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert app.apply_button.cget("text") == "Apply Next Now"
+        assert "disabled" not in app.black_button.state()
+    finally:
+        gate.set()
+        app.destroy()
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")

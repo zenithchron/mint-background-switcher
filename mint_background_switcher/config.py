@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .paths import config_file, xdg_config_dir
-from .storage import locked_read_json, locked_write_json
+from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, lock_path_for, read_json_unlocked
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 VALID_MODES = {"shared", "same", "montage", "postcard", "per-monitor", "span"}
 EFFECT_CHOICES = ("none", "grayscale", "sepia", "blur", "vignette", "calendar")
 VALID_EFFECTS = set(EFFECT_CHOICES)
@@ -99,6 +100,8 @@ class Profile:
 class Config:
     active_profile: str = "Default"
     profiles: dict[str, Profile] = field(default_factory=dict)
+    working_directory: str | None = None
+    _loaded_working_directory: str | None = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def default(cls, folder: str | None = None) -> "Config":
@@ -123,12 +126,21 @@ class Config:
         active = str(data.get("active_profile") or next(iter(profiles)))
         if active not in profiles:
             active = next(iter(profiles))
-        return cls(active_profile=active, profiles=profiles)
+        working_directory_raw = data.get("working_directory")
+        working_directory = (
+            working_directory_raw.strip()
+            if isinstance(working_directory_raw, str) and working_directory_raw.strip()
+            else None
+        )
+        config = cls(active_profile=active, profiles=profiles, working_directory=working_directory)
+        config._loaded_working_directory = working_directory
+        return config
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": CONFIG_VERSION,
             "active_profile": self.active_profile,
+            "working_directory": self.working_directory,
             "profiles": {name: profile.to_dict() for name, profile in self.profiles.items()},
         }
 
@@ -155,8 +167,48 @@ def save_config(config: Config, path: Path | None = None) -> Path:
     path = path or config_file()
     xdg_config_dir().mkdir(parents=True, exist_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True)
-    locked_write_json(path, config.to_dict())
+    with locked_file(lock_path_for(path)):
+        current: Config | None = None
+        if path.exists():
+            try:
+                current = Config.from_dict(read_json_unlocked(path))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                current = None
+        if current is not None and config.working_directory == config._loaded_working_directory:
+            # Profile editors can remain open while a working-folder migration runs.
+            # Preserve a newer committed folder unless this caller deliberately changed it.
+            config.working_directory = current.working_directory
+        atomic_write_json_unlocked(path, config.to_dict())
+        config._loaded_working_directory = config.working_directory
     return path
+
+
+_UNSET = object()
+
+
+def replace_working_directory(
+    working_directory: str | None,
+    *,
+    expected: str | None | object = _UNSET,
+    path: Path | None = None,
+    validate: Callable[[Config], None] | None = None,
+) -> tuple[Config, str | None]:
+    """Atomically replace only the working-folder setting on the freshest config."""
+
+    path = path or config_file()
+    xdg_config_dir().mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with locked_file(lock_path_for(path)):
+        current = Config.from_dict(read_json_unlocked(path)) if path.exists() else Config.default()
+        previous = current.working_directory
+        if expected is not _UNSET and previous != expected:
+            raise RuntimeError("working directory changed concurrently; migration was not activated")
+        if validate is not None:
+            validate(current)
+        current.working_directory = working_directory
+        atomic_write_json_unlocked(path, current.to_dict())
+        current._loaded_working_directory = working_directory
+    return current, previous
 
 
 def ensure_config(folder: str | None = None) -> Path:

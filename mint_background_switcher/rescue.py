@@ -16,7 +16,9 @@ from datetime import datetime
 from pathlib import Path
 
 from .autostart import disable_autostart
+from .config import load_config
 from .paths import xdg_cache_dir, xdg_config_dir
+from .working_storage import configured_working_directory, validate_working_directory
 
 
 @dataclass(slots=True)
@@ -157,6 +159,19 @@ def run_rescue(*, full: bool = False, reboot: bool = False) -> RescueResult:
     _kill_matching_processes("mint-background-switcher", actions)
     _kill_matching_processes("mint_background_switcher", actions)
 
+    custom_working: Path | None = None
+    try:
+        config = load_config()
+        if config.working_directory:
+            custom_working = validate_working_directory(
+                configured_working_directory(config),
+                config,
+                require_marker=True,
+            )
+    except Exception as exc:
+        actions.append(f"could not validate custom working folder for rescue: {exc}")
+    if custom_working is not None:
+        _move_to_backup(custom_working, backup_dir, "mint-background-switcher.working", actions)
     _move_to_backup(xdg_config_dir(), backup_dir, "mint-background-switcher.config", actions)
     _move_to_backup(xdg_cache_dir(), backup_dir, "mint-background-switcher.cache", actions)
 

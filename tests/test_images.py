@@ -3,6 +3,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from mint_background_switcher import images as images_module
 from mint_background_switcher.images import (
     CALENDAR_HIGHLIGHT_COLOR,
     POSTCARD_BACKGROUND_COLOR,
@@ -14,6 +15,7 @@ from mint_background_switcher.images import (
     compose_montage,
     compose_per_monitor,
     compose_postcard,
+    compose_span,
     fit_with_black_bars,
     is_usable_image,
     scan_images,
@@ -65,6 +67,28 @@ def test_is_usable_image_rejects_files_pillow_cannot_decode(tmp_path: Path):
 
     assert is_usable_image(valid) is True
     assert is_usable_image(broken) is False
+
+
+def test_is_usable_image_verifies_container_without_loading_pixels(monkeypatch):
+    calls = []
+
+    class ProbeImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def verify(self):
+            calls.append("verify")
+
+        def load(self):
+            raise AssertionError("validation decoded pixels before composition")
+
+    monkeypatch.setattr(images_module.Image, "open", lambda _path: ProbeImage())
+
+    assert is_usable_image("candidate.jpg") is True
+    assert calls == ["verify"]
 
 
 def test_apply_grayscale_effect_removes_color_and_preserves_rgb(tmp_path: Path):
@@ -188,6 +212,27 @@ def test_compose_montage_places_four_fitted_images_on_each_monitor(tmp_path: Pat
         assert montage.getpixel((150, 30)) == colors[1]
         assert montage.getpixel((50, 90)) == colors[2]
         assert montage.getpixel((150, 90)) == colors[3]
+
+
+def test_generated_wallpaper_replaces_symlink_without_touching_its_target(tmp_path: Path):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (30, 20), (220, 40, 10)).save(source)
+    unrelated = tmp_path / "unrelated.txt"
+    unrelated.write_bytes(b"must remain untouched")
+    working = tmp_path / "working"
+    working.mkdir()
+    output = working / "P-active-1.png"
+    output.symlink_to(unrelated)
+
+    result = compose_span([Monitor("A", 60, 40, 0, 0)], str(source), output)
+
+    assert result == output
+    assert not output.is_symlink()
+    assert output.is_file()
+    assert unrelated.read_bytes() == b"must remain untouched"
+    with Image.open(output) as generated:
+        assert generated.size == (60, 40)
+    assert list(working.glob(f".{output.name}.*.tmp")) == []
 
 
 def test_compose_postcard_frames_four_uncropped_images_on_each_monitor(tmp_path: Path):

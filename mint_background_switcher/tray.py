@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Callable
+import subprocess
 import sys
+import threading
+import time
 
 from .autostart import disable_autostart, enable_autostart
 from .config import load_config, save_config
-from .service import black_screen, pause, resume, switch_once
+from .hotkeys import source_wrapper_argv
+from .service import SwitchCancelled, black_screen, pause, switch_once
 from .state import load_state
 
 TRAY_ICON_CANDIDATES = (
@@ -50,11 +56,154 @@ def _load_gtk():
         ) from exc
 
 
+class RotationRunner:
+    """Run one live rotation off the GTK thread and coalesce duplicate requests."""
+
+    def __init__(
+        self,
+        idle_add: Callable[..., object],
+        *,
+        operation: Callable[..., object] = switch_once,
+        error_handler: Callable[[BaseException], object] | None = None,
+    ) -> None:
+        self._idle_add = idle_add
+        self._operation = operation
+        self._error_handler = error_handler or (lambda _error: None)
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._last_thread: threading.Thread | None = None
+        self._cancel_event: threading.Event | None = None
+        self._pending: tuple[str | None, bool] | None = None
+        self._actions: deque[Callable[[], object]] = deque()
+
+    @property
+    def busy(self) -> bool:
+        with self._lock:
+            return self._thread is not None
+
+    def request(self, profile_name: str | None = None, *, clear_black: bool = True) -> bool:
+        with self._lock:
+            if self._thread is not None:
+                self._pending = (profile_name, clear_black)
+                return False
+            self._start_locked(profile_name, clear_black)
+            return True
+
+    def _start_locked(self, profile_name: str | None, clear_black: bool) -> None:
+        cancel_event = threading.Event()
+        thread = threading.Thread(
+            target=self._run,
+            args=(profile_name, clear_black, cancel_event, None),
+            name="mbs-wallpaper-rotation",
+            daemon=False,
+        )
+        self._cancel_event = cancel_event
+        self._thread = thread
+        self._last_thread = thread
+        thread.start()
+
+    def submit(self, action: Callable[[], object]) -> bool:
+        """Serialize a non-rotation state action with current and pending rotations."""
+
+        with self._lock:
+            if self._thread is not None:
+                self._actions.append(action)
+                return False
+            cancel_event = threading.Event()
+            thread = threading.Thread(
+                target=self._run,
+                args=(None, True, cancel_event, action),
+                name="mbs-tray-action",
+                daemon=False,
+            )
+            self._cancel_event = cancel_event
+            self._thread = thread
+            self._last_thread = thread
+            thread.start()
+            return True
+
+    def _run(
+        self,
+        profile_name: str | None,
+        clear_black: bool,
+        cancel_event: threading.Event,
+        action: Callable[[], object] | None,
+    ) -> None:
+        current = (profile_name, clear_black)
+        current_action = action
+        while True:
+            try:
+                if current_action is None:
+                    self._operation(
+                        current[0],
+                        clear_black=current[1],
+                        cancelled=cancel_event.is_set,
+                    )
+                else:
+                    current_action()
+            except BaseException as exc:
+                expected_cancel = current_action is None and (
+                    cancel_event.is_set() or isinstance(exc, SwitchCancelled)
+                )
+                if not expected_cancel:
+                    self._idle_add(self._deliver_error, exc)
+
+            with self._lock:
+                if self._actions:
+                    current_action = self._actions.popleft()
+                    cancel_event = threading.Event()
+                    self._cancel_event = cancel_event
+                    continue
+                pending = self._pending
+                self._pending = None
+                if pending is None:
+                    self._cancel_event = None
+                    self._thread = None
+                    break
+                current = pending
+                current_action = None
+                cancel_event = threading.Event()
+                self._cancel_event = cancel_event
+        self._idle_add(self._completed)
+
+    def _deliver_error(self, error: BaseException) -> bool:
+        self._error_handler(error)
+        return False
+
+    def _completed(self) -> bool:
+        return False
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._pending = None
+            if self._cancel_event is not None:
+                self._cancel_event.set()
+
+    def wait(self, *, timeout: float | None = None) -> None:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            with self._lock:
+                thread = self._thread or self._last_thread
+            if thread is None or thread is threading.current_thread():
+                return
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            thread.join(remaining)
+            if not thread.is_alive():
+                with self._lock:
+                    if self._last_thread is thread:
+                        self._last_thread = None
+                return
+            if deadline is not None and time.monotonic() >= deadline:
+                return
+
+
 class TrayApp:
     def __init__(self) -> None:
         self.Gtk, self.GLib, self.AppIndicator = _load_gtk()
         icon_name = choose_tray_icon(self.Gtk)
         self.timer_id: int | None = None
+        self.rotation_runner = RotationRunner(self.GLib.idle_add, error_handler=self._report_error)
+        self._settings_process: subprocess.Popen | None = None
         self.indicator = self.AppIndicator.Indicator.new(
             "mint-background-switcher",
             icon_name,
@@ -126,46 +275,64 @@ class TrayApp:
     def _timer_tick(self):
         state = load_state()
         if not state.paused and not state.black_screen:
-            try:
-                switch_once()
-            except Exception as exc:
-                print(f"Mint Background Switcher tray error: {exc}", file=sys.stderr, flush=True)
+            self.rotation_runner.request()
         self._schedule_timer()
         return False
 
     def _next(self, *_):
-        switch_once()
+        self.rotation_runner.request()
 
     def _pause(self, *_):
-        pause()
+        self.rotation_runner.cancel()
+        self._run_action(pause)
 
     def _resume(self, *_):
-        resume()
+        self.rotation_runner.request(clear_black=True)
 
     def _black(self, *_):
-        black_screen()
+        self.rotation_runner.cancel()
+        self._run_action(black_screen)
 
     def _profile(self, _item, profile_name: str):
         cfg = load_config()
         cfg.active_profile = profile_name
         save_config(cfg)
-        resume(profile_name)
+        self.rotation_runner.request(profile_name, clear_black=True)
         self._schedule_timer()
 
     def _settings(self, *_):
-        try:
-            from .settings_ui import main as settings_main
-        except ImportError as exc:
-            print("Settings editor requires Tkinter. On Mint/Ubuntu install python3-tk.", file=sys.stderr)
+        if self._settings_process is not None and self._settings_process.poll() is None:
             return
+        try:
+            self._settings_process = subprocess.Popen(
+                source_wrapper_argv() + ["settings"],
+                close_fds=True,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            self._report_error(exc)
+            return
+        self.GLib.timeout_add_seconds(1, self._poll_settings)
 
-        settings_main()
+    def _poll_settings(self) -> bool:
+        if self._settings_process is not None and self._settings_process.poll() is None:
+            return True
+        self._settings_process = None
         self._build_menu()
         self._schedule_timer()
+        return False
+
+    def _report_error(self, error: BaseException) -> bool:
+        print(f"Mint Background Switcher tray error: {error}", file=sys.stderr, flush=True)
+        return False
+
+    def _run_action(self, action: Callable[[], object]) -> None:
+        self.rotation_runner.submit(action)
 
     def _quit(self, *_):
         if self.timer_id:
             self.GLib.source_remove(self.timer_id)
+        self.rotation_runner.cancel()
         self.Gtk.main_quit()
 
     def run(self) -> None:

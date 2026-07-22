@@ -1,17 +1,54 @@
 import json
 
-from mint_background_switcher.config import Config, Profile
+from mint_background_switcher.config import Config, Profile, load_config, replace_working_directory, save_config
 
 
 def test_config_roundtrip():
-    cfg = Config(active_profile="P", profiles={"P": Profile(name="P", mode="per-monitor", shared_folders=["/pics"], monitor_folders={"HDMI-1": ["/a", "/b"]})})
+    cfg = Config(
+        active_profile="P",
+        profiles={
+            "P": Profile(
+                name="P",
+                mode="per-monitor",
+                shared_folders=["/pics"],
+                monitor_folders={"HDMI-1": ["/a", "/b"]},
+            )
+        },
+        working_directory="/working",
+    )
     data = cfg.to_dict()
     loaded = Config.from_dict(json.loads(json.dumps(data)))
     profile = loaded.get_profile()
     assert loaded.active_profile == "P"
+    assert loaded.working_directory == "/working"
     assert profile.mode == "per-monitor"
     assert profile.folders_for_monitor("HDMI-1") == ["/a", "/b"]
     assert profile.folders_for_monitor("missing") == ["/pics"]
+
+
+def test_stale_profile_save_preserves_newer_working_directory(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    initial = Config(active_profile="P", profiles={"P": Profile(name="P")})
+    save_config(initial)
+    stale_editor = load_config()
+    replace_working_directory("/new/working", expected=None)
+    stale_editor.profiles["P"].mode = "postcard"
+
+    save_config(stale_editor)
+
+    saved = load_config()
+    assert saved.working_directory == "/new/working"
+    assert saved.profiles["P"].mode == "postcard"
+
+
+def test_missing_or_invalid_working_directory_uses_default():
+    missing = Config.from_dict({"active_profile": "P", "profiles": {"P": {}}})
+    invalid = Config.from_dict(
+        {"active_profile": "P", "working_directory": ["not", "a", "path"], "profiles": {"P": {}}}
+    )
+
+    assert missing.working_directory is None
+    assert invalid.working_directory is None
 
 
 def test_same_mode_is_valid():

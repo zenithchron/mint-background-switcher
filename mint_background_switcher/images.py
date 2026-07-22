@@ -6,6 +6,7 @@ import calendar
 from datetime import date
 import os
 from pathlib import Path
+import tempfile
 from typing import Iterable
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
@@ -33,6 +34,32 @@ _MONTH_NAMES = (
     "December",
 )
 _WEEKDAY_LABELS = ("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+
+
+def _save_png_atomic(image: Image.Image, output_path: str | Path) -> Path:
+    """Save a PNG beside its destination, then replace without following symlinks."""
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.",
+        suffix=".tmp",
+        dir=str(output.parent),
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as file_handle:
+            image.save(file_handle, format="PNG")
+            file_handle.flush()
+            os.fsync(file_handle.fileno())
+        # Replacing a symlink replaces the link itself, never the linked target.
+        os.replace(temporary, output)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return output
 
 
 def scan_images(folders: Iterable[str], recursive: bool = True) -> list[str]:
@@ -86,12 +113,11 @@ def open_image(path: str | Path) -> Image.Image:
 
 
 def is_usable_image(path: str | Path) -> bool:
-    """Return whether Pillow can fully decode and orient an image path."""
+    """Return whether Pillow recognizes an image without decoding all pixel data."""
 
     try:
         with Image.open(path) as image:
-            image.load()
-            ImageOps.exif_transpose(image)
+            image.verify()
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
         return False
     return True
@@ -275,7 +301,7 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
             processed = grayscale.convert("RGB")
         else:
             raise ValueError(f"Unsupported wallpaper effect: {effect}")
-        processed.save(path, format="PNG")
+        _save_png_atomic(processed, path)
     return path
 
 
@@ -296,10 +322,7 @@ def compose_per_monitor(
             continue
         panel = fit_with_black_bars(open_image(image_path), (monitor.width, monitor.height), bar_color)
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    combined.save(output, format="PNG")
-    return output
+    return _save_png_atomic(combined, output_path)
 
 
 def compose_montage(
@@ -336,10 +359,7 @@ def compose_montage(
             tile = fit_with_black_bars(open_image(image_path), (cell_width, cell_height), bar_color)
             panel.paste(tile, (left, top))
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    combined.save(output, format="PNG")
-    return output
+    return _save_png_atomic(combined, output_path)
 
 
 def _postcard_tile(
@@ -410,10 +430,7 @@ def compose_postcard(
             y = top + (cell_height - card.height) // 2
             panel.paste(card, (x, y), card)
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    combined.save(output, format="PNG")
-    return output
+    return _save_png_atomic(combined, output_path)
 
 
 def compose_span(
@@ -425,18 +442,12 @@ def compose_span(
 ) -> Path:
     width, height, _, _ = virtual_canvas(monitors)
     fitted = fit_with_black_bars(open_image(image_path), (width, height), bar_color)
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    fitted.save(output, format="PNG")
-    return output
+    return _save_png_atomic(fitted, output_path)
 
 
 def compose_black(monitors: list[Monitor], output_path: str | Path) -> Path:
     width, height, _, _ = virtual_canvas(monitors)
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (width, height), (0, 0, 0)).save(output, format="PNG")
-    return output
+    return _save_png_atomic(Image.new("RGB", (width, height), (0, 0, 0)), output_path)
 
 
 def ensure_cache_dir() -> Path:

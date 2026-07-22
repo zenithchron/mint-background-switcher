@@ -12,7 +12,16 @@ from typing import Any, Callable
 from . import APP_NAME, __version__, updater
 from .config import EFFECT_CHOICES, Config, Profile, load_config, save_config
 from .monitor import Monitor, detect_monitors
-from .service import black_screen, save_current_wallpaper, switch_once
+from .service import SwitchCancelled, black_screen, save_current_wallpaper, switch_once
+from .working_storage import (
+    MARKER_FILENAME,
+    WorkingDirectoryMigrationCancelled,
+    configured_working_directory,
+    create_working_directory,
+    migrate_working_directory,
+)
+
+__all__ = ["MARKER_FILENAME", "SettingsApp"]
 
 
 SETTINGS_WINDOW_TARGET_WIDTH = 1120
@@ -104,18 +113,31 @@ class SettingsApp(tk.Tk):
         self.bar_color_var = tk.StringVar()
         self.monitor_folder_var = tk.StringVar()
         self.update_status_var = tk.StringVar()
+        working_directory = configured_working_directory(self.config_data)
+        self.working_directory_var = tk.StringVar(value=str(working_directory))
+        self.working_status_var = tk.StringVar(
+            value=f"Active: {working_directory} — source images remain in their original folders."
+        )
         self.monitor_folders_data: dict[str, list[str]] = {}
         self._update_busy = False
         self._update_worker: threading.Thread | None = None
         self._update_results: queue.Queue[
             tuple[Callable[[Any], None] | None, Any, str, Exception | None]
         ] = queue.Queue()
+        self._apply_busy = False
+        self._apply_worker: threading.Thread | None = None
+        self._apply_cancel = threading.Event()
+        self._migration_busy = False
+        self._migration_worker: threading.Thread | None = None
+        self._migration_cancel = threading.Event()
+        self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._load_profile(self.profile_var.get())
         self._set_initial_window_geometry()
         self.after(100, self._poll_update_results)
+        self.after(100, self._poll_operation_results)
 
     def _set_initial_window_geometry(self) -> None:
         self.update_idletasks()
@@ -146,10 +168,14 @@ class SettingsApp(tk.Tk):
         self.profile_combo = ttk.Combobox(top, textvariable=self.profile_var, values=sorted(self.config_data.profiles), state="readonly")
         self.profile_combo.pack(side=tk.LEFT, padx=5)
         self.profile_combo.bind("<<ComboboxSelected>>", lambda _e: self._load_profile(self.profile_var.get()))
-        ttk.Button(top, text="New", command=self._new_profile).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Rename", command=self._rename_profile).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Delete", command=self._delete_profile).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Save", command=self._save_current).pack(side=tk.RIGHT, padx=2)
+        self.profile_new_button = ttk.Button(top, text="New", command=self._new_profile)
+        self.profile_new_button.pack(side=tk.LEFT, padx=2)
+        self.profile_rename_button = ttk.Button(top, text="Rename", command=self._rename_profile)
+        self.profile_rename_button.pack(side=tk.LEFT, padx=2)
+        self.profile_delete_button = ttk.Button(top, text="Delete", command=self._delete_profile)
+        self.profile_delete_button.pack(side=tk.LEFT, padx=2)
+        self.profile_save_button = ttk.Button(top, text="Save", command=self._save_current)
+        self.profile_save_button.pack(side=tk.RIGHT, padx=2)
 
         form = ttk.LabelFrame(root, text="Profile settings", padding=10)
         form.pack(fill=tk.X, pady=8)
@@ -183,7 +209,7 @@ class SettingsApp(tk.Tk):
         folders.pack(fill=tk.BOTH, expand=True, pady=8)
 
         shared_frame = ttk.LabelFrame(folders, text="Shared folders / span folders", padding=8)
-        self.shared_text = tk.Text(shared_frame, height=12, width=40)
+        self.shared_text = tk.Text(shared_frame, height=6, width=40)
         self.shared_text.pack(fill=tk.BOTH, expand=True)
         shared_buttons = ttk.Frame(shared_frame)
         shared_buttons.pack(fill=tk.X, pady=4)
@@ -202,10 +228,11 @@ class SettingsApp(tk.Tk):
         ttk.Label(
             monitor_frame,
             text=(
-                "Click Add per-monitor folder, choose a folder, then pick the screen it should appear on.\n"
+                "Add a per-monitor folder, then choose the screen it should use.\n"
                 "Current screens: " + (current_monitors or "none detected")
             ),
             justify=tk.LEFT,
+            wraplength=520,
         ).pack(anchor="w")
         ttk.Button(monitor_frame, text="Add per-monitor folder...", command=self._add_monitor_folder_from_root).pack(
             anchor="w", pady=(4, 2)
@@ -214,9 +241,32 @@ class SettingsApp(tk.Tk):
             anchor="w", pady=(0, 2)
         )
         ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(6, 0))
-        self.monitor_text = tk.Text(monitor_frame, height=12, width=48)
+        self.monitor_text = tk.Text(monitor_frame, height=6, width=48)
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
         folders.add(monitor_frame, weight=1)
+
+        working = ttk.LabelFrame(root, text="Working files", padding=(8, 5))
+        working.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(working, text="Generated wallpapers and library index:").grid(row=0, column=0, sticky="w")
+        self.working_directory_entry = ttk.Entry(working, textvariable=self.working_directory_var, width=19)
+        self.working_directory_entry.grid(row=0, column=1, sticky="ew", padx=6)
+        self.working_browse_button = ttk.Button(working, text="Browse...", command=self._browse_working_directory)
+        self.working_browse_button.grid(row=0, column=2, padx=2)
+        self.working_create_button = ttk.Button(working, text="Create Folder...", command=self._create_working_directory)
+        self.working_create_button.grid(row=0, column=3, padx=2)
+        self.working_use_button = ttk.Button(working, text="Use Folder...", command=self._use_working_directory)
+        self.working_use_button.grid(row=0, column=4, padx=2)
+        self.working_cancel_button = ttk.Button(working, text="Cancel Move", command=self._cancel_working_migration)
+        self.working_cancel_button.grid(row=0, column=5, padx=(2, 0))
+        self.working_cancel_button.state(["disabled"])
+        ttk.Label(working, textvariable=self.working_status_var, anchor="w").grid(
+            row=1,
+            column=0,
+            columnspan=6,
+            sticky="ew",
+            pady=(4, 0),
+        )
+        working.columnconfigure(1, weight=1)
 
         maintenance = ttk.Frame(root)
         maintenance.pack(fill=tk.X, pady=(0, 4))
@@ -229,14 +279,16 @@ class SettingsApp(tk.Tk):
 
         bottom = ttk.Frame(root)
         bottom.pack(fill=tk.X)
-        ttk.Button(bottom, text="Apply Next Now", command=self._apply_next).pack(side=tk.LEFT, padx=3)
-        ttk.Button(bottom, text="Black Screen", command=self._black_screen).pack(side=tk.LEFT, padx=3)
-        ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper).pack(
-            side=tk.LEFT, padx=3
-        )
+        self.apply_button = ttk.Button(bottom, text="Apply Next Now", command=self._apply_next)
+        self.apply_button.pack(side=tk.LEFT, padx=3)
+        self.black_button = ttk.Button(bottom, text="Black Screen", command=self._black_screen)
+        self.black_button.pack(side=tk.LEFT, padx=3)
+        self.export_button = ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper)
+        self.export_button.pack(side=tk.LEFT, padx=3)
         self.close_button = ttk.Button(bottom, text="Close", command=self._request_close)
         self.close_button.pack(side=tk.RIGHT, padx=3)
-        ttk.Button(bottom, text="About", command=self._show_about).pack(side=tk.RIGHT, padx=3)
+        self.about_button = ttk.Button(bottom, text="About", command=self._show_about)
+        self.about_button.pack(side=tk.RIGHT, padx=3)
         ttk.Label(bottom, text=f"Version {__version__}").pack(side=tk.RIGHT, padx=(3, 10))
         self._refresh_rollback_button()
         self._refresh_update_status()
@@ -293,6 +345,8 @@ class SettingsApp(tk.Tk):
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
+        if self._any_worker_busy():
+            return False
         try:
             name = self.profile_var.get()
             profile = self._profile_from_fields(name)
@@ -332,6 +386,8 @@ class SettingsApp(tk.Tk):
         return name
 
     def _new_profile(self) -> None:
+        if self._any_worker_busy():
+            return
         suggested = self._default_new_profile_name()
         name = self._validated_profile_name(
             self._ask_profile_name("New profile", "Profile name:", initialvalue=suggested)
@@ -346,6 +402,8 @@ class SettingsApp(tk.Tk):
         self._load_profile(name)
 
     def _rename_profile(self) -> None:
+        if self._any_worker_busy():
+            return
         old_name = self.profile_var.get()
         if old_name not in self.config_data.profiles:
             messagebox.showerror("Rename failed", f"No profile named {old_name!r}.")
@@ -369,6 +427,8 @@ class SettingsApp(tk.Tk):
             messagebox.showerror("Rename failed", str(exc))
 
     def _delete_profile(self) -> None:
+        if self._any_worker_busy():
+            return
         name = self.profile_var.get()
         if len(self.config_data.profiles) <= 1:
             messagebox.showwarning("Cannot delete", "At least one profile is required.")
@@ -574,7 +634,217 @@ class SettingsApp(tk.Tk):
         except Exception as exc:
             messagebox.showerror("Could not add folder", str(exc))
 
+    def _any_worker_busy(self) -> bool:
+        return bool(
+            self._optional_attr("_update_busy", False)
+            or self._optional_attr("_apply_busy", False)
+            or self._optional_attr("_migration_busy", False)
+        )
+
+    def _refresh_worker_controls(self) -> None:
+        busy = self._any_worker_busy()
+        self.close_button.state(["disabled"] if busy else ["!disabled"])
+        self.apply_button.configure(text="Applying..." if self._apply_busy else "Apply Next Now")
+        self.apply_button.state(["disabled"] if busy else ["!disabled"])
+        for button in (
+            self.profile_new_button,
+            self.profile_rename_button,
+            self.profile_delete_button,
+            self.profile_save_button,
+            self.working_browse_button,
+            self.working_create_button,
+            self.working_use_button,
+            self.black_button,
+            self.export_button,
+        ):
+            button.state(["disabled"] if busy else ["!disabled"])
+        self.working_cancel_button.state(["!disabled"] if self._migration_busy else ["disabled"])
+        if busy:
+            self.update_button.state(["disabled"])
+            self.rollback_button.state(["disabled"])
+        else:
+            self.update_button.state(["!disabled"])
+            self._refresh_rollback_button()
+
+    def _browse_working_directory(self) -> None:
+        current = Path(self.working_directory_var.get().strip() or "/").expanduser()
+        initial = current if current.is_dir() else current.parent
+        selected = self._ask_folder(initialdir=str(initial), title="Choose an empty MBS working folder")
+        if selected:
+            self.working_directory_var.set(str(Path(selected).expanduser().absolute()))
+            self.working_status_var.set("Selected but not active. Click Use Folder to validate and copy managed files.")
+
+    def _create_working_directory(self) -> None:
+        parent = self._ask_folder(initialdir="/", title="Choose where to create an MBS working folder")
+        if not parent:
+            return
+        name = simpledialog.askstring(
+            "Create working folder",
+            "New folder name:",
+            initialvalue="MBS Working Files",
+            parent=self,
+        )
+        if name is None:
+            return
+        try:
+            created = create_working_directory(parent, name, self.config_data)
+        except Exception as exc:
+            messagebox.showerror("Could not create working folder", str(exc), parent=self)
+            return
+        self.working_directory_var.set(str(created))
+        self.working_status_var.set("Folder created and validated. Click Use Folder to activate it.")
+
+    def _use_working_directory(self) -> None:
+        if self._any_worker_busy():
+            return
+        selected = self.working_directory_var.get().strip()
+        if not selected:
+            messagebox.showerror("Working folder required", "Choose or create a working folder first.", parent=self)
+            return
+        current = configured_working_directory(self.config_data)
+        candidate = Path(selected).expanduser().absolute()
+        if candidate.resolve(strict=False) == current.resolve(strict=False):
+            self.working_directory_var.set(str(current))
+            self.working_status_var.set(
+                f"Active: {current} — source images remain in their original folders."
+            )
+            return
+        create_candidate = not candidate.exists()
+        if create_candidate and not candidate.parent.is_dir():
+            messagebox.showerror(
+                "Working folder parent missing",
+                f"Create or choose the parent folder first:\n{candidate.parent}",
+                parent=self,
+            )
+            return
+        creation_note = "\n\nThis folder does not exist and will be created." if create_candidate else ""
+        if not messagebox.askyesno(
+            "Change working folder?",
+            (
+                f"Copy generated wallpapers and the library index from:\n{current}\n\nto:\n{candidate}\n\n"
+                "The old files will be retained for recovery. Source wallpaper folders are never moved."
+                f"{creation_note}"
+            ),
+            parent=self,
+        ):
+            return
+        if not self._save_current(show_success=False):
+            return
+        if create_candidate:
+            try:
+                candidate = create_working_directory(candidate.parent, candidate.name, self.config_data)
+            except Exception as exc:
+                messagebox.showerror("Could not create working folder", str(exc), parent=self)
+                return
+            self.working_directory_var.set(str(candidate))
+
+        self._migration_cancel.clear()
+        self._migration_busy = True
+        self.working_status_var.set("Preparing working-folder migration...")
+        self._refresh_worker_controls()
+
+        def progress(completed: int, total: int, name: str) -> None:
+            self._operation_results.put(("migration-progress", (completed, total, name), None))
+
+        def run() -> None:
+            try:
+                result = migrate_working_directory(
+                    self.config_data,
+                    candidate,
+                    cancelled=self._migration_cancel.is_set,
+                    progress=progress,
+                )
+            except Exception as exc:
+                self._operation_results.put(("migration-done", None, exc))
+            else:
+                self._operation_results.put(("migration-done", result, None))
+
+        worker = threading.Thread(target=run, name="mbs-working-folder-migration", daemon=False)
+        self._migration_worker = worker
+        try:
+            worker.start()
+        except Exception:
+            self._migration_worker = None
+            self._migration_busy = False
+            self._refresh_worker_controls()
+            raise
+
+    def _cancel_working_migration(self) -> None:
+        if self._optional_attr("_migration_busy", False):
+            self._migration_cancel.set()
+            self.working_status_var.set("Cancellation requested; waiting for the current verified copy step...")
+
+    def _set_apply_busy(self, busy: bool) -> None:
+        self._apply_busy = busy
+        self._refresh_worker_controls()
+
+    def _poll_operation_results(self) -> None:
+        try:
+            while True:
+                kind, result, error = self._operation_results.get_nowait()
+                if kind == "migration-progress":
+                    completed, total, name = result
+                    self.working_status_var.set(f"Copying {completed}/{total}: {name}")
+                    continue
+                if kind == "migration-done":
+                    if self._migration_worker is not None:
+                        self._migration_worker.join()
+                    self._migration_worker = None
+                    self._migration_busy = False
+                    self._refresh_worker_controls()
+                    if error is not None:
+                        if isinstance(error, WorkingDirectoryMigrationCancelled):
+                            self.working_status_var.set("Working-folder migration cancelled; the previous folder remains active.")
+                        else:
+                            self.working_status_var.set("Working-folder migration failed; the previous folder remains active.")
+                            messagebox.showerror("Working folder change failed", str(error), parent=self)
+                    else:
+                        self.config_data = load_config()
+                        self.working_directory_var.set(str(result.destination))
+                        self.working_status_var.set(
+                            f"Active: {result.destination} — source images remain in their original folders."
+                        )
+                        messagebox.showinfo(
+                            "Working folder changed",
+                            (
+                                f"MBS now uses:\n{result.destination}\n\n"
+                                f"Previous generated files were retained at:\n{result.source}"
+                            ),
+                            parent=self,
+                        )
+                    continue
+                if kind == "apply-progress":
+                    count, _path = result
+                    self.apply_button.configure(text=f"Scanning... {count}")
+                    continue
+                if kind in {"apply-done", "black-done"}:
+                    if self._apply_worker is not None:
+                        self._apply_worker.join()
+                    self._apply_worker = None
+                    self._set_apply_busy(False)
+                    if error is not None:
+                        if kind == "black-done" and isinstance(error, SwitchCancelled):
+                            continue
+                        title = "Black screen failed" if kind == "black-done" else "Apply failed"
+                        messagebox.showerror(title, str(error), parent=self)
+                    else:
+                        title = "Black screen" if kind == "black-done" else "Applied"
+                        detail = (
+                            f"Generated {result.wallpaper}; rotation is paused."
+                            if kind == "black-done"
+                            else f"Generated {result.wallpaper}"
+                        )
+                        messagebox.showinfo(title, detail, parent=self)
+        except queue.Empty:
+            pass
+        try:
+            self.after(100, self._poll_operation_results)
+        except tk.TclError:
+            pass
+
     def _export_current_wallpaper(self) -> None:
+        if self._any_worker_busy():
+            return
         selected = filedialog.asksaveasfilename(
             parent=self,
             title="Save current wallpaper",
@@ -648,20 +918,28 @@ class SettingsApp(tk.Tk):
     def _set_update_busy(self, busy: bool, label: str = "Check for Updates...") -> None:
         self._update_busy = busy
         self.update_button.configure(text=label if busy else "Check for Updates...")
-        self.update_button.state(["disabled"] if busy else ["!disabled"])
-        self.close_button.state(["disabled"] if busy else ["!disabled"])
         if busy:
-            self.rollback_button.state(["disabled"])
             self.update_status_var.set(label)
         else:
-            self._refresh_rollback_button()
             self._refresh_update_status()
+        self._refresh_worker_controls()
 
     def _request_close(self) -> None:
         if self._optional_attr("_update_busy", False):
             messagebox.showinfo(
                 "Update in progress",
                 "Keep Settings open until the current update operation finishes.",
+                parent=self,
+            )
+            return
+        if self._optional_attr("_migration_busy", False) or self._optional_attr("_apply_busy", False):
+            if self._optional_attr("_migration_busy", False):
+                self._migration_cancel.set()
+            if self._optional_attr("_apply_busy", False):
+                self._apply_cancel.set()
+            messagebox.showinfo(
+                "Operation in progress",
+                "Cancellation was requested. Keep Settings open until the current safe step finishes.",
                 parent=self,
             )
             return
@@ -674,7 +952,7 @@ class SettingsApp(tk.Tk):
         on_success: Callable[[Any], None],
         error_title: str,
     ) -> None:
-        if self._optional_attr("_update_busy", False):
+        if self._any_worker_busy():
             return
         self._set_update_busy(True, label)
 
@@ -699,6 +977,8 @@ class SettingsApp(tk.Tk):
         try:
             while True:
                 on_success, result, error_title, error = self._update_results.get_nowait()
+                if self._update_worker is not None:
+                    self._update_worker.join()
                 self._update_worker = None
                 self._set_update_busy(False)
                 if error is not None:
@@ -839,22 +1119,63 @@ class SettingsApp(tk.Tk):
         self.destroy()
 
     def _apply_next(self) -> None:
+        if self._any_worker_busy():
+            return
         if not self._save_current(show_success=False):
             return
+        profile_name = self.profile_var.get()
+        self._apply_cancel.clear()
+        self._set_apply_busy(True)
+
+        def progress(count: int, path: str) -> None:
+            self._operation_results.put(("apply-progress", (count, path), None))
+
+        def run() -> None:
+            try:
+                result = switch_once(
+                    profile_name,
+                    cancelled=self._apply_cancel.is_set,
+                    progress=progress,
+                )
+            except Exception as exc:
+                self._operation_results.put(("apply-done", None, exc))
+            else:
+                self._operation_results.put(("apply-done", result, None))
+
+        worker = threading.Thread(target=run, name="mbs-settings-apply", daemon=False)
+        self._apply_worker = worker
         try:
-            result = switch_once(self.profile_var.get())
-            messagebox.showinfo("Applied", f"Generated {result.wallpaper}")
-        except Exception as exc:
-            messagebox.showerror("Apply failed", str(exc))
+            worker.start()
+        except Exception:
+            self._apply_worker = None
+            self._set_apply_busy(False)
+            raise
 
     def _black_screen(self) -> None:
+        if self._any_worker_busy():
+            return
         if not self._save_current(show_success=False):
             return
+        profile_name = self.profile_var.get()
+        self._apply_cancel.clear()
+        self._set_apply_busy(True)
+
+        def run() -> None:
+            try:
+                result = black_screen(profile_name, cancelled=self._apply_cancel.is_set)
+            except Exception as exc:
+                self._operation_results.put(("black-done", None, exc))
+            else:
+                self._operation_results.put(("black-done", result, None))
+
+        worker = threading.Thread(target=run, name="mbs-settings-black-screen", daemon=False)
+        self._apply_worker = worker
         try:
-            result = black_screen(self.profile_var.get())
-            messagebox.showinfo("Black screen", f"Generated {result.wallpaper}; rotation is paused.")
-        except Exception as exc:
-            messagebox.showerror("Black screen failed", str(exc))
+            worker.start()
+        except Exception:
+            self._apply_worker = None
+            self._set_apply_busy(False)
+            raise
 
 
 def main() -> None:

@@ -10,6 +10,8 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
+- Selectable, validated working-file storage for generated wallpapers and the image-library index.
+- Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
 - User-triggered managed updates from Settings with versioned per-user installs, atomic activation, restart, and rollback.
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
@@ -20,6 +22,14 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.13 - 2026-07-22
+
+- Added a persistent image-library index and database-backed no-repeat pools for responsive rotation with approximately 64,000 images and larger accidental recursive trees.
+- Added **Working files** controls to browse for or explicitly create a dedicated generated-file folder, with ownership, overlap, nesting, collision, permission, and availability validation.
+- Added staged, verified, cancellable migration that retains the old generated files and never moves or modifies source images.
+- Moved tray rotation and Settings **Apply Next Now** off their GUI event loops, coalesced repeated tray **Next** actions, and launch Settings independently from the tray.
+- Bumped the package version to `0.1.13`.
 
 ### 0.1.12 - 2026-07-21
 
@@ -141,7 +151,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -179,7 +189,7 @@ The updater resolves the latest `vMAJOR.MINOR.PATCH` tag through GitHub, pins th
 
 Creating the candidate venv invokes `pip`. If required packages are not already cached or available from system site packages, pip may contact your configured Python package index for build requirements and dependencies such as setuptools, wheel, Pillow, and Python 3.10's tomli. See [SECURITY.md](SECURITY.md) for the complete network and trust boundary.
 
-Profiles, runtime state, generated wallpapers, and other user data remain under `~/.config` and `~/.cache`, outside the managed installation. Existing safe-start/tray autostart mode and delay are rewritten to the stable launcher. A registered Mint Background Switcher black-screen hotkey is rebound to the same stable launcher. The currently running tray process keeps running its old code until it is restarted or the next login.
+Profiles, runtime state, startup logs, generated wallpapers, the image-library index, and other user data remain outside the managed installation. Generated wallpapers and the index use the default MBS cache unless a dedicated working folder is selected in Settings. Existing safe-start/tray autostart mode and delay are rewritten to the stable launcher. A registered Mint Background Switcher black-screen hotkey is rebound to the same stable launcher. The currently running tray process keeps running its old code until it is restarted or the next login.
 
 After two managed versions have been installed, **Roll Back...** activates the previous valid managed version without using the network and retains the newer version. During the first migration there is no previous managed version to roll back to, so the original source checkout is intentionally left untouched as the recovery path. Restarting Settings warns before discarding unsaved profile edits.
 
@@ -248,7 +258,8 @@ mint-background-switcher register-hotkey --binding '<Primary><Alt>b'
 - Config and profiles: `~/.config/mint-background-switcher/config.json`
 - Runtime state: `~/.config/mint-background-switcher/state.json`
 - Startup guard: `~/.config/mint-background-switcher/startup-guard.json`
-- Generated wallpapers and startup log: `~/.cache/mint-background-switcher/`
+- Generated wallpapers and image-library index: `~/.cache/mint-background-switcher/` by default, or the dedicated folder selected under **Working files**
+- Startup log: `~/.cache/mint-background-switcher/startup.log` (not relocated with working files)
 - Managed versions and active-version link: `~/.local/share/mint-background-switcher/`
 - Stable managed launcher: `~/.local/bin/mint-background-switcher`
 - Autostart entry: `~/.config/autostart/mint-background-switcher.desktop`
@@ -261,6 +272,14 @@ export MBS_CACHE_DIR=/tmp/mbs-cache
 export MBS_INSTALL_ROOT=/tmp/mbs-managed
 export MBS_USER_BIN_DIR=/tmp/mbs-bin
 ```
+
+## Working files and large libraries
+
+MBS treats configured wallpaper folders as read-only source libraries. It does not create thumbnails, resized copies, metadata files, or indexes inside those folders. Discovery metadata and no-repeat pools live in `library-index.sqlite3` in the MBS working folder. A fresh or stale index is refreshed transactionally; warm rotations reuse it for five minutes. A no-repeat pool is refilled near-linearly once per cycle, then ordinary draws fetch only the bounded rows needed for the next wallpaper. Scanning, selection, decoding, composition, and Settings migration run outside GTK/Tk event loops.
+
+The default working folder is `~/.cache/mint-background-switcher/`. To use another disk or location, open Settings and use **Working files → Browse...** for an empty or previously MBS-owned folder, or **Create Folder...** to explicitly create one child folder under a chosen parent. A typed nonexistent path is created only after confirmation and only when its parent already exists. **Use Folder...** validates the destination and copies only generated wallpaper PNGs and image-index files. Copy contents are verified before configuration changes, name collisions are rejected, and the old files are retained for recovery.
+
+MBS rejects a working folder that overlaps any source-image folder, contains or is contained by the current working folder, is a foreign nonempty directory, has an invalid ownership marker, is not writable, or is unavailable. If an activated custom volume later disappears, rotation reports that exact failure and does not fall back to an unrelated cache. Configuration, `state.json`, startup logs, managed installations, desktop integration, autostart entries, and hotkeys are not relocated.
 
 ## Profile modes
 
@@ -292,7 +311,7 @@ Add `@150%`, `@1.25`, etc. when you want the test geometry to simulate Cinnamon 
 
 ## Switching behavior
 
-Live wallpaper changes are rendered to an off-screen active file first, then applied by switching the desktop URI. The app alternates between two active files so the image currently displayed by Cinnamon/GNOME is not overwritten in place. Normal Cinnamon wallpaper changes only update the desktop background URI/options; they do not modify Muffin/Nemo transition or panel settings automatically.
+Live wallpaper changes are rendered to an off-screen active file first, then applied by switching the desktop URI. The app alternates between two active files so the image currently displayed by Cinnamon/GNOME is not overwritten in place. Tray rotation and Settings **Apply Next Now** use non-daemon background workers so their interfaces remain responsive; repeated tray **Next** requests coalesce to one pending rotation. Normal Cinnamon wallpaper changes only update the desktop background URI/options; they do not modify Muffin/Nemo transition or panel settings automatically.
 
 `save-current` copies that generated PNG, including the complete multi-monitor composition, without selecting new source images or changing runtime state. In Settings, choose **Save Current Wallpaper...** and select a PNG destination; Settings asks before replacing an existing file. From the CLI, the destination must end in `.png` and existing files are protected unless `--force` is supplied.
 
@@ -310,7 +329,7 @@ If Cinnamon ever comes up without panel/menu, switch to a TTY with `Ctrl+Alt+F3`
 ./scripts/mint-background-switcher rescue --full --reboot
 ```
 
-`rescue --light` only disables Mint Background Switcher and resets wallpaper. `rescue --full` also backs up and resets Cinnamon/Nemo dconf settings and `monitors.xml`, which is more disruptive but is the recovery path for an icons-only desktop failure.
+`rescue --light` disables Mint Background Switcher, backs up its normal cache plus any marker-validated custom working folder, and resets wallpaper without touching source-image folders. `rescue --full` also backs up and resets Cinnamon/Nemo dconf settings and `monitors.xml`, which is more disruptive but is the recovery path for an icons-only desktop failure.
 
 ## Development
 

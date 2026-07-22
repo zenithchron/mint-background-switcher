@@ -7,7 +7,7 @@ import random
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from .paths import state_file, xdg_config_dir
 from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, locked_write_json, lock_path_for, read_json_unlocked
@@ -81,7 +81,11 @@ def save_state(state: RuntimeState, path: Path | None = None) -> Path:
 
 
 @contextmanager
-def state_transaction(path: Path | None = None) -> Iterator[RuntimeState]:
+def state_transaction(
+    path: Path | None = None,
+    *,
+    on_error: Callable[[BaseException], None] | None = None,
+) -> Iterator[RuntimeState]:
     """Lock state for a read-modify-write operation and save atomically on success."""
     path = path or state_file()
     xdg_config_dir().mkdir(parents=True, exist_ok=True)
@@ -91,8 +95,13 @@ def state_transaction(path: Path | None = None) -> Iterator[RuntimeState]:
             state = RuntimeState.from_dict(read_json_unlocked(path)) if path.exists() else RuntimeState()
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             state = RuntimeState()
-        yield state
-        atomic_write_json_unlocked(path, state.to_dict())
+        try:
+            yield state
+            atomic_write_json_unlocked(path, state.to_dict())
+        except BaseException as exc:
+            if on_error is not None:
+                on_error(exc)
+            raise
 
 
 def _normalized_pool(pool: list[str]) -> list[str]:
@@ -117,15 +126,19 @@ def draw_many(
     pool_norm = _normalized_pool(pool)
     if not pool_norm or count <= 0:
         return []
+    pool_set = set(pool_norm)
 
     selected: list[str] = []
+    selected_set: set[str] = set()
     while len(selected) < count:
-        remaining = [p for p in state.remaining.get(bucket, []) if p in pool_norm and p not in selected]
+        remaining = [p for p in state.remaining.get(bucket, []) if p in pool_set and p not in selected_set]
         if not remaining:
-            remaining = [p for p in pool_norm if p not in selected]
+            remaining = [p for p in pool_norm if p not in selected_set]
             if not remaining:
                 remaining = list(pool_norm)
             rng.shuffle(remaining)
-        selected.append(remaining.pop())
+        choice = remaining.pop()
+        selected.append(choice)
+        selected_set.add(choice)
         state.remaining[bucket] = remaining
     return selected
