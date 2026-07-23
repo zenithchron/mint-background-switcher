@@ -87,6 +87,10 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert calendar.get_profile().effect == "calendar"
     assert calendar.to_dict()["profiles"]["P"]["effect"] == "calendar"
 
+    invert = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "INVERT"}}})
+    assert invert.get_profile().effect == "invert"
+    assert invert.to_dict()["profiles"]["P"]["effect"] == "invert"
+
     invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "posterize"}}})
     assert invalid.get_profile().effect == "none"
 

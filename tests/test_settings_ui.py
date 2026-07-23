@@ -191,6 +191,67 @@ def test_settings_effect_menu_exposes_calendar_and_applies_selection(monkeypatch
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_effect_menu_exposes_invert_and_applies_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.effect_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_effects = []
+        applied_profiles = []
+        messages = []
+        errors = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_effects.append(config.get_profile("Default").effect),
+        )
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="invert-preview.png"),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        assert "invert" in labels
+        assert app.effect_menu.winfo_ismapped()
+        assert app.effect_menu.winfo_width() > 1
+        menu.invoke(labels.index("invert"))
+        assert app.effect_var.get() == "invert"
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_effects == ["invert"]
+        assert applied_profiles == ["Default"]
+        assert messages and messages[-1][0] == "Applied"
+
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda _profile, **_kwargs: (_ for _ in ()).throw(RuntimeError("invert preview failed")),
+        )
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_effects == ["invert", "invert"]
+        assert errors == [("Apply failed", "invert preview failed")]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
 def test_settings_mode_menu_exposes_montage_and_applies_selection(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))

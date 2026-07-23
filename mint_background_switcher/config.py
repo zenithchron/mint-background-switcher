@@ -12,7 +12,7 @@ from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, 
 
 CONFIG_VERSION = 2
 VALID_MODES = {"shared", "same", "montage", "postcard", "per-monitor", "span"}
-EFFECT_CHOICES = ("none", "grayscale", "sepia", "blur", "vignette", "calendar")
+EFFECT_CHOICES = ("none", "grayscale", "sepia", "invert", "blur", "vignette", "calendar")
 VALID_EFFECTS = set(EFFECT_CHOICES)
 VALID_BAR_COLORS = {"black", "auto"}
 

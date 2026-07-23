@@ -626,6 +626,7 @@ def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeyp
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
     cfg.get_profile("P").mode = "postcard"
+    cfg.get_profile("P").effect = "invert"
     save_config(cfg)
     image_dir = tmp_path / "images"
     for image_path in image_dir.glob("*.png"):
@@ -638,6 +639,10 @@ def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeyp
     assert result.applied is False
     assert result.images == []
     assert result.wallpaper.exists()
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
 
 
 def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
@@ -671,6 +676,50 @@ def test_sepia_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
                     assert red > green > blue
                     return
     raise AssertionError("sepia wallpaper has no colored pixels")
+
+
+def test_invert_effect_dry_run_preserves_sources_state_and_black_screen(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "same"
+    cfg.get_profile("P").effect = "invert"
+    save_config(cfg)
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:same": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+    image_dir = tmp_path / "images"
+    source_bytes = {path: path.read_bytes() for path in image_dir.glob("*.png")}
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.applied is False
+    assert len(result.images) == 1
+    with Image.open(result.images[0]) as selected:
+        source_pixel = selected.convert("RGB").getpixel((0, 0))
+        assert isinstance(source_pixel, tuple)
+        expected_pixel = tuple(255 - int(channel) for channel in source_pixel[:3])
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.mode == "RGB"
+        assert wallpaper.size == (220, 80)
+        assert wallpaper.getpixel((50, 40)) == expected_pixel
+        assert wallpaper.getpixel((0, 0)) == (255, 255, 255)
+    assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+    assert load_state().to_dict() == before_state
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+    black_result = black_screen("P", dry_run=True)
+    with Image.open(black_result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+    assert load_state().to_dict() == before_state
 
 
 def test_automatic_bar_color_is_applied_to_each_monitor(monkeypatch, tmp_path: Path):

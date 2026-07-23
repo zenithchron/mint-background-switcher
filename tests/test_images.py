@@ -117,6 +117,25 @@ def test_apply_sepia_effect_adds_warm_tone_and_preserves_rgb(tmp_path: Path):
         assert red > green > blue
 
 
+def test_apply_invert_effect_complements_pixels_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "color.png"
+    source = Image.new("RGB", (2, 1))
+    source.putpixel((0, 0), (0, 64, 255))
+    source.putpixel((1, 0), (12, 34, 56))
+    before = source.tobytes()
+    source.save(path)
+
+    assert apply_effect(path, "invert") == path
+
+    assert source.tobytes() == before
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.size == source.size
+        assert processed.getpixel((0, 0)) == (255, 191, 0)
+        assert processed.getpixel((1, 0)) == (243, 221, 199)
+    assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
+
+
 def test_apply_blur_effect_softens_sharp_edges_and_preserves_rgb(tmp_path: Path):
     path = tmp_path / "edge.png"
     source = Image.new("RGB", (21, 9), (0, 0, 0))

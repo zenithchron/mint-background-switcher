@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.14] - 2026-07-23
+
+### Added
+
+- An optional inverted-colors effect inspired by John’s Background Switcher, applied to the complete generated wallpaper in every layout mode.
+- **invert** under **Settings → Profile settings → Effect**, with Save and **Apply Next Now** success/error feedback.
+- Exact-pixel, dry-run/source-safety, black-screen/fallback, and Xvfb-backed Settings coverage for the new effect.
+
+### Changed
+
+- Bumped the package version to `0.1.14`.
+
 ## [0.1.13] - 2026-07-22
 
 ### Added

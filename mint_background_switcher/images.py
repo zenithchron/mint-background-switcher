@@ -293,6 +293,8 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
             processed = Image.composite(Image.new("RGB", rgb_source.size, (0, 0, 0)), rgb_source, darkening_mask)
         elif effect == "calendar":
             processed = add_three_month_calendar(source)
+        elif effect == "invert":
+            processed = ImageOps.invert(source.convert("RGB"))
         elif effect == "sepia":
             grayscale = ImageOps.grayscale(source)
             processed = ImageOps.colorize(grayscale, black=(0, 0, 0), white=(255, 240, 192))
