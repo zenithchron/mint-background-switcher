@@ -103,6 +103,25 @@ def test_apply_grayscale_effect_removes_color_and_preserves_rgb(tmp_path: Path):
         assert processed.getchannel("G").tobytes() == processed.getchannel("B").tobytes()
 
 
+def test_apply_desaturate_effect_halves_color_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "color.png"
+    source = Image.new("RGB", (2, 1))
+    source.putpixel((0, 0), (200, 40, 10))
+    source.putpixel((1, 0), (10, 100, 250))
+    before = source.tobytes()
+    source.save(path)
+
+    assert apply_effect(path, "desaturate") == path
+
+    assert source.tobytes() == before
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.size == source.size
+        assert processed.getpixel((0, 0)) == (142, 62, 47)
+        assert processed.getpixel((1, 0)) == (50, 95, 170)
+    assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
+
+
 def test_apply_sepia_effect_adds_warm_tone_and_preserves_rgb(tmp_path: Path):
     path = tmp_path / "color.png"
     Image.new("RGB", (8, 6), (200, 40, 10)).save(path)

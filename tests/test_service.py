@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageOps
 
 from mint_background_switcher import service
 from mint_background_switcher.config import Config, Profile, save_config
@@ -710,6 +710,52 @@ def test_invert_effect_dry_run_preserves_sources_state_and_black_screen(monkeypa
         assert wallpaper.size == (220, 80)
         assert wallpaper.getpixel((50, 40)) == expected_pixel
         assert wallpaper.getpixel((0, 0)) == (255, 255, 255)
+    assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+    assert load_state().to_dict() == before_state
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+    black_result = black_screen("P", dry_run=True)
+    with Image.open(black_result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+    assert load_state().to_dict() == before_state
+
+
+def test_desaturate_effect_dry_run_preserves_sources_state_and_black_screen(
+    monkeypatch, tmp_path: Path
+):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "same"
+    cfg.get_profile("P").effect = "desaturate"
+    save_config(cfg)
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:same": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+    image_dir = tmp_path / "images"
+    source_bytes = {path: path.read_bytes() for path in image_dir.glob("*.png")}
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.applied is False
+    assert len(result.images) == 1
+    with Image.open(result.images[0]) as selected:
+        rgb_source = selected.convert("RGB")
+        expected = Image.blend(rgb_source, ImageOps.grayscale(rgb_source).convert("RGB"), 0.5)
+        expected_pixel = expected.getpixel((0, 0))
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.mode == "RGB"
+        assert wallpaper.size == (220, 80)
+        assert wallpaper.getpixel((50, 40)) == expected_pixel
+        assert wallpaper.getpixel((0, 0)) == (0, 0, 0)
     assert {path: path.read_bytes() for path in source_bytes} == source_bytes
     assert load_state().to_dict() == before_state
     assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()

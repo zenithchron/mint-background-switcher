@@ -298,6 +298,10 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
         elif effect == "sepia":
             grayscale = ImageOps.grayscale(source)
             processed = ImageOps.colorize(grayscale, black=(0, 0, 0), white=(255, 240, 192))
+        elif effect == "desaturate":
+            rgb_source = source.convert("RGB")
+            grayscale = ImageOps.grayscale(rgb_source).convert("RGB")
+            processed = Image.blend(rgb_source, grayscale, 0.5)
         elif effect == "grayscale":
             grayscale = ImageOps.grayscale(source)
             processed = grayscale.convert("RGB")
