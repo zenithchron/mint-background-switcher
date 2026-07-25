@@ -15,6 +15,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - User-triggered managed updates from Settings with versioned per-user installs, atomic activation, restart, and rollback.
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
+- View every unique original picture used in the current wallpaper and open a selected source from Settings.
 - Optional per-profile grayscale, half-color desaturation, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Optional automatic letterbox-bar colors matched to each source image.
 - Safe login autostart that waits for Cinnamon before rotating.
@@ -22,6 +23,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.16 - 2026-07-25
+
+- Added **View Current Pictures...** to list every unique original image used in the current wallpaper and open a selected source with the default desktop application.
+- Added no-picture, launch-success, missing-file, unavailable-opener, and nonzero launch-error feedback, plus stale-list refresh and pre-open revalidation, while keeping wallpaper state and source files unchanged.
+- Added read-only service tests and Xvfb-backed Settings visibility, refresh, selection, version, asynchronous success, and error coverage.
+- Bumped the package version to `0.1.16`.
 
 ### 0.1.15 - 2026-07-24
 
@@ -130,13 +138,14 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Pillow 9.1 or newer for image composition and effects.
 - `xrandr` and `gsettings` for monitor detection and desktop wallpaper application.
 - Tkinter for the settings editor.
+- `xdg-open` from `xdg-utils` for opening current source pictures from Settings.
 - GTK/AppIndicator bindings for optional tray mode.
 
 On Linux Mint or Ubuntu, install the usual system packages with:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-pil python3-tk python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1
+sudo apt install -y python3-venv python3-pil python3-tk python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 xdg-utils
 ```
 
 ## Install from GitHub
@@ -165,7 +174,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, and **Save Current Wallpaper...**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **postcard** and **montage** modes, profile effects such as **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -328,6 +337,8 @@ Add `@150%`, `@1.25`, etc. when you want the test geometry to simulate Cinnamon 
 Live wallpaper changes are rendered to an off-screen active file first, then applied by switching the desktop URI. The app alternates between two active files so the image currently displayed by Cinnamon/GNOME is not overwritten in place. Tray rotation and Settings **Apply Next Now** use non-daemon background workers so their interfaces remain responsive; repeated tray **Next** requests coalesce to one pending rotation. Normal Cinnamon wallpaper changes only update the desktop background URI/options; they do not modify Muffin/Nemo transition or panel settings automatically.
 
 `save-current` copies that generated PNG, including the complete multi-monitor composition, without selecting new source images or changing runtime state. In Settings, choose **Save Current Wallpaper...** and select a PNG destination; Settings asks before replacing an existing file. From the CLI, the destination must end in `.png` and existing files are protected unless `--force` is supplied.
+
+**View Current Pictures...** reads the last successful wallpaper's source list without advancing rotation or changing persistent state. Its local selection window de-duplicates originals used across monitors, montage tiles, or postcard frames, refreshes when revisited, and revalidates the list immediately before asynchronously sending the selected existing file to `xdg-open`. Missing files, unavailable launchers, and nonzero opener exits stay in Settings as actionable errors. The source library remains read-only.
 
 Black-screen mode uses Cinnamon/GNOME solid-black color mode before doing monitor detection or fallback PNG work, so the visible switch should be near-instant. If a configured image folder is empty or temporarily unavailable, normal rotation applies a non-sticky black fallback instead of erroring, then retries on the next rotation.
 

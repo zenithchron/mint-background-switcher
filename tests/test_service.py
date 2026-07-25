@@ -8,7 +8,13 @@ from PIL import Image, ImageOps
 
 from mint_background_switcher import service
 from mint_background_switcher.config import Config, Profile, save_config
-from mint_background_switcher.service import black_screen, resume, save_current_wallpaper, switch_once
+from mint_background_switcher.service import (
+    black_screen,
+    current_source_images,
+    resume,
+    save_current_wallpaper,
+    switch_once,
+)
 from mint_background_switcher.state import RuntimeState, load_state, save_state
 from mint_background_switcher.working_storage import WorkingDirectoryError, prepare_working_directory
 
@@ -47,6 +53,27 @@ def _setup_profile(monkeypatch, tmp_path: Path) -> None:
             profiles={"P": Profile(name="P", shared_folders=[str(image_dir)], desktop="unknown")},
         )
     )
+
+
+def test_current_source_images_is_unique_ordered_and_read_only(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    first = tmp_path / "pictures" / "first.png"
+    second = tmp_path / "pictures" / "second.png"
+    missing = tmp_path / "pictures" / "missing.png"
+    first.parent.mkdir()
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    original = RuntimeState(
+        paused=True,
+        last_wallpaper=str(tmp_path / "current.png"),
+        last_images=[str(first), str(second), str(first), "", str(missing)],
+    )
+    save_state(original)
+
+    assert current_source_images() == [first, second, missing]
+    assert load_state().to_dict() == original.to_dict()
+    assert first.read_bytes() == b"first"
+    assert second.read_bytes() == b"second"
 
 
 def test_dry_run_next_black_and_resume_do_not_persist_state(monkeypatch, tmp_path: Path):

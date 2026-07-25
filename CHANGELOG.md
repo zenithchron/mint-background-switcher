@@ -4,6 +4,22 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.16] - 2026-07-25
+
+### Added
+
+- **View Current Pictures...** in Settings, inspired by John’s Background Switcher, for listing every unique original image used in the current wallpaper and opening a selected source in the default desktop application.
+- Clear no-picture, successful-launch, missing-file, unavailable-opener, and nonzero launch-error feedback without changing the wallpaper, rotation state, or source files; an open dialog refreshes when revisited and revalidates the current sources before launching one.
+- Read-only source-list service coverage plus an Xvfb-backed Settings test for button, dialog, refresh, list, version, asynchronous open-success, and open-error visibility.
+
+### Changed
+
+- Bumped the package version to `0.1.16`.
+
+### Security
+
+- Selected sources must still be regular files, and Settings launches `xdg-open` with a fixed argument vector and no shell.
+
 ## [0.1.15] - 2026-07-24
 
 ### Added

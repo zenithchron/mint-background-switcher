@@ -109,6 +109,205 @@ def test_settings_window_geometry_keeps_1024x768_screens_usable():
     assert y == 33
 
 
+def test_open_picture_uses_default_desktop_opener_without_a_shell(monkeypatch, tmp_path):
+    picture = tmp_path / "picture with spaces.png"
+    picture.write_bytes(b"picture")
+    calls = []
+    monkeypatch.setattr(settings_ui.shutil, "which", lambda command: "/usr/bin/xdg-open" if command == "xdg-open" else None)
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(wait=lambda *, timeout: calls.append(("wait", timeout)) or 0)
+
+    monkeypatch.setattr(settings_ui.subprocess, "Popen", fake_popen)
+
+    opened = settings_ui._open_picture(picture)
+
+    assert opened == picture.resolve()
+    assert calls[0][0] == ["/usr/bin/xdg-open", str(picture.resolve())]
+    assert calls[0][1]["shell"] is False
+    assert calls[0][1]["close_fds"] is True
+    assert calls[0][1]["start_new_session"] is True
+    assert calls[0][1]["stdin"] is settings_ui.subprocess.DEVNULL
+    assert calls[0][1]["stdout"] is settings_ui.subprocess.DEVNULL
+    assert calls[0][1]["stderr"] is settings_ui.subprocess.DEVNULL
+    assert calls[1] == ("wait", 5.0)
+
+
+def test_open_picture_rejects_a_missing_source_before_launch(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        settings_ui.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("missing source must not launch")),
+    )
+
+    with pytest.raises(FileNotFoundError, match="Current source picture is missing"):
+        settings_ui._open_picture(tmp_path / "missing.png")
+
+
+def test_open_picture_reports_when_desktop_opener_is_unavailable(monkeypatch, tmp_path):
+    picture = tmp_path / "picture.png"
+    picture.write_bytes(b"picture")
+    monkeypatch.setattr(settings_ui.shutil, "which", lambda _command: None)
+
+    with pytest.raises(RuntimeError, match="install xdg-utils"):
+        settings_ui._open_picture(picture)
+
+
+def test_open_picture_reports_a_nonzero_desktop_opener_exit(monkeypatch, tmp_path):
+    picture = tmp_path / "picture.png"
+    picture.write_bytes(b"picture")
+    monkeypatch.setattr(settings_ui.shutil, "which", lambda _command: "/usr/bin/xdg-open")
+    monkeypatch.setattr(
+        settings_ui.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: SimpleNamespace(wait=lambda *, timeout: 3),
+    )
+
+    with pytest.raises(RuntimeError, match=r"exit status 3.*default image application"):
+        settings_ui._open_picture(picture)
+
+
+def test_open_picture_accepts_a_long_running_desktop_handoff(monkeypatch, tmp_path):
+    picture = tmp_path / "picture.png"
+    picture.write_bytes(b"picture")
+    monkeypatch.setattr(settings_ui.shutil, "which", lambda _command: "/usr/bin/xdg-open")
+
+    def wait(*, timeout):
+        raise settings_ui.subprocess.TimeoutExpired("/usr/bin/xdg-open", timeout)
+
+    monkeypatch.setattr(
+        settings_ui.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: SimpleNamespace(wait=wait),
+    )
+
+    assert settings_ui._open_picture(picture) == picture.resolve()
+
+
+def test_view_current_pictures_reports_when_no_sources_are_recorded(monkeypatch):
+    messages = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_any_worker_busy", lambda: False)
+    setattr(dummy, "_optional_attr", lambda _name, default=None: default)
+    monkeypatch.setattr(settings_ui, "current_source_images", lambda: [])
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._view_current_pictures(dummy)
+
+    assert messages and messages[0][0] == "No current pictures"
+    assert "Apply Next Now" in messages[0][1]
+    assert messages[0][2]["parent"] is dummy
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_view_current_pictures_is_visible_refreshes_and_opens_selected_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    sources = [first, second]
+    monkeypatch.setattr(settings_ui, "current_source_images", lambda: list(sources))
+    opened = []
+    opener_threads = []
+    errors = []
+
+    def fake_open(path):
+        opener_threads.append(threading.get_ident())
+        opened.append(path)
+        return path
+
+    monkeypatch.setattr(settings_ui, "_open_picture", fake_open)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    main_thread = threading.get_ident()
+    try:
+        app.update_idletasks()
+        app.update()
+
+        def descendant_texts(widget):
+            texts = []
+            for child in widget.winfo_children():
+                try:
+                    text = child.cget("text")
+                except settings_ui.tk.TclError:
+                    text = ""
+                if text:
+                    texts.append(str(text))
+                texts.extend(descendant_texts(child))
+            return texts
+
+        assert app.current_pictures_button.winfo_ismapped()
+        assert app.current_pictures_button.winfo_width() > 1
+        assert (
+            app.current_pictures_button.winfo_x() + app.current_pictures_button.winfo_width()
+            <= app.current_pictures_button.master.winfo_width()
+        )
+        assert app.title() == f"{settings_ui.APP_NAME} Settings — {settings_ui.__version__}"
+        assert f"Version {settings_ui.__version__}" in descendant_texts(app)
+
+        app.current_pictures_button.invoke()
+        app.update_idletasks()
+        app.update()
+        assert app._current_pictures_window is not None
+        assert app._current_pictures_window.winfo_ismapped()
+        assert app._current_pictures_window.winfo_width() <= app.winfo_screenwidth()
+        assert app._current_pictures_window.winfo_height() <= app.winfo_screenheight()
+        assert app.current_pictures_list.winfo_ismapped()
+        assert app.open_picture_button.winfo_ismapped()
+        assert app.current_pictures_list.get(0, settings_ui.tk.END) == (str(first), str(second))
+
+        app.current_pictures_list.selection_clear(0, settings_ui.tk.END)
+        app.current_pictures_list.selection_set(1)
+        app.open_picture_button.invoke()
+        _pump_until(app, lambda: opened == [second] and second.name in app.current_picture_status_var.get())
+        assert opener_threads and opener_threads[-1] != main_thread
+
+        sources[:] = [first]
+        app.current_pictures_button.invoke()
+        app.update_idletasks()
+        app.update()
+        assert app.current_pictures_list.get(0, settings_ui.tk.END) == (str(first),)
+        assert "source list was refreshed" in app.current_picture_status_var.get()
+
+        sources[:] = [second]
+        app.open_picture_button.invoke()
+        app.update_idletasks()
+        app.update()
+        assert opened == [second]
+        assert app.current_pictures_list.get(0, settings_ui.tk.END) == (str(second),)
+        assert "source list was refreshed" in app.current_picture_status_var.get()
+        app.open_picture_button.invoke()
+        _pump_until(
+            app,
+            lambda: opened == [second, second] and app.open_picture_button.instate(["!disabled"]),
+        )
+
+        monkeypatch.setattr(
+            settings_ui,
+            "_open_picture",
+            lambda _path: (_ for _ in ()).throw(RuntimeError("viewer failed")),
+        )
+        app.open_picture_button.invoke()
+        _pump_until(app, lambda: bool(errors))
+        assert errors[-1][0] == "Open picture failed"
+        assert errors[-1][1] == "viewer failed"
+        assert errors[-1][2]["parent"] is app._current_pictures_window
+    finally:
+        app.destroy()
+
+
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
 def test_settings_effect_menu_exposes_vignette_and_is_visible(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))

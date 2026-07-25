@@ -45,6 +45,29 @@ class SwitchCancelled(RuntimeError):
     """Raised when a background rotation is cancelled before desktop activation."""
 
 
+def current_source_images() -> list[Path]:
+    """Return the unique local source paths used by the current wallpaper.
+
+    This is a read-only snapshot of runtime state. Paths are made absolute without
+    requiring the source files to still be mounted or present.
+    """
+
+    images: list[Path] = []
+    seen: set[str] = set()
+    for raw_path in load_state().last_images:
+        if not raw_path.strip():
+            continue
+        try:
+            image = Path(os.path.abspath(Path(raw_path).expanduser()))
+        except (OSError, RuntimeError):
+            continue
+        key = os.fspath(image)
+        if key not in seen:
+            seen.add(key)
+            images.append(image)
+    return images
+
+
 def _cancel_if_requested(cancelled: Callable[[], bool] | None) -> None:
     if cancelled is not None and cancelled():
         raise SwitchCancelled("wallpaper rotation was cancelled")

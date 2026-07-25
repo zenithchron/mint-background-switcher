@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import queue
+import shutil
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -12,7 +14,7 @@ from typing import Any, Callable
 from . import APP_NAME, __version__, updater
 from .config import EFFECT_CHOICES, Config, Profile, load_config, save_config
 from .monitor import Monitor, detect_monitors
-from .service import SwitchCancelled, black_screen, save_current_wallpaper, switch_once
+from .service import SwitchCancelled, black_screen, current_source_images, save_current_wallpaper, switch_once
 from .working_storage import (
     MARKER_FILENAME,
     WorkingDirectoryMigrationCancelled,
@@ -31,6 +33,39 @@ SETTINGS_WINDOW_MIN_HEIGHT = 680
 SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
+
+
+def _open_picture(path: str | Path) -> Path:
+    """Launch one existing picture through the desktop's default application."""
+
+    picture = Path(path).expanduser().resolve(strict=False)
+    if not picture.is_file():
+        raise FileNotFoundError(f"Current source picture is missing: {picture}")
+    opener = shutil.which("xdg-open")
+    if opener is None:
+        raise RuntimeError("xdg-open is unavailable; install xdg-utils to open source pictures")
+    process = subprocess.Popen(
+        [opener, str(picture)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        start_new_session=True,
+        shell=False,
+    )
+    try:
+        return_code = process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        # Some desktop openers remain attached to the launched application. Once
+        # the validated opener has stayed alive this long, let the detached handoff
+        # continue instead of blocking Settings or terminating the viewer.
+        return picture
+    if return_code != 0:
+        raise RuntimeError(
+            f"xdg-open could not open the selected picture (exit status {return_code}). "
+            "Check the default image application."
+        )
+    return picture
 
 
 def _monitor_window_rect(
@@ -130,6 +165,8 @@ class SettingsApp(tk.Tk):
         self._migration_busy = False
         self._migration_worker: threading.Thread | None = None
         self._migration_cancel = threading.Event()
+        self._current_pictures_window: tk.Toplevel | None = None
+        self._refresh_current_pictures: Callable[[], bool] | None = None
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
@@ -285,6 +322,12 @@ class SettingsApp(tk.Tk):
         self.black_button.pack(side=tk.LEFT, padx=3)
         self.export_button = ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper)
         self.export_button.pack(side=tk.LEFT, padx=3)
+        self.current_pictures_button = ttk.Button(
+            bottom,
+            text="View Current Pictures...",
+            command=self._view_current_pictures,
+        )
+        self.current_pictures_button.pack(side=tk.LEFT, padx=3)
         self.close_button = ttk.Button(bottom, text="Close", command=self._request_close)
         self.close_button.pack(side=tk.RIGHT, padx=3)
         self.about_button = ttk.Button(bottom, text="About", command=self._show_about)
@@ -656,6 +699,7 @@ class SettingsApp(tk.Tk):
             self.working_use_button,
             self.black_button,
             self.export_button,
+            self.current_pictures_button,
         ):
             button.state(["disabled"] if busy else ["!disabled"])
         self.working_cancel_button.state(["!disabled"] if self._migration_busy else ["disabled"])
@@ -877,6 +921,167 @@ class SettingsApp(tk.Tk):
             )
         except Exception as exc:
             messagebox.showerror("Save current wallpaper failed", str(exc), parent=self)
+
+    def _view_current_pictures(self) -> None:
+        if self._any_worker_busy():
+            return
+
+        existing_window = self._optional_attr("_current_pictures_window", None)
+        try:
+            if existing_window is not None and existing_window.winfo_exists():
+                refresh = self._optional_attr("_refresh_current_pictures", None)
+                if callable(refresh):
+                    refresh()
+                existing_window.deiconify()
+                existing_window.lift()
+                existing_window.focus_force()
+                return
+        except tk.TclError:
+            self._current_pictures_window = None
+
+        images = current_source_images()
+        if not images:
+            messagebox.showinfo(
+                "No current pictures",
+                "No source pictures are recorded for the current wallpaper. Choose Apply Next Now first.",
+                parent=self,
+            )
+            return
+
+        window = tk.Toplevel(self)
+        self._current_pictures_window = window
+        window.title("Current Pictures")
+        window.transient(self)
+        window.geometry("760x360")
+        window.minsize(520, 260)
+
+        content = ttk.Frame(window, padding=12)
+        content.pack(fill=tk.BOTH, expand=True)
+        count_var = tk.StringVar(
+            value=(
+                f"{len(images)} unique source picture{'s' if len(images) != 1 else ''} "
+                "were used in the current wallpaper."
+            )
+        )
+        ttk.Label(content, textvariable=count_var).pack(anchor="w", pady=(0, 8))
+
+        list_frame = ttk.Frame(content)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        picture_list = tk.Listbox(list_frame, selectmode=tk.SINGLE, exportselection=False)
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=picture_list.yview)
+        picture_list.configure(yscrollcommand=scrollbar.set)
+        picture_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        for image in images:
+            picture_list.insert(tk.END, str(image))
+        picture_list.selection_set(0)
+        picture_list.activate(0)
+
+        status_var = tk.StringVar(value="Select a source picture, then open it with the default desktop application.")
+        ttk.Label(content, textvariable=status_var, anchor="w").pack(fill=tk.X, pady=(8, 4))
+        buttons = ttk.Frame(content)
+        buttons.pack(fill=tk.X)
+        opening = [False]
+
+        open_button = ttk.Button(buttons, text="Open Picture")
+        open_button.pack(side=tk.LEFT)
+
+        def refresh_sources() -> bool:
+            latest = current_source_images()
+            if latest == images:
+                return False
+            images[:] = latest
+            picture_list.delete(0, tk.END)
+            for image in images:
+                picture_list.insert(tk.END, str(image))
+            count_var.set(
+                f"{len(images)} unique source picture{'s' if len(images) != 1 else ''} "
+                "were used in the current wallpaper."
+            )
+            if images:
+                picture_list.selection_set(0)
+                picture_list.activate(0)
+                if not opening[0]:
+                    open_button.state(["!disabled"])
+                status_var.set("The wallpaper changed; the source list was refreshed. Select a picture to open.")
+            else:
+                open_button.state(["disabled"])
+                status_var.set("The current wallpaper has no recorded source pictures.")
+            return True
+
+        def open_selected() -> None:
+            if opening[0]:
+                return
+            if refresh_sources():
+                return
+            selected = picture_list.curselection()
+            if not selected:
+                messagebox.showinfo("Select a picture", "Select a source picture to open.", parent=window)
+                return
+            selected_picture = images[int(selected[0])]
+            result_queue: queue.Queue[tuple[Path | None, Exception | None]] = queue.Queue()
+            opening[0] = True
+            open_button.state(["disabled"])
+            status_var.set("Opening the selected picture...")
+
+            def launch() -> None:
+                try:
+                    opened = _open_picture(selected_picture)
+                except Exception as exc:
+                    result_queue.put((None, exc))
+                else:
+                    result_queue.put((opened, None))
+
+            def poll_result() -> None:
+                try:
+                    opened, error = result_queue.get_nowait()
+                except queue.Empty:
+                    try:
+                        window.after(50, poll_result)
+                    except tk.TclError:
+                        pass
+                    return
+                opening[0] = False
+                try:
+                    if images:
+                        open_button.state(["!disabled"])
+                    if error is not None:
+                        status_var.set("The selected picture could not be opened.")
+                        messagebox.showerror("Open picture failed", str(error), parent=window)
+                    elif opened is not None:
+                        status_var.set(f"Sent {opened.name} to the default desktop application.")
+                except tk.TclError:
+                    pass
+
+            worker = threading.Thread(target=launch, name="mbs-picture-opener", daemon=False)
+            try:
+                worker.start()
+            except Exception as exc:
+                opening[0] = False
+                open_button.state(["!disabled"])
+                status_var.set("The selected picture could not be opened.")
+                messagebox.showerror("Open picture failed", str(exc), parent=window)
+                return
+            window.after(50, poll_result)
+
+        open_button.configure(command=open_selected)
+        ttk.Button(buttons, text="Refresh", command=refresh_sources).pack(side=tk.LEFT, padx=(6, 0))
+
+        def close_window() -> None:
+            self._current_pictures_window = None
+            self._refresh_current_pictures = None
+            window.destroy()
+
+        ttk.Button(buttons, text="Close", command=close_window).pack(side=tk.RIGHT)
+        window.protocol("WM_DELETE_WINDOW", close_window)
+        picture_list.bind("<Double-Button-1>", lambda _event: open_selected())
+        picture_list.bind("<Return>", lambda _event: open_selected())
+        picture_list.focus_set()
+
+        self.current_pictures_list = picture_list
+        self.open_picture_button = open_button
+        self.current_picture_status_var = status_var
+        self._refresh_current_pictures = refresh_sources
 
     def _show_about(self) -> None:
         messagebox.showinfo(
