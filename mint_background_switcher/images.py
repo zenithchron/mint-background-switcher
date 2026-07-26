@@ -18,6 +18,8 @@ SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif"
 CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
 POSTCARD_BACKGROUND_COLOR = (112, 78, 46)
 POSTCARD_PIN_COLOR = (188, 42, 42, 255)
+POLAROID_BACKGROUND_COLOR = (39, 44, 52)
+POLAROID_FRAME_COLOR = (248, 246, 238, 255)
 _MONTH_NAMES = (
     "",
     "January",
@@ -34,6 +36,14 @@ _MONTH_NAMES = (
     "December",
 )
 _WEEKDAY_LABELS = ("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+
+
+class ImageDecodeError(OSError):
+    """A selected source stopped being safely decodable before composition."""
+
+    def __init__(self, image_path: str | Path) -> None:
+        self.image_path = str(image_path)
+        super().__init__("A selected source image could not be decoded")
 
 
 def _save_png_atomic(image: Image.Image, output_path: str | Path) -> Path:
@@ -432,6 +442,74 @@ def compose_postcard(
             if cell_width <= 0 or cell_height <= 0:
                 continue
             card = _postcard_tile(image_path, (cell_width, cell_height), angle, bar_color=bar_color)
+            x = left + (cell_width - card.width) // 2
+            y = top + (cell_height - card.height) // 2
+            panel.paste(card, (x, y), card)
+        combined.paste(panel, normalized_position(monitor, min_x, min_y))
+    return _save_png_atomic(combined, output_path)
+
+
+def _polaroid_tile(
+    image_path: str,
+    cell_size: tuple[int, int],
+    angle: float,
+    *,
+    bar_color: str,
+) -> Image.Image:
+    """Return one uncropped photo in a bottom-heavy Polaroid-style frame."""
+
+    cell_width, cell_height = cell_size
+    photo_width = max(1, round(cell_width * 0.70))
+    photo_height = max(1, round(cell_height * 0.56))
+    border = max(1, min(cell_width, cell_height) // 30)
+    bottom_border = max(border * 4, round(cell_height * 0.12))
+    try:
+        source = open_image(image_path)
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
+        raise ImageDecodeError(image_path) from exc
+    fitted = fit_with_black_bars(source, (photo_width, photo_height), bar_color)
+    card = Image.new(
+        "RGBA",
+        (photo_width + 2 * border, photo_height + border + bottom_border),
+        POLAROID_FRAME_COLOR,
+    )
+    card.paste(fitted, (border, border))
+    rotated = card.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+    rotated.thumbnail((max(1, cell_width), max(1, cell_height)), Image.Resampling.LANCZOS)
+    return rotated
+
+
+def compose_polaroid(
+    monitors: list[Monitor],
+    images_by_monitor: dict[str, list[str]],
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+) -> Path:
+    """Compose four locally selected photos as tilted Polaroid-style prints per monitor."""
+
+    if not monitors:
+        raise ValueError("Cannot compose wallpaper without monitors")
+    width, height, min_x, min_y = virtual_canvas(monitors)
+    combined = Image.new("RGB", (width, height), (0, 0, 0))
+    angles = (7.0, -8.0, -6.0, 8.0)
+    for monitor in monitors:
+        panel = Image.new("RGB", (monitor.width, monitor.height), POLAROID_BACKGROUND_COLOR)
+        split_x = monitor.width // 2
+        split_y = monitor.height // 2
+        cells = (
+            (0, 0, split_x, split_y),
+            (split_x, 0, monitor.width, split_y),
+            (0, split_y, split_x, monitor.height),
+            (split_x, split_y, monitor.width, monitor.height),
+        )
+        image_paths = images_by_monitor.get(monitor.name, [])
+        for image_path, angle, (left, top, right, bottom) in zip(image_paths, angles, cells):
+            cell_width = right - left
+            cell_height = bottom - top
+            if cell_width <= 0 or cell_height <= 0:
+                continue
+            card = _polaroid_tile(image_path, (cell_width, cell_height), angle, bar_color=bar_color)
             x = left + (cell_width - card.width) // 2
             y = top + (cell_height - card.height) // 2
             panel.paste(card, (x, y), card)

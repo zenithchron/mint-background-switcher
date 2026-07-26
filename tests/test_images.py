@@ -6,14 +6,18 @@ from PIL import Image
 from mint_background_switcher import images as images_module
 from mint_background_switcher.images import (
     CALENDAR_HIGHLIGHT_COLOR,
+    POLAROID_BACKGROUND_COLOR,
+    POLAROID_FRAME_COLOR,
     POSTCARD_BACKGROUND_COLOR,
     POSTCARD_PIN_COLOR,
+    _polaroid_tile,
     _postcard_tile,
     add_three_month_calendar,
     apply_effect,
     compose_black,
     compose_montage,
     compose_per_monitor,
+    compose_polaroid,
     compose_postcard,
     compose_span,
     fit_with_black_bars,
@@ -318,6 +322,55 @@ def test_postcard_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path:
     assert {(*color, 255) for color in marker_colors}.issubset(straight_colors)
 
     ultrawide = _postcard_tile(str(path), (1920, 540), -8.0, bar_color="black")
+    assert ultrawide.width <= 1920
+    assert ultrawide.height <= 540
+
+
+def test_compose_polaroid_frames_four_uncropped_images_on_each_monitor(tmp_path: Path):
+    colors = ((210, 50, 60), (50, 190, 90), (60, 90, 220), (220, 180, 40))
+    paths = []
+    for index, color in enumerate(colors):
+        path = tmp_path / f"polaroid-{index}.png"
+        Image.new("RGB", (120, 80), color).save(path)
+        paths.append(str(path))
+    source_bytes = {path: Path(path).read_bytes() for path in paths}
+    monitors = [Monitor("A", 240, 160, 0, 0)]
+
+    output = compose_polaroid(monitors, {"A": paths}, tmp_path / "polaroid.png")
+    repeated = compose_polaroid(monitors, {"A": paths}, tmp_path / "polaroid-repeated.png")
+
+    assert output.read_bytes() == repeated.read_bytes()
+    assert {path: Path(path).read_bytes() for path in paths} == source_bytes
+    with Image.open(output) as polaroid:
+        assert polaroid.mode == "RGB"
+        assert polaroid.size == (240, 160)
+        assert polaroid.getpixel((0, 0)) == POLAROID_BACKGROUND_COLOR
+        rendered_colors = {
+            color
+            for _count, color in polaroid.getcolors(maxcolors=polaroid.width * polaroid.height) or []
+            if isinstance(color, tuple) and len(color) == 3
+        }
+        assert set(colors).issubset(rendered_colors)
+        assert POLAROID_FRAME_COLOR[:3] in rendered_colors
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_polaroid_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (90, 90, 90))
+    marker_colors = ((250, 20, 20), (20, 250, 20), (20, 20, 250), (250, 220, 20))
+    marker_boxes = ((0, 0, 11, 11), (108, 0, 119, 11), (0, 68, 11, 79), (108, 68, 119, 79))
+    for color, (left, top, right, bottom) in zip(marker_colors, marker_boxes):
+        for x in range(left, right + 1):
+            for y in range(top, bottom + 1):
+                source.putpixel((x, y), color)
+    path = tmp_path / "polaroid-edge-markers.png"
+    source.save(path)
+
+    straight = _polaroid_tile(str(path), (240, 160), 0.0, bar_color="black")
+    straight_colors = {color for _count, color in straight.getcolors(maxcolors=straight.width * straight.height) or []}
+    assert {(*color, 255) for color in marker_colors}.issubset(straight_colors)
+
+    ultrawide = _polaroid_tile(str(path), (1920, 540), 7.0, bar_color="black")
     assert ultrawide.width <= 1920
     assert ultrawide.height <= 540
 

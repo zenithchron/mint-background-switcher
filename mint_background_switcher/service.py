@@ -15,10 +15,12 @@ from pathlib import Path
 from .config import Config, Profile, load_config
 from .desktop import DesktopSetter
 from .images import (
+    ImageDecodeError,
     apply_effect,
     compose_black,
     compose_montage,
     compose_per_monitor,
+    compose_polaroid,
     compose_postcard,
     compose_span,
     is_usable_image,
@@ -186,6 +188,19 @@ def _draw_from_pool(
     # implementation. The first indexed live draw completes that migration globally.
     state.remaining.clear()
     return selected
+
+
+def _discard_from_pool(pool: _ImagePool, path: str) -> None:
+    """Discard one source that failed during actual pixel decoding."""
+
+    if pool.paths is not None:
+        pool.paths = [candidate for candidate in pool.paths if candidate != path]
+        return
+    if pool.snapshot is None:
+        return
+    selector = pool.selection or pool.index
+    if selector is not None:
+        selector.discard(pool.snapshot.signature, path)
 
 
 def _draw_one_from_pool(
@@ -453,6 +468,63 @@ def _switch_once_with_state(
                 images_used = chosen
                 wallpaper = compose_postcard(monitors, postcard_by_monitor, wallpaper_path, bar_color=profile.bar_color)
                 _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+    elif profile.mode == "polaroid":
+        pool = _load_image_pool(
+            profile.shared_folders,
+            profile.recursive,
+            dry_run=dry_run,
+            index=index,
+            selection=selection,
+            cancelled=cancelled,
+            progress=progress,
+        )
+        if pool.empty:
+            wallpaper = _apply_black_fallback(
+                profile,
+                monitors,
+                wallpaper_path,
+                dry_run=dry_run,
+                cancelled=cancelled,
+            )
+            action = "black-fallback"
+        else:
+            bucket = _profile_bucket(profile, "polaroid")
+            while True:
+                _cancel_if_requested(cancelled)
+                chosen = _draw_from_pool(
+                    state,
+                    pool,
+                    bucket,
+                    len(monitors) * 4,
+                    rng=rng,
+                )
+                if not chosen:
+                    wallpaper = _apply_black_fallback(
+                        profile,
+                        monitors,
+                        wallpaper_path,
+                        dry_run=dry_run,
+                        cancelled=cancelled,
+                    )
+                    action = "black-fallback"
+                    break
+                polaroid_by_monitor = {
+                    monitor.name: chosen[index * 4 : (index + 1) * 4]
+                    for index, monitor in enumerate(monitors)
+                }
+                try:
+                    wallpaper = compose_polaroid(
+                        monitors,
+                        polaroid_by_monitor,
+                        wallpaper_path,
+                        bar_color=profile.bar_color,
+                    )
+                except ImageDecodeError as exc:
+                    _discard_from_pool(pool, exc.image_path)
+                    continue
+                images_used = chosen
+                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+                break
     elif profile.mode == "same":
         pool = _load_image_pool(
             profile.shared_folders,

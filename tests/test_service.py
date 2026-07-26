@@ -672,6 +672,182 @@ def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeyp
         ]
 
 
+def test_polaroid_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "polaroid"
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_polaroid(monitors, images_by_monitor, output_path, *, bar_color="black"):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
+        captured["bar_color"] = bar_color
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"polaroid")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_polaroid", fake_compose_polaroid)
+    draw_counts = []
+    original_draw = service.LibrarySelection.draw
+
+    def observed_draw(selection, signature, bucket, count, *, rng=None):
+        draw_counts.append((bucket, count))
+        return original_draw(selection, signature, bucket, count, rng=rng)
+
+    monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+    state = load_state()
+
+    assert result.action == "next"
+    assert len(result.images) == 8
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
+    assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
+    assert captured["bar_color"] == "black"
+    assert "profile:P:polaroid" not in state.remaining
+    assert draw_counts == [("profile:P:polaroid", 8)]
+
+
+def test_polaroid_dry_run_skips_malformed_images_without_changing_sources_or_state(
+    monkeypatch, tmp_path: Path
+):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "polaroid"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    (image_dir / "img3.png").unlink()
+    broken = image_dir / "broken.jpg"
+    broken.write_bytes(b"not a decodable image")
+    source_bytes = {path: path.read_bytes() for path in image_dir.iterdir()}
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:polaroid": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert len(result.images) == 8
+    assert str(broken.resolve()) not in result.images
+    assert result.wallpaper.exists()
+    assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+    assert load_state().to_dict() == before_state
+    assert not (tmp_path / "cache" / "library-index.sqlite3").exists()
+
+    black_result = black_screen("P", dry_run=True)
+    with Image.open(black_result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+    assert load_state().to_dict() == before_state
+
+
+def test_polaroid_truncated_jpeg_falls_back_without_changing_source_or_state(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "polaroid"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    for image_path in image_dir.glob("*.png"):
+        image_path.unlink()
+    truncated = image_dir / "truncated.jpg"
+    Image.new("RGB", (120, 80), (20, 80, 160)).save(truncated, format="JPEG", quality=90)
+    truncated.write_bytes(truncated.read_bytes()[:-1])
+    source_bytes = truncated.read_bytes()
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:polaroid": [str(truncated)]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+
+    assert service.is_usable_image(truncated) is True
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "black-fallback"
+    assert result.applied is False
+    assert result.images == []
+    assert truncated.read_bytes() == source_bytes
+    assert load_state().to_dict() == before_state
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+
+
+def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "polaroid"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    source_bytes = {path: path.read_bytes() for path in image_dir.glob("*.png")}
+    compose_polaroid = service.compose_polaroid
+    attempts = []
+    removed = []
+
+    def remove_one_selected_source(monitors, images_by_monitor, output_path, *, bar_color="black"):
+        attempts.append({name: list(paths) for name, paths in images_by_monitor.items()})
+        if not removed:
+            victim = Path(images_by_monitor["A"][0])
+            victim.unlink()
+            removed.append(victim)
+        return compose_polaroid(monitors, images_by_monitor, output_path, bar_color=bar_color)
+
+    monkeypatch.setattr(service, "compose_polaroid", remove_one_selected_source)
+
+    first = switch_once("P", dry_run=False, rng=random.Random(7))
+    second = switch_once("P", dry_run=False, rng=random.Random(8))
+
+    victim = removed[0]
+    assert first.action == second.action == "next"
+    assert len(first.images) == len(second.images) == 8
+    assert str(victim) not in first.images
+    assert str(victim) not in second.images
+    assert len(attempts) == 3
+    assert load_state().last_images == second.images
+    for path, payload in source_bytes.items():
+        if path != victim:
+            assert path.read_bytes() == payload
+
+
+def test_polaroid_mode_uses_black_fallback_when_all_images_are_malformed(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "polaroid"
+    cfg.get_profile("P").effect = "invert"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    for image_path in image_dir.glob("*.png"):
+        image_path.unlink()
+    (image_dir / "broken.jpg").write_bytes(b"not a decodable image")
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "black-fallback"
+    assert result.applied is False
+    assert result.images == []
+    assert result.wallpaper.exists()
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+
+
 def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

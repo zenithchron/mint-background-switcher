@@ -227,6 +227,7 @@ class SettingsApp(tk.Tk):
             "same",
             "montage",
             "postcard",
+            "polaroid",
             "per-monitor",
             "span",
         )
@@ -872,12 +873,19 @@ class SettingsApp(tk.Tk):
                         title = "Black screen failed" if kind == "black-done" else "Apply failed"
                         messagebox.showerror(title, str(error), parent=self)
                     else:
-                        title = "Black screen" if kind == "black-done" else "Applied"
-                        detail = (
-                            f"Generated {result.wallpaper}; rotation is paused."
-                            if kind == "black-done"
-                            else f"Generated {result.wallpaper}"
-                        )
+                        if kind == "apply-done" and getattr(result, "action", None) == "black-fallback":
+                            title = "Safe black fallback"
+                            detail = (
+                                "No usable source images were available, so a black wallpaper was applied. "
+                                "Check the selected profile folders and try again."
+                            )
+                        else:
+                            title = "Black screen" if kind == "black-done" else "Applied"
+                            detail = (
+                                f"Generated {result.wallpaper}; rotation is paused."
+                                if kind == "black-done"
+                                else f"Generated {result.wallpaper}"
+                            )
                         messagebox.showinfo(title, detail, parent=self)
         except queue.Empty:
             pass

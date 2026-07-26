@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.17] - 2026-07-26
+
+### Added
+
+- A local `polaroid` mode inspired by John’s Background Switcher, arranging four uncropped photos per monitor as individually tilted, bottom-heavy white prints on a dark background.
+- **polaroid** under **Settings → Profile settings → Mode**, with Save, **Apply Next Now** success/error, and explicit safe-black-fallback feedback.
+- Deterministic composition, source-edge preservation, malformed-image fallback, dry-run/source/state safety, no-repeat selection, black-screen non-regression, and Xvfb-backed Settings/About coverage.
+
+### Changed
+
+- Bumped the package version to `0.1.17`.
+
 ## [0.1.16] - 2026-07-25
 
 ### Added

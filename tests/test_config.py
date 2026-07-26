@@ -66,6 +66,11 @@ def test_postcard_mode_is_valid():
     assert cfg.get_profile().mode == "postcard"
 
 
+def test_polaroid_mode_is_valid():
+    cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "POLAROID"}}})
+    assert cfg.get_profile().mode == "polaroid"
+
+
 def test_effects_roundtrip_and_invalid_effect_falls_back():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "GRAYSCALE"}}})
     assert cfg.get_profile().effect == "grayscale"
