@@ -6,12 +6,14 @@ import hashlib
 import json
 import os
 import re
+import signal
 import shutil
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised by the Python 3.10 CI job.
@@ -107,6 +109,7 @@ class InstallResult:
     previous: InstallRecord | None
     launcher: Path
     warnings: tuple[str, ...] = ()
+    restarted_background_modes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -751,6 +754,145 @@ def _activate_record(
     return launcher, tuple(warnings)
 
 
+_BACKGROUND_MODES = ("run", "safe-start", "tray")
+
+
+def _background_command_from_cmdline(argv: list[str]) -> tuple[str, ...] | None:
+    """Return the MBS background mode and its arguments from a process command line."""
+
+    if not argv:
+        return None
+    mode_index: int | None = None
+    executable = Path(argv[0]).name
+    if executable == APP_ID:
+        mode_index = 1
+    elif executable.startswith("python"):
+        if len(argv) >= 2 and Path(argv[1]).name == APP_ID:
+            mode_index = 2
+        elif len(argv) >= 3 and argv[1] == "-m" and argv[2] in {
+            "mint_background_switcher",
+            "mint_background_switcher.cli",
+        }:
+            mode_index = 3
+    if mode_index is None or len(argv) <= mode_index:
+        return None
+    command = tuple(argv[mode_index:])
+    return command if command[0] in _BACKGROUND_MODES else None
+
+
+def _background_mode_from_cmdline(argv: list[str]) -> str | None:
+    command = _background_command_from_cmdline(argv)
+    return command[0] if command is not None else None
+
+
+def _find_active_background_processes(proc_root: Path = Path("/proc")) -> list[tuple[int, tuple[str, ...]]]:
+    """Find same-user MBS background processes without matching arbitrary substrings."""
+
+    protected = {os.getpid()}
+    uid = os.getuid()
+    matches: list[tuple[int, tuple[str, ...]]] = []
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return matches
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid in protected:
+            continue
+        try:
+            if entry.stat().st_uid != uid:
+                continue
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        argv = [os.fsdecode(part) for part in raw.split(b"\0") if part]
+        command = _background_command_from_cmdline(argv)
+        if command is not None:
+            matches.append((pid, command))
+    return sorted(matches)
+
+
+def _process_has_exited(pid: int, proc_root: Path = Path("/proc")) -> bool:
+    try:
+        process_stat = (proc_root / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return True
+    except OSError:
+        process_stat = ""
+    if process_stat:
+        closing_parenthesis = process_stat.rfind(")")
+        remaining = process_stat[closing_parenthesis + 1 :].split() if closing_parenthesis >= 0 else []
+        if remaining and remaining[0] == "Z":
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _wait_for_process_exit(pid: int, timeout_seconds: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if _process_has_exited(pid):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def restart_active_background_processes(launcher: Path) -> tuple[str, ...]:
+    """Stop active old-code MBS loops and relaunch each active mode once."""
+
+    if not launcher.exists():
+        raise UpdateError("The managed launcher is missing; cannot restart the background process.")
+    processes = _find_active_background_processes()
+    if not processes:
+        return ()
+    for pid, _command in processes:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            raise UpdateError(f"Could not stop the old background process (pid {pid}): {exc}") from exc
+    survivors = [pid for pid, _command in processes if not _wait_for_process_exit(pid)]
+    if survivors:
+        raise UpdateError(f"The old background process did not stop (pid {survivors[0]}).")
+    restarted_commands = tuple(dict.fromkeys(command for _pid, command in processes))
+    active_modes = {command[0] for command in restarted_commands}
+    restarted_modes = tuple(mode for mode in _BACKGROUND_MODES if mode in active_modes)
+    try:
+        for command in restarted_commands:
+            subprocess.Popen(
+                [str(launcher), *command],
+                start_new_session=True,
+                close_fds=True,
+                env=_clean_subprocess_env(),
+            )
+    except OSError as exc:
+        raise UpdateError(f"Could not restart the background process: {exc}") from exc
+    return restarted_modes
+
+
+def _install_result_with_background_restart(
+    record: InstallRecord,
+    previous: InstallRecord | None,
+    launcher: Path,
+    warnings: tuple[str, ...],
+) -> InstallResult:
+    try:
+        restarted_modes = restart_active_background_processes(launcher)
+    except Exception as exc:
+        warning = f"Updated the application, but could not restart the active background process: {exc}"
+        return InstallResult(record, previous, launcher, (*warnings, warning))
+    return InstallResult(record, previous, launcher, warnings, restarted_modes)
+
+
 def install_release(release: ReleaseInfo, *, client: ReleaseClient | None = None) -> InstallResult:
     version_key(release.version)
     if release.tag != f"v{release.version}":
@@ -794,7 +936,7 @@ def install_release(release: ReleaseInfo, *, client: ReleaseClient | None = None
                 autostart_preference=preference,
                 hotkey_was_registered=hotkey_was_registered,
             )
-            return InstallResult(existing, previous, launcher, warnings)
+            return _install_result_with_background_restart(existing, previous, launcher, warnings)
 
         versions = _versions_dir()
         if versions.is_symlink():
@@ -833,7 +975,7 @@ def install_release(release: ReleaseInfo, *, client: ReleaseClient | None = None
             autostart_preference=preference,
             hotkey_was_registered=hotkey_was_registered,
         )
-        return InstallResult(record, previous, launcher, warnings)
+        return _install_result_with_background_restart(record, previous, launcher, warnings)
 
 
 def rollback_install() -> InstallResult:
@@ -860,4 +1002,9 @@ def restart_settings() -> None:
     launcher = managed_launcher()
     if not launcher.exists():
         raise UpdateError("The managed launcher is missing; cannot restart Settings.")
-    subprocess.Popen([str(launcher), "settings"], start_new_session=True, close_fds=True)
+    subprocess.Popen(
+        [str(launcher), "settings"],
+        start_new_session=True,
+        close_fds=True,
+        env=_clean_subprocess_env(),
+    )

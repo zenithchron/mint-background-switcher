@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import signal
 import shutil
 import subprocess
 import tarfile
@@ -285,6 +286,12 @@ def test_install_release_atomically_manages_launcher_and_preserves_tray_autostar
     monkeypatch.setattr(updater, "_probe_installed_version", lambda _path: "0.1.12")
     monkeypatch.setattr(updater, "_probe_tray_runtime", lambda _staging: None)
     monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    background_restarts = []
+    monkeypatch.setattr(
+        updater,
+        "restart_active_background_processes",
+        lambda launcher: background_restarts.append(launcher) or ("tray",),
+    )
 
     autostart = config_home / "autostart" / "mint-background-switcher.desktop"
     autostart.parent.mkdir(parents=True)
@@ -308,6 +315,8 @@ def test_install_release_atomically_manages_launcher_and_preserves_tray_autostar
 
     assert result.record.version == "0.1.12"
     assert result.record.commit_sha == commit
+    assert result.restarted_background_modes == ("tray",)
+    assert background_restarts == [updater.managed_launcher()]
     assert updater.active_install().version == "0.1.12"
     finalized = subprocess.run(
         [str(result.record.path / "venv" / "bin" / "mint-background-switcher"), "--version"],
@@ -626,9 +635,131 @@ def test_restart_settings_uses_managed_launcher_without_shell(monkeypatch, tmp_p
     launcher.parent.mkdir(parents=True)
     launcher.write_text("launcher", encoding="utf-8")
     calls = []
+    monkeypatch.setenv("PYTHONPATH", "/old/source")
+    monkeypatch.setenv("PYTHONHOME", "/old/python")
+    monkeypatch.setenv("VIRTUAL_ENV", "/old/venv")
 
     monkeypatch.setattr(updater.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)) or object())
 
     updater.restart_settings()
 
-    assert calls == [([str(launcher), "settings"], {"start_new_session": True, "close_fds": True})]
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == [str(launcher), "settings"]
+    assert kwargs["start_new_session"] is True
+    assert kwargs["close_fds"] is True
+    assert all(key not in kwargs["env"] for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"))
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["/home/user/.local/bin/mint-background-switcher", "tray"], "tray"),
+        (["/venv/bin/python3", "/venv/bin/mint-background-switcher", "safe-start"], "safe-start"),
+        (["python3", "-m", "mint_background_switcher", "run"], "run"),
+        (["python3", "-m", "mint_background_switcher.cli", "tray"], "tray"),
+        (["/home/user/.local/bin/mint-background-switcher", "settings"], None),
+        (["/home/user/.local/bin/mint-background-switcher", "next"], None),
+        (["cat", "/home/user/.local/bin/mint-background-switcher", "tray"], None),
+        (["python3", "-m", "another_package", "tray"], None),
+    ],
+)
+def test_background_mode_from_cmdline_only_matches_long_running_mbs_commands(argv, expected):
+    assert updater._background_mode_from_cmdline(argv) == expected
+
+
+def test_background_command_from_cmdline_preserves_mode_arguments():
+    assert updater._background_command_from_cmdline(
+        ["python3", "-m", "mint_background_switcher", "run", "--profile", "Work", "--dry-run"]
+    ) == ("run", "--profile", "Work", "--dry-run")
+    assert updater._background_command_from_cmdline(
+        ["/home/user/.local/bin/mint-background-switcher", "safe-start", "--check-only"]
+    ) == ("safe-start", "--check-only")
+
+
+def test_find_active_background_processes_reads_only_matching_user_processes(monkeypatch, tmp_path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    for pid, argv in {
+        41: ["python3", "-m", "mint_background_switcher", "safe-start", "--profile", "Road"],
+        42: ["/home/user/.local/bin/mint-background-switcher", "settings"],
+        43: ["/home/user/.local/bin/mint-background-switcher", "tray"],
+    }.items():
+        process_dir = proc_root / str(pid)
+        process_dir.mkdir()
+        (process_dir / "cmdline").write_bytes(b"\0".join(part.encode() for part in argv) + b"\0")
+    (proc_root / "not-a-pid").mkdir()
+    monkeypatch.setattr(updater.os, "getpid", lambda: 999)
+    # Settings is commonly launched by the tray; its parent is the process that must restart.
+    monkeypatch.setattr(updater.os, "getppid", lambda: 41)
+
+    assert updater._find_active_background_processes(proc_root) == [
+        (41, ("safe-start", "--profile", "Road")),
+        (43, ("tray",)),
+    ]
+
+
+def test_process_has_exited_treats_zombie_as_stopped(monkeypatch, tmp_path):
+    proc_root = tmp_path / "proc"
+    process_dir = proc_root / "41"
+    process_dir.mkdir(parents=True)
+    (process_dir / "stat").write_text("41 (mint background switcher) Z 1 2 3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        updater.os,
+        "kill",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("zombie check must not signal the process")),
+    )
+
+    assert updater._process_has_exited(41, proc_root) is True
+
+
+def test_restart_active_background_processes_stops_old_processes_and_relaunches_modes(monkeypatch, tmp_path):
+    launcher = tmp_path / "mint-background-switcher"
+    launcher.write_text("launcher", encoding="utf-8")
+    terminated = []
+    calls = []
+    monkeypatch.setenv("PYTHONPATH", "/old/source")
+    monkeypatch.setenv("PYTHONHOME", "/old/python")
+    monkeypatch.setenv("VIRTUAL_ENV", "/old/venv")
+
+    monkeypatch.setattr(
+        updater,
+        "_find_active_background_processes",
+        lambda: [
+            (41, ("safe-start", "--profile", "Road")),
+            (42, ("safe-start", "--check-only")),
+            (43, ("tray",)),
+        ],
+    )
+    monkeypatch.setattr(updater.os, "kill", lambda pid, sig: terminated.append((pid, sig)))
+    monkeypatch.setattr(updater, "_wait_for_process_exit", lambda _pid: True)
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)) or object())
+
+    restarted = updater.restart_active_background_processes(launcher)
+
+    assert terminated == [(41, signal.SIGTERM), (42, signal.SIGTERM), (43, signal.SIGTERM)]
+    assert restarted == ("safe-start", "tray")
+    assert [argv for argv, _kwargs in calls] == [
+        [str(launcher), "safe-start", "--profile", "Road"],
+        [str(launcher), "safe-start", "--check-only"],
+        [str(launcher), "tray"],
+    ]
+    for _argv, kwargs in calls:
+        assert kwargs["start_new_session"] is True
+        assert kwargs["close_fds"] is True
+        assert all(key not in kwargs["env"] for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"))
+
+
+def test_restart_active_background_processes_does_not_launch_over_process_that_will_not_stop(monkeypatch, tmp_path):
+    launcher = tmp_path / "mint-background-switcher"
+    launcher.write_text("launcher", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(updater, "_find_active_background_processes", lambda: [(41, ("safe-start",))])
+    monkeypatch.setattr(updater.os, "kill", lambda _pid, _sig: None)
+    monkeypatch.setattr(updater, "_wait_for_process_exit", lambda _pid: False)
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)) or object())
+
+    with pytest.raises(updater.UpdateError, match="did not stop"):
+        updater.restart_active_background_processes(launcher)
+
+    assert calls == []

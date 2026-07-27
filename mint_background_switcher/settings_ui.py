@@ -1285,6 +1285,13 @@ class SettingsApp(tk.Tk):
     def _handle_activation_success(self, result: updater.InstallResult, *, title: str, summary: str) -> None:
         self._refresh_rollback_button()
         self._refresh_update_status()
+        if result.restarted_background_modes:
+            background_status = "The active MBS background process was restarted automatically."
+        else:
+            background_status = (
+                "Any running tray or safe-start process will use the activated version after it is restarted "
+                "or at your next login."
+            )
         warning_text = ""
         if result.warnings:
             warning_text = "\n\n" + "\n".join(result.warnings)
@@ -1292,8 +1299,8 @@ class SettingsApp(tk.Tk):
             title,
             (
                 f"{summary}\n\n"
-                "Restart Settings into the managed installation now? The running tray process will "
-                "use the activated version after it is restarted or at your next login.\n\n"
+                f"{background_status}\n\n"
+                "Restart Settings into the managed installation now?\n\n"
                 "Unsaved profile changes in this Settings window will be lost."
                 f"{warning_text}"
             ),

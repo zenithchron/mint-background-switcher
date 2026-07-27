@@ -1718,7 +1718,12 @@ def test_up_to_date_managed_copy_reports_current_without_install(monkeypatch):
 
 def test_successful_install_can_restart_into_managed_settings(monkeypatch, tmp_path):
     record = settings_ui.updater.InstallRecord("0.1.12", "d" * 40, "e" * 64, "2026-07-21T20:00:00+00:00", tmp_path)
-    result = settings_ui.updater.InstallResult(record, None, tmp_path / "launcher")
+    result = settings_ui.updater.InstallResult(
+        record,
+        None,
+        tmp_path / "launcher",
+        restarted_background_modes=("safe-start",),
+    )
     restarts = []
     prompts = []
     dummy = object.__new__(settings_ui.SettingsApp)
@@ -1735,6 +1740,7 @@ def test_successful_install_can_restart_into_managed_settings(monkeypatch, tmp_p
 
     assert restarts == [True]
     assert prompts[0][0] == "Update installed"
+    assert "background process was restarted automatically" in prompts[0][1].lower()
     assert "unsaved profile changes" in prompts[0][1].lower()
 
 

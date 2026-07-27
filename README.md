@@ -24,6 +24,12 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 ## Change log
 
+### 0.1.19 - 2026-07-27
+
+- Managed updates now automatically restart active tray, safe-start, or background-loop processes through the newly activated launcher.
+- Added focused process-discovery, graceful-stop, zombie-state, relaunch, and Settings feedback coverage.
+- Bumped the package version to `0.1.19`.
+
 ### 0.1.18 - 2026-07-27
 
 - Added a local `collage` mode that arranges five uncropped photos per monitor in a deterministic asymmetric mosaic.
@@ -226,7 +232,7 @@ The updater resolves the latest `vMAJOR.MINOR.PATCH` tag through GitHub, pins th
 
 Creating the candidate venv invokes `pip`. If required packages are not already cached or available from system site packages, pip may contact your configured Python package index for build requirements and dependencies such as setuptools, wheel, Pillow, and Python 3.10's tomli. See [SECURITY.md](SECURITY.md) for the complete network and trust boundary.
 
-Profiles, runtime state, startup logs, generated wallpapers, the image-library index, and other user data remain outside the managed installation. Generated wallpapers and the index use the default MBS cache unless a dedicated working folder is selected in Settings. Existing safe-start/tray autostart mode and delay are rewritten to the stable launcher. A registered Mint Background Switcher black-screen hotkey is rebound to the same stable launcher. The currently running tray process keeps running its old code until it is restarted or the next login.
+Profiles, runtime state, startup logs, generated wallpapers, the image-library index, and other user data remain outside the managed installation. Generated wallpapers and the index use the default MBS cache unless a dedicated working folder is selected in Settings. Existing safe-start/tray autostart mode and delay are rewritten to the stable launcher. A registered Mint Background Switcher black-screen hotkey is rebound to the same stable launcher. After activation, any active tray, safe-start, or background-loop process is stopped and relaunched through the new stable launcher; if that restart fails, Settings reports the failure while leaving the verified update active.
 
 After two managed versions have been installed, **Roll Back...** activates the previous valid managed version without using the network and retains the newer version. During the first migration there is no previous managed version to roll back to, so the original source checkout is intentionally left untouched as the recovery path. Restarting Settings warns before discarding unsaved profile edits.
 
