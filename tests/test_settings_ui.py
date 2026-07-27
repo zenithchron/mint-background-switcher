@@ -679,6 +679,86 @@ def test_black_screen_close_requests_cancellation_and_joins_worker(monkeypatch, 
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_mode_menu_exposes_collage_and_applies_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.mode_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_modes = []
+        applied_profiles = []
+        messages = []
+        errors = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_modes.append(config.get_profile("Default").mode),
+        )
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="/tmp/collage-preview.png"),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        assert "collage" in labels
+        assert app.mode_menu.winfo_ismapped()
+        assert app.mode_menu.winfo_width() > 1
+        assert app.title() == f"{settings_ui.APP_NAME} Settings — {settings_ui.__version__}"
+        menu.invoke(labels.index("collage"))
+        assert app.mode_var.get() == "collage"
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_modes == ["collage"]
+        assert applied_profiles == ["Default"]
+        assert messages and messages[-1][0] == "Applied"
+
+        app._show_about()
+        assert messages[-1][0] == f"About {settings_ui.APP_NAME}"
+        assert f"Version {settings_ui.__version__}" in messages[-1][1]
+
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda _profile, **_kwargs: SimpleNamespace(
+                wallpaper="/tmp/collage-black-fallback.png",
+                action="black-fallback",
+            ),
+        )
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_modes == ["collage", "collage"]
+        assert messages[-1][0] == "Safe black fallback"
+        assert "No usable source images" in messages[-1][1]
+
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda _profile, **_kwargs: (_ for _ in ()).throw(RuntimeError("collage preview failed")),
+        )
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_modes == ["collage", "collage", "collage"]
+        assert errors == [("Apply failed", "collage preview failed")]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
 def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))

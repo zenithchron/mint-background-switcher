@@ -580,6 +580,136 @@ def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     assert "profile:P:montage" not in state.remaining
 
 
+def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "collage"
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_collage(monitors, images_by_monitor, output_path, *, bar_color="black"):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
+        captured["bar_color"] = bar_color
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"collage")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_collage", fake_compose_collage)
+    draw_counts = []
+    original_draw = service.LibrarySelection.draw
+
+    def observed_draw(selection, signature, bucket, count, *, rng=None):
+        draw_counts.append((bucket, count))
+        return original_draw(selection, signature, bucket, count, rng=rng)
+
+    monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+    state = load_state()
+
+    assert result.action == "next"
+    assert len(result.images) == 10
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["images_by_monitor"] == {"A": result.images[:5], "B": result.images[5:]}
+    assert all(len(paths) == 5 for paths in captured["images_by_monitor"].values())
+    assert captured["bar_color"] == "black"
+    assert "profile:P:collage" not in state.remaining
+    assert draw_counts == [("profile:P:collage", 10)]
+
+
+def test_collage_dry_run_skips_malformed_images_without_changing_sources_or_state(
+    monkeypatch, tmp_path: Path
+):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "collage"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    broken = image_dir / "broken.jpg"
+    broken.write_bytes(b"not a decodable image")
+    source_bytes = {path: path.read_bytes() for path in image_dir.iterdir()}
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:collage": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert len(result.images) == 10
+    assert str(broken.resolve()) not in result.images
+    assert result.wallpaper.exists()
+    assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+    assert load_state().to_dict() == before_state
+    assert not (tmp_path / "cache" / "library-index.sqlite3").exists()
+
+    black_result = black_screen("P", dry_run=True)
+    with Image.open(black_result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+    assert load_state().to_dict() == before_state
+
+
+def test_collage_mode_uses_black_fallback_when_all_images_are_malformed(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "collage"
+    cfg.get_profile("P").effect = "invert"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    for image_path in image_dir.glob("*.png"):
+        image_path.unlink()
+    (image_dir / "broken.jpg").write_bytes(b"not a decodable image")
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "black-fallback"
+    assert result.applied is False
+    assert result.images == []
+    assert result.wallpaper.exists()
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+
+
+def test_collage_decode_retry_is_bounded_before_safe_black_fallback(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "collage"
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    _write_images(image_dir, count=24)
+    attempts = []
+
+    def fail_selected_source(_monitors, images_by_monitor, _output_path, *, bar_color="black"):
+        selected = [path for paths in images_by_monitor.values() for path in paths]
+        attempts.append(selected)
+        raise service.ImageDecodeError(selected[0])
+
+    monkeypatch.setattr(service, "compose_collage", fail_selected_source)
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "black-fallback"
+    assert result.images == []
+    assert len(attempts) == 10
+    assert len({batch[0] for batch in attempts}) == 10
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+
+
 def test_postcard_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

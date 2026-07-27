@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Iterable
+import warnings
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
 
@@ -373,6 +374,71 @@ def compose_montage(
             if cell_width <= 0 or cell_height <= 0:
                 continue
             tile = fit_with_black_bars(open_image(image_path), (cell_width, cell_height), bar_color)
+            panel.paste(tile, (left, top))
+        combined.paste(panel, normalized_position(monitor, min_x, min_y))
+    return _save_png_atomic(combined, output_path)
+
+
+def _collage_tile(
+    image_path: str,
+    size: tuple[int, int],
+    *,
+    bar_color: str,
+) -> Image.Image:
+    """Fit one complete source image into an asymmetric collage cell."""
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            source = open_image(image_path)
+    except (
+        OSError,
+        SyntaxError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as exc:
+        raise ImageDecodeError(image_path) from exc
+    return fit_with_black_bars(source, size, bar_color)
+
+
+def compose_collage(
+    monitors: list[Monitor],
+    images_by_monitor: dict[str, list[str]],
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+) -> Path:
+    """Compose five uncropped local photos as an asymmetric mosaic per monitor."""
+
+    if not monitors:
+        raise ValueError("Cannot compose wallpaper without monitors")
+    width, height, min_x, min_y = virtual_canvas(monitors)
+    combined = Image.new("RGB", (width, height), (0, 0, 0))
+    for monitor in monitors:
+        panel = Image.new("RGB", (monitor.width, monitor.height), (0, 0, 0))
+        main_x = round(monitor.width * 0.60)
+        left_y = round(monitor.height * 0.62)
+        right_y = round(monitor.height * 0.42)
+        lower_left_x = main_x // 2
+        cells = (
+            (0, 0, main_x, left_y),
+            (0, left_y, lower_left_x, monitor.height),
+            (lower_left_x, left_y, main_x, monitor.height),
+            (main_x, 0, monitor.width, right_y),
+            (main_x, right_y, monitor.width, monitor.height),
+        )
+        image_paths = images_by_monitor.get(monitor.name, [])
+        for image_path, (left, top, right, bottom) in zip(image_paths, cells):
+            cell_width = right - left
+            cell_height = bottom - top
+            if cell_width <= 0 or cell_height <= 0:
+                continue
+            tile = _collage_tile(
+                image_path,
+                (cell_width, cell_height),
+                bar_color=bar_color,
+            )
             panel.paste(tile, (left, top))
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     return _save_png_atomic(combined, output_path)

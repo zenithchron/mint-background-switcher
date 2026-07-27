@@ -18,6 +18,7 @@ from .images import (
     ImageDecodeError,
     apply_effect,
     compose_black,
+    compose_collage,
     compose_montage,
     compose_per_monitor,
     compose_polaroid,
@@ -423,6 +424,75 @@ def _switch_once_with_state(
             images_used = chosen
             wallpaper = compose_montage(monitors, montage_by_monitor, wallpaper_path, bar_color=profile.bar_color)
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+    elif profile.mode == "collage":
+        pool = _load_image_pool(
+            profile.shared_folders,
+            profile.recursive,
+            dry_run=dry_run,
+            index=index,
+            selection=selection,
+            cancelled=cancelled,
+            progress=progress,
+        )
+        if pool.empty:
+            wallpaper = _apply_black_fallback(
+                profile,
+                monitors,
+                wallpaper_path,
+                dry_run=dry_run,
+                cancelled=cancelled,
+            )
+            action = "black-fallback"
+        else:
+            bucket = _profile_bucket(profile, "collage")
+            decode_retries_remaining = max(1, len(monitors) * 5)
+            while True:
+                _cancel_if_requested(cancelled)
+                chosen = _draw_from_pool(
+                    state,
+                    pool,
+                    bucket,
+                    len(monitors) * 5,
+                    rng=rng,
+                )
+                if not chosen:
+                    wallpaper = _apply_black_fallback(
+                        profile,
+                        monitors,
+                        wallpaper_path,
+                        dry_run=dry_run,
+                        cancelled=cancelled,
+                    )
+                    action = "black-fallback"
+                    break
+                collage_by_monitor = {
+                    monitor.name: chosen[index * 5 : (index + 1) * 5]
+                    for index, monitor in enumerate(monitors)
+                }
+                try:
+                    wallpaper = compose_collage(
+                        monitors,
+                        collage_by_monitor,
+                        wallpaper_path,
+                        bar_color=profile.bar_color,
+                    )
+                except ImageDecodeError as exc:
+                    _discard_from_pool(pool, exc.image_path)
+                    decode_retries_remaining -= 1
+                    if decode_retries_remaining <= 0:
+                        wallpaper = _apply_black_fallback(
+                            profile,
+                            monitors,
+                            wallpaper_path,
+                            dry_run=dry_run,
+                            cancelled=cancelled,
+                        )
+                        action = "black-fallback"
+                        break
+                    continue
+                images_used = chosen
+                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+                break
     elif profile.mode == "postcard":
         pool = _load_image_pool(
             profile.shared_folders,

@@ -226,6 +226,7 @@ class SettingsApp(tk.Tk):
             "shared",
             "same",
             "montage",
+            "collage",
             "postcard",
             "polaroid",
             "per-monitor",

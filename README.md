@@ -6,7 +6,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 - Local image folders with recursive scanning.
 - Random no-repeat rotation until each pool is exhausted.
-- Shared, same-image, 2x2 montage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
+- Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
@@ -23,6 +23,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.18 - 2026-07-27
+
+- Added a local `collage` mode that arranges five uncropped photos per monitor in a deterministic asymmetric mosaic.
+- Added **collage** under **Settings → Profile settings → Mode**; save the profile or choose **Apply Next Now** for success/error and explicit safe-black-fallback feedback.
+- Added deterministic composition, source-edge, bounded malformed/oversized-image fallback, dry-run/source/state safety, black-screen, no-repeat selection, and Xvfb-backed Settings/About tests.
+- Bumped the package version to `0.1.18`.
 
 ### 0.1.17 - 2026-07-26
 
@@ -181,7 +188,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **polaroid**, **postcard**, and **montage** modes, profile effects such as **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About** for the version, project details, license, and repository URL. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -318,6 +325,7 @@ Each profile has a mode:
 - `shared`: all monitors draw from one shared image pool, without duplicates within the same rotation when possible.
 - `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `montage`: four images from the shared pool are arranged in a 2x2 grid on each monitor, with every complete image fitted inside its tile instead of cropped.
+- `collage`: five images from the shared pool are fitted without cropping into a deterministic asymmetric mosaic independently on each monitor.
 - `postcard`: four images from the shared pool are fitted without cropping, placed in angled white frames with pushpins, and arranged on a corkboard-colored background independently for each monitor.
 - `polaroid`: four images from the shared pool are fitted without cropping inside individually tilted, bottom-heavy white print frames on a dark background for each monitor.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.

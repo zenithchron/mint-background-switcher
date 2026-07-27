@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.18] - 2026-07-27
+
+### Added
+
+- A local `collage` mode inspired by John’s Background Switcher, arranging five uncropped photos per monitor in a deterministic asymmetric mosaic.
+- **collage** under **Settings → Profile settings → Mode**, with Save, **Apply Next Now** success/error, and explicit safe-black-fallback feedback.
+- Deterministic composition, source-edge preservation, bounded malformed/oversized-image fallback, dry-run/source/state safety, no-repeat selection, black-screen non-regression, and Xvfb-backed Settings/About coverage.
+
+### Changed
+
+- Bumped the package version to `0.1.18`.
+
 ## [0.1.17] - 2026-07-26
 
 ### Added

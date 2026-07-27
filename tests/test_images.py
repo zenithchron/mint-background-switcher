@@ -2,6 +2,7 @@ from datetime import date
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 from mint_background_switcher import images as images_module
 from mint_background_switcher.images import (
@@ -10,11 +11,13 @@ from mint_background_switcher.images import (
     POLAROID_FRAME_COLOR,
     POSTCARD_BACKGROUND_COLOR,
     POSTCARD_PIN_COLOR,
+    _collage_tile,
     _polaroid_tile,
     _postcard_tile,
     add_three_month_calendar,
     apply_effect,
     compose_black,
+    compose_collage,
     compose_montage,
     compose_per_monitor,
     compose_polaroid,
@@ -275,6 +278,67 @@ def test_generated_wallpaper_replaces_symlink_without_touching_its_target(tmp_pa
     with Image.open(output) as generated:
         assert generated.size == (60, 40)
     assert list(working.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_compose_collage_places_five_uncropped_images_on_each_monitor(tmp_path: Path):
+    colors = ((230, 40, 50), (40, 200, 80), (50, 90, 230), (230, 190, 40), (180, 50, 210))
+    paths = []
+    for index, color in enumerate(colors):
+        path = tmp_path / f"collage-{index}.png"
+        Image.new("RGB", (120, 80), color).save(path)
+        paths.append(str(path))
+    source_bytes = {path: Path(path).read_bytes() for path in paths}
+    monitors = [Monitor("A", 250, 160, 0, 0)]
+
+    output = compose_collage(monitors, {"A": paths}, tmp_path / "collage.png")
+    repeated = compose_collage(monitors, {"A": paths}, tmp_path / "collage-repeated.png")
+
+    assert output.read_bytes() == repeated.read_bytes()
+    assert {path: Path(path).read_bytes() for path in paths} == source_bytes
+    with Image.open(output) as collage:
+        assert collage.mode == "RGB"
+        assert collage.size == (250, 160)
+        rendered_colors = {
+            color
+            for _count, color in collage.getcolors(maxcolors=collage.width * collage.height) or []
+            if isinstance(color, tuple) and len(color) == 3
+        }
+        assert set(colors).issubset(rendered_colors)
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_collage_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (90, 90, 90))
+    marker_colors = ((250, 20, 20), (20, 250, 20), (20, 20, 250), (250, 220, 20))
+    marker_boxes = ((0, 0, 11, 11), (108, 0, 119, 11), (0, 68, 11, 79), (108, 68, 119, 79))
+    for color, (left, top, right, bottom) in zip(marker_colors, marker_boxes):
+        for x in range(left, right + 1):
+            for y in range(top, bottom + 1):
+                source.putpixel((x, y), color)
+    path = tmp_path / "collage-edge-markers.png"
+    source.save(path)
+
+    standard = _collage_tile(str(path), (240, 160), bar_color="black")
+    standard_colors = {
+        color for _count, color in standard.getcolors(maxcolors=standard.width * standard.height) or []
+    }
+    assert set(marker_colors).issubset(standard_colors)
+
+    ultrawide = _collage_tile(str(path), (1920, 540), bar_color="black")
+    assert ultrawide.size == (1920, 540)
+    ultrawide_colors = {
+        color for _count, color in ultrawide.getcolors(maxcolors=ultrawide.width * ultrawide.height) or []
+    }
+    assert set(marker_colors).issubset(ultrawide_colors)
+
+
+def test_collage_tile_rejects_pillow_decompression_bomb_warnings(monkeypatch, tmp_path: Path):
+    path = tmp_path / "oversized-for-test.png"
+    Image.new("RGB", (15, 10), (20, 40, 60)).save(path)
+    monkeypatch.setattr(images_module.Image, "MAX_IMAGE_PIXELS", 100)
+
+    with pytest.raises(images_module.ImageDecodeError):
+        _collage_tile(str(path), (30, 20), bar_color="black")
 
 
 def test_compose_postcard_frames_four_uncropped_images_on_each_monitor(tmp_path: Path):

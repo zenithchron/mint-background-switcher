@@ -61,6 +61,11 @@ def test_montage_mode_is_valid():
     assert cfg.get_profile().mode == "montage"
 
 
+def test_collage_mode_is_valid():
+    cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "COLLAGE"}}})
+    assert cfg.get_profile().mode == "collage"
+
+
 def test_postcard_mode_is_valid():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "POSTCARD"}}})
     assert cfg.get_profile().mode == "postcard"

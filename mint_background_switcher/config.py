@@ -11,7 +11,16 @@ from .paths import config_file, xdg_config_dir
 from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, lock_path_for, read_json_unlocked
 
 CONFIG_VERSION = 2
-VALID_MODES = {"shared", "same", "montage", "postcard", "polaroid", "per-monitor", "span"}
+VALID_MODES = {
+    "shared",
+    "same",
+    "montage",
+    "collage",
+    "postcard",
+    "polaroid",
+    "per-monitor",
+    "span",
+}
 EFFECT_CHOICES = (
     "none",
     "grayscale",
