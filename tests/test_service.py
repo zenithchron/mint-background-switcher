@@ -818,12 +818,14 @@ def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
         *,
         bar_color="black",
         size=0.5,
+        span=False,
         rng=None,
     ):
         captured["monitors"] = [monitor.name for monitor in monitors]
         captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
         captured["bar_color"] = bar_color
         captured["size"] = size
+        captured["span"] = span
         captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"polaroid")
@@ -851,9 +853,48 @@ def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
     assert all(len(paths) == 7 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
     assert captured["size"] == 0.8
+    assert captured["span"] is False
     assert isinstance(captured["rng"], random.Random)
     assert "profile:P:polaroid" not in state.remaining
     assert draw_counts == [("profile:P:polaroid", 14)]
+
+
+def test_polaroid_span_uses_configured_count_across_combined_desktop(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "polaroid"
+    profile.polaroid_count = 7
+    profile.polaroid_span = True
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_polaroid(monitors, images_by_monitor, output_path, **kwargs):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
+        captured.update(kwargs)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"spanning-polaroid")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_polaroid", fake_compose_polaroid)
+    draw_counts = []
+    original_draw = service.LibrarySelection.draw
+
+    def observed_draw(selection, signature, bucket, count, *, rng=None):
+        draw_counts.append((bucket, count))
+        return original_draw(selection, signature, bucket, count, rng=rng)
+
+    monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(9))
+
+    assert result.action == "next"
+    assert len(result.images) == 7
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["images_by_monitor"] == {"A": result.images}
+    assert captured["span"] is True
+    assert draw_counts == [("profile:P:polaroid", 7)]
 
 
 def test_polaroid_dry_run_skips_malformed_images_without_changing_sources_or_state(
@@ -953,6 +994,7 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
         *,
         bar_color="black",
         size=0.5,
+        span=False,
         rng=None,
     ):
         attempts.append({name: list(paths) for name, paths in images_by_monitor.items()})
@@ -966,6 +1008,7 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
             output_path,
             bar_color=bar_color,
             size=size,
+            span=span,
             rng=rng,
         )
 

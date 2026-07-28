@@ -560,13 +560,14 @@ def _switch_once_with_state(
         else:
             bucket = _profile_bucket(profile, "polaroid")
             count_per_monitor = profile.polaroid_count
+            requested_count = count_per_monitor if profile.polaroid_span else len(monitors) * count_per_monitor
             while True:
                 _cancel_if_requested(cancelled)
                 chosen = _draw_from_pool(
                     state,
                     pool,
                     bucket,
-                    len(monitors) * count_per_monitor,
+                    requested_count,
                     rng=rng,
                 )
                 if not chosen:
@@ -579,10 +580,13 @@ def _switch_once_with_state(
                     )
                     action = "black-fallback"
                     break
-                polaroid_by_monitor = {
-                    monitor.name: chosen[index * count_per_monitor : (index + 1) * count_per_monitor]
-                    for index, monitor in enumerate(monitors)
-                }
+                if profile.polaroid_span:
+                    polaroid_by_monitor = {monitors[0].name: chosen}
+                else:
+                    polaroid_by_monitor = {
+                        monitor.name: chosen[index * count_per_monitor : (index + 1) * count_per_monitor]
+                        for index, monitor in enumerate(monitors)
+                    }
                 try:
                     wallpaper = compose_polaroid(
                         monitors,
@@ -590,6 +594,7 @@ def _switch_once_with_state(
                         wallpaper_path,
                         bar_color=profile.bar_color,
                         size=profile.polaroid_size,
+                        span=profile.polaroid_span,
                         rng=rng,
                     )
                 except ImageDecodeError as exc:

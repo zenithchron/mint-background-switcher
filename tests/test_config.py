@@ -80,17 +80,27 @@ def test_polaroid_options_roundtrip_with_backward_compatible_defaults_and_bounds
     defaults = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "polaroid"}}})
     assert defaults.get_profile().polaroid_count == 4
     assert defaults.get_profile().polaroid_size == 0.5
+    assert defaults.get_profile().polaroid_span is False
 
     configured = Config.from_dict(
         {
             "active_profile": "P",
-            "profiles": {"P": {"mode": "polaroid", "polaroid_count": "7", "polaroid_size": "0.8"}},
+            "profiles": {
+                "P": {
+                    "mode": "polaroid",
+                    "polaroid_count": "7",
+                    "polaroid_size": "0.8",
+                    "polaroid_span": True,
+                }
+            },
         }
     )
     assert configured.get_profile().polaroid_count == 7
     assert configured.get_profile().polaroid_size == 0.8
+    assert configured.get_profile().polaroid_span is True
     assert configured.to_dict()["profiles"]["P"]["polaroid_count"] == 7
     assert configured.to_dict()["profiles"]["P"]["polaroid_size"] == 0.8
+    assert configured.to_dict()["profiles"]["P"]["polaroid_span"] is True
 
     high = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"polaroid_count": 999, "polaroid_size": 2}}}
@@ -98,7 +108,7 @@ def test_polaroid_options_roundtrip_with_backward_compatible_defaults_and_bounds
     low = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"polaroid_count": 0, "polaroid_size": -1}}}
     )
-    assert (high.get_profile().polaroid_count, high.get_profile().polaroid_size) == (20, 1.0)
+    assert (high.get_profile().polaroid_count, high.get_profile().polaroid_size) == (100, 1.0)
     assert (low.get_profile().polaroid_count, low.get_profile().polaroid_size) == (1, 0.0)
 
 

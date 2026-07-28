@@ -45,7 +45,7 @@ def _coerce_interval(value: Any, default: float = 10.0) -> float:
 
 def _coerce_polaroid_count(value: Any, default: int = 4) -> int:
     try:
-        return max(1, min(20, int(value)))
+        return max(1, min(100, int(value)))
     except (TypeError, ValueError, OverflowError):
         return default
 
@@ -58,6 +58,20 @@ def _coerce_polaroid_size(value: Any, default: float = 0.5) -> float:
     if not math.isfinite(size):
         return default
     return max(0.0, min(1.0, size))
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
 
 
 def _coerce_str_list(value: Any) -> list[str]:
@@ -91,6 +105,7 @@ class Profile:
     bar_color: str = "black"
     polaroid_count: int = 4
     polaroid_size: float = 0.5
+    polaroid_span: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -116,6 +131,7 @@ class Profile:
             bar_color=bar_color,
             polaroid_count=_coerce_polaroid_count(data.get("polaroid_count", 4)),
             polaroid_size=_coerce_polaroid_size(data.get("polaroid_size", 0.5)),
+            polaroid_span=_coerce_bool(data.get("polaroid_span", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -131,6 +147,7 @@ class Profile:
             "bar_color": self.bar_color,
             "polaroid_count": self.polaroid_count,
             "polaroid_size": self.polaroid_size,
+            "polaroid_span": self.polaroid_span,
         }
 
     def folders_for_monitor(self, monitor_name: str) -> list[str]:

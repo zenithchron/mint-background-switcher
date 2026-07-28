@@ -562,6 +562,24 @@ def _random_card_position(
     return rng.randint(0, max_x), rng.randint(0, max_y)
 
 
+def _random_spanning_card_position(
+    canvas_size: tuple[int, int],
+    card_size: tuple[int, int],
+    rng: random.Random,
+    *,
+    anchor_rect: tuple[int, int, int, int] | None = None,
+) -> tuple[int, int]:
+    """Keep the card center on a screen while allowing its edges to be clipped."""
+
+    if anchor_rect is None:
+        left, top, width, height = 0, 0, canvas_size[0], canvas_size[1]
+    else:
+        left, top, width, height = anchor_rect
+    center_x = rng.randint(left, left + max(0, width - 1))
+    center_y = rng.randint(top, top + max(0, height - 1))
+    return center_x - card_size[0] // 2, center_y - card_size[1] // 2
+
+
 def compose_polaroid(
     monitors: list[Monitor],
     images_by_monitor: dict[str, list[str]],
@@ -569,9 +587,10 @@ def compose_polaroid(
     *,
     bar_color: str = "black",
     size: float = 0.5,
+    span: bool = False,
     rng: random.Random | None = None,
 ) -> Path:
-    """Compose randomly placed, tilted, overlapping Polaroid prints per monitor."""
+    """Compose random Polaroid prints per monitor or across the virtual desktop."""
 
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
@@ -579,6 +598,36 @@ def compose_polaroid(
     size = max(0.0, min(1.0, float(size)))
     size_fraction = 0.20 + size * 0.35
     width, height, min_x, min_y = virtual_canvas(monitors)
+    if span:
+        combined = Image.new("RGB", (width, height), POLAROID_BACKGROUND_COLOR)
+        max_card_size = (
+            max(1, round(max(monitor.width for monitor in monitors) * size_fraction)),
+            max(1, round(max(monitor.height for monitor in monitors) * size_fraction)),
+        )
+        image_paths = [
+            image_path
+            for monitor in monitors
+            for image_path in images_by_monitor.get(monitor.name, [])
+        ]
+        card_specs = [(image_path, rng.uniform(-10.0, 10.0)) for image_path in image_paths]
+        rng.shuffle(card_specs)
+        anchors = list(monitors)
+        rng.shuffle(anchors)
+        for index, (image_path, angle) in enumerate(card_specs):
+            if index and index % len(anchors) == 0:
+                rng.shuffle(anchors)
+            card = _polaroid_tile(image_path, max_card_size, angle, bar_color=bar_color)
+            anchor = anchors[index % len(anchors)]
+            anchor_x, anchor_y = normalized_position(anchor, min_x, min_y)
+            x, y = _random_spanning_card_position(
+                (width, height),
+                card.size,
+                rng,
+                anchor_rect=(anchor_x, anchor_y, anchor.width, anchor.height),
+            )
+            combined.paste(card, (x, y), card)
+        return _save_png_atomic(combined, output_path)
+
     combined = Image.new("RGB", (width, height), (0, 0, 0))
     for monitor in monitors:
         panel = Image.new("RGB", (monitor.width, monitor.height), POLAROID_BACKGROUND_COLOR)

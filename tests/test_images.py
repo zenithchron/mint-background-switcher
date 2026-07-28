@@ -16,6 +16,7 @@ from mint_background_switcher.images import (
     _polaroid_tile,
     _postcard_tile,
     _random_card_position,
+    _random_spanning_card_position,
     add_three_month_calendar,
     apply_effect,
     compose_black,
@@ -455,6 +456,92 @@ def test_random_polaroid_positions_vary_and_keep_cards_fully_visible():
 
     assert len(set(positions)) > 1
     assert all(0 <= x <= 1280 and 0 <= y <= 600 for x, y in positions)
+
+
+def test_random_spanning_positions_keep_centers_visible_but_allow_clipping():
+    rng = random.Random(31)
+    positions = [_random_spanning_card_position((1920, 1080), (640, 480), rng) for _index in range(100)]
+
+    assert len(set(positions)) > 1
+    assert all(0 <= x + 320 <= 1920 and 0 <= y + 240 <= 1080 for x, y in positions)
+    assert any(x < 0 or y < 0 or x + 640 > 1920 or y + 480 > 1080 for x, y in positions)
+
+
+def test_polaroid_span_allows_outer_clipping_and_monitor_crossing(monkeypatch, tmp_path: Path):
+    colors = {"outer": (210, 50, 60, 255), "crossing": (60, 90, 220, 255)}
+    positions = iter([(-20, 10), (80, 40)])
+    anchor_rects = []
+
+    class FixedRng:
+        @staticmethod
+        def uniform(_low, _high):
+            return 0.0
+
+        @staticmethod
+        def shuffle(_items):
+            return None
+
+    monkeypatch.setattr(
+        images_module,
+        "_polaroid_tile",
+        lambda image_path, _size, _angle, **_kwargs: Image.new("RGBA", (40, 40), colors[image_path]),
+    )
+
+    def fixed_position(*_args, anchor_rect=None, **_kwargs):
+        anchor_rects.append(anchor_rect)
+        return next(positions)
+
+    monkeypatch.setattr(images_module, "_random_spanning_card_position", fixed_position)
+    monitors = [Monitor("A", 100, 100, 0, 0), Monitor("B", 100, 100, 100, 0)]
+
+    output = compose_polaroid(
+        monitors,
+        {"A": ["outer", "crossing"]},
+        tmp_path / "spanning.png",
+        span=True,
+        rng=FixedRng(),
+    )
+
+    with Image.open(output) as wallpaper:
+        assert wallpaper.size == (200, 100)
+        assert wallpaper.getpixel((0, 20)) == colors["outer"][:3]
+        assert wallpaper.getpixel((99, 50)) == colors["crossing"][:3]
+        assert wallpaper.getpixel((100, 50)) == colors["crossing"][:3]
+    assert anchor_rects == [(0, 0, 100, 100), (100, 0, 100, 100)]
+
+
+def test_polaroid_span_is_reproducible_with_injected_rng(tmp_path: Path):
+    paths = []
+    for index, color in enumerate(((210, 50, 60), (50, 190, 90), (60, 90, 220), (220, 180, 40))):
+        path = tmp_path / f"span-{index}.png"
+        Image.new("RGB", (120 + index * 20, 80 + index * 10), color).save(path)
+        paths.append(str(path))
+    monitors = [Monitor("A", 240, 160, 0, 0), Monitor("B", 240, 160, 240, 0)]
+
+    first = compose_polaroid(
+        monitors,
+        {"A": paths},
+        tmp_path / "span-first.png",
+        span=True,
+        rng=random.Random(41),
+    )
+    repeated = compose_polaroid(
+        monitors,
+        {"A": paths},
+        tmp_path / "span-repeated.png",
+        span=True,
+        rng=random.Random(41),
+    )
+    moved = compose_polaroid(
+        monitors,
+        {"A": paths},
+        tmp_path / "span-moved.png",
+        span=True,
+        rng=random.Random(42),
+    )
+
+    assert first.read_bytes() == repeated.read_bytes()
+    assert first.read_bytes() != moved.read_bytes()
 
 
 def test_polaroid_size_setting_measurably_changes_print_size(tmp_path: Path):

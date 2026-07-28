@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.22] - 2026-07-28
+
+### Added
+
+- A per-profile **Span across all screens** Polaroid option that composes one virtual-desktop layout, allowing prints to cross monitor boundaries and be clipped by the outer desktop edge.
+
+### Changed
+
+- Increased the Polaroid photo-count maximum from 20 to 100. The count remains per screen normally and becomes the total across the combined desktop when Span is enabled.
+- Enlarged the Polaroid size-slider handle for easier grabbing.
+- Bumped the package version to `0.1.22`.
+
 ## [0.1.21] - 2026-07-28
 
 ### Added

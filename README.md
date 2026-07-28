@@ -10,7 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Tabbed Settings editor with General, one tab per wallpaper mode, and About & Updates while retaining an explicit active-mode selector.
-- Configurable Polaroid layouts with 1–20 native-aspect prints per screen, a Small-to-Large size slider, and randomized fully visible placement, tilt, overlap, and stacking.
+- Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/tilt/stacking, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
 - Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
 - User-triggered managed updates from Settings with versioned per-user installs, atomic activation, restart, and rollback.
@@ -24,6 +24,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.22 - 2026-07-28
+
+- Added **Span across all screens** to Polaroid settings so prints can cross monitor boundaries or extend beyond the outer desktop edge.
+- Increased the Polaroid count maximum to 100; the count is per screen normally and total across the combined desktop while spanning.
+- Enlarged the Polaroid size-slider handle and added focused config, composition, service, and Xvfb-backed Settings coverage.
+- Bumped the package version to `0.1.22`.
 
 ### 0.1.21 - 2026-07-28
 
@@ -347,7 +354,7 @@ Each profile has a mode:
 - `montage`: four images from the shared pool are arranged in a 2x2 grid on each monitor, with every complete image fitted inside its tile instead of cropped.
 - `collage`: five images from the shared pool are fitted without cropping into a deterministic asymmetric mosaic independently on each monitor.
 - `postcard`: four images from the shared pool are fitted without cropping, placed in angled white frames with pushpins, and arranged on a corkboard-colored background independently for each monitor.
-- `polaroid`: 1–20 images from the shared pool are placed at their native aspect ratios inside individually tilted, bottom-heavy white print frames on a dark background for each monitor.
+- `polaroid`: 1–100 images from the shared pool are placed at native aspect ratios inside tilted, bottom-heavy white print frames. By default the count applies per screen and each print stays fully visible on its screen; optional Polaroid Span makes the count desktop-wide and allows prints to cross screen boundaries or be clipped at the virtual desktop edge.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
 - `span`: one image is fit with configured letterbox bars across the full virtual desktop canvas.
 

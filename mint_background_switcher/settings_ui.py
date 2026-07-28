@@ -176,6 +176,7 @@ class SettingsApp(tk.Tk):
         self.bar_color_var = tk.StringVar()
         self.polaroid_count_var = tk.IntVar(value=4)
         self.polaroid_size_var = tk.DoubleVar(value=0.5)
+        self.polaroid_span_var = tk.BooleanVar(value=False)
         self.monitor_folder_var = tk.StringVar()
         self.update_status_var = tk.StringVar()
         working_directory = configured_working_directory(self.config_data)
@@ -200,6 +201,7 @@ class SettingsApp(tk.Tk):
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
+        self.polaroid_span_var.trace_add("write", self._refresh_polaroid_count_label)
         self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._load_profile(self.profile_var.get())
         self._set_initial_window_geometry()
@@ -356,25 +358,37 @@ class SettingsApp(tk.Tk):
         ).pack(anchor="w", pady=(0, 12))
         self.polaroid_options = ttk.LabelFrame(polaroid_tab, text="Polaroid options", padding=10)
         self.polaroid_options.pack(fill=tk.X)
-        ttk.Label(self.polaroid_options, text="Polaroid photos per screen:").pack(side=tk.LEFT)
-        ttk.Spinbox(
+        self.polaroid_count_label = ttk.Label(self.polaroid_options, text="Polaroid photos per screen:")
+        self.polaroid_count_label.pack(side=tk.LEFT)
+        self.polaroid_count_spinbox = ttk.Spinbox(
             self.polaroid_options,
             from_=1,
-            to=20,
+            to=100,
             textvariable=self.polaroid_count_var,
             width=4,
-        ).pack(side=tk.LEFT, padx=(5, 18))
+        )
+        self.polaroid_count_spinbox.pack(side=tk.LEFT, padx=(5, 18))
         ttk.Label(self.polaroid_options, text="Photo size:").pack(side=tk.LEFT)
         ttk.Label(self.polaroid_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
-        ttk.Scale(
+        polaroid_scale_style = ttk.Style(self)
+        polaroid_scale_style.configure("Polaroid.Horizontal.TScale", sliderlength=36)
+        self.polaroid_size_scale = ttk.Scale(
             self.polaroid_options,
             from_=0.0,
             to=1.0,
             variable=self.polaroid_size_var,
             orient=tk.HORIZONTAL,
             length=180,
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            style="Polaroid.Horizontal.TScale",
+        )
+        self.polaroid_size_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Label(self.polaroid_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
+        self.polaroid_span_checkbutton = ttk.Checkbutton(
+            self.polaroid_options,
+            text="Span across all screens",
+            variable=self.polaroid_span_var,
+        )
+        self.polaroid_span_checkbutton.pack(side=tk.LEFT, padx=(18, 0))
 
         monitor_frame = ttk.LabelFrame(self.mode_tabs["per-monitor"], text="Per-monitor folders", padding=8)
         monitor_frame.pack(fill=tk.BOTH, expand=True)
@@ -464,9 +478,14 @@ class SettingsApp(tk.Tk):
         self.bar_color_var.set(profile.bar_color)
         self.polaroid_count_var.set(profile.polaroid_count)
         self.polaroid_size_var.set(profile.polaroid_size)
+        self.polaroid_span_var.set(profile.polaroid_span)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
+
+    def _refresh_polaroid_count_label(self, *_args: object) -> None:
+        text = "Polaroid photos across all screens:" if self.polaroid_span_var.get() else "Polaroid photos per screen:"
+        self.polaroid_count_label.configure(text=text)
 
     def _set_monitor_text(self, text: str) -> None:
         try:
@@ -495,8 +514,10 @@ class SettingsApp(tk.Tk):
     def _profile_from_fields(self, name: str) -> Profile:
         count_var = vars(self).get("polaroid_count_var")
         size_var = vars(self).get("polaroid_size_var")
-        polaroid_count = max(1, min(20, int(count_var.get()))) if count_var is not None else 4
+        span_var = vars(self).get("polaroid_span_var")
+        polaroid_count = max(1, min(100, int(count_var.get()))) if count_var is not None else 4
         polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
+        polaroid_span = bool(span_var.get()) if span_var is not None else False
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -510,6 +531,7 @@ class SettingsApp(tk.Tk):
             bar_color=self.bar_color_var.get(),
             polaroid_count=polaroid_count,
             polaroid_size=polaroid_size,
+            polaroid_span=polaroid_span,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
