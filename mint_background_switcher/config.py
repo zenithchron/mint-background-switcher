@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -42,6 +43,23 @@ def _coerce_interval(value: Any, default: float = 10.0) -> float:
         return default
 
 
+def _coerce_polaroid_count(value: Any, default: int = 4) -> int:
+    try:
+        return max(1, min(20, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _coerce_polaroid_size(value: Any, default: float = 0.5) -> float:
+    try:
+        size = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not math.isfinite(size):
+        return default
+    return max(0.0, min(1.0, size))
+
+
 def _coerce_str_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -71,6 +89,8 @@ class Profile:
     desktop: str = "auto"
     effect: str = "none"
     bar_color: str = "black"
+    polaroid_count: int = 4
+    polaroid_size: float = 0.5
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -94,6 +114,8 @@ class Profile:
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
+            polaroid_count=_coerce_polaroid_count(data.get("polaroid_count", 4)),
+            polaroid_size=_coerce_polaroid_size(data.get("polaroid_size", 0.5)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,6 +129,8 @@ class Profile:
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,
+            "polaroid_count": self.polaroid_count,
+            "polaroid_size": self.polaroid_size,
         }
 
     def folders_for_monitor(self, monitor_name: str) -> list[str]:

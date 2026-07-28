@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+import random
 
 from PIL import Image
 import pytest
@@ -14,6 +15,7 @@ from mint_background_switcher.images import (
     _collage_tile,
     _polaroid_tile,
     _postcard_tile,
+    _random_card_position,
     add_three_month_calendar,
     apply_effect,
     compose_black,
@@ -400,10 +402,17 @@ def test_compose_polaroid_frames_four_uncropped_images_on_each_monitor(tmp_path:
     source_bytes = {path: Path(path).read_bytes() for path in paths}
     monitors = [Monitor("A", 240, 160, 0, 0)]
 
-    output = compose_polaroid(monitors, {"A": paths}, tmp_path / "polaroid.png")
-    repeated = compose_polaroid(monitors, {"A": paths}, tmp_path / "polaroid-repeated.png")
+    output = compose_polaroid(monitors, {"A": paths}, tmp_path / "polaroid.png", rng=random.Random(13))
+    repeated = compose_polaroid(
+        monitors,
+        {"A": paths},
+        tmp_path / "polaroid-repeated.png",
+        rng=random.Random(13),
+    )
+    moved = compose_polaroid(monitors, {"A": paths}, tmp_path / "polaroid-moved.png", rng=random.Random(14))
 
     assert output.read_bytes() == repeated.read_bytes()
+    assert output.read_bytes() != moved.read_bytes()
     assert {path: Path(path).read_bytes() for path in paths} == source_bytes
     with Image.open(output) as polaroid:
         assert polaroid.mode == "RGB"
@@ -433,10 +442,44 @@ def test_polaroid_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path:
     straight = _polaroid_tile(str(path), (240, 160), 0.0, bar_color="black")
     straight_colors = {color for _count, color in straight.getcolors(maxcolors=straight.width * straight.height) or []}
     assert {(*color, 255) for color in marker_colors}.issubset(straight_colors)
+    assert (0, 0, 0, 255) not in straight_colors
 
     ultrawide = _polaroid_tile(str(path), (1920, 540), 7.0, bar_color="black")
     assert ultrawide.width <= 1920
     assert ultrawide.height <= 540
+
+
+def test_random_polaroid_positions_vary_and_keep_cards_fully_visible():
+    rng = random.Random(29)
+    positions = [_random_card_position((1920, 1080), (640, 480), rng) for _index in range(20)]
+
+    assert len(set(positions)) > 1
+    assert all(0 <= x <= 1280 and 0 <= y <= 600 for x, y in positions)
+
+
+def test_polaroid_size_setting_measurably_changes_print_size(tmp_path: Path):
+    source = tmp_path / "red-square.png"
+    Image.new("RGB", (100, 100), (220, 30, 30)).save(source)
+    monitors = [Monitor("A", 400, 300, 0, 0)]
+    images = {"A": [str(source)]}
+
+    small_path = compose_polaroid(monitors, images, tmp_path / "small.png", size=0.0, rng=random.Random(7))
+    large_path = compose_polaroid(monitors, images, tmp_path / "large.png", size=1.0, rng=random.Random(7))
+
+    with Image.open(small_path) as small, Image.open(large_path) as large:
+        background = (39, 44, 52)
+        small_pixels = small.load()
+        large_pixels = large.load()
+        assert small_pixels is not None
+        assert large_pixels is not None
+        small_print_pixels = sum(
+            small_pixels[x, y] != background for y in range(small.height) for x in range(small.width)
+        )
+        large_print_pixels = sum(
+            large_pixels[x, y] != background for y in range(large.height) for x in range(large.width)
+        )
+        assert small.size == large.size == (400, 300)
+        assert large_print_pixels > small_print_pixels * 2
 
 
 def test_compose_per_monitor_and_black(tmp_path: Path):

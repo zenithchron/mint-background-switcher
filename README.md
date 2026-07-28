@@ -9,7 +9,8 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
-- Settings editor for profiles, folders, wallpaper actions, installed version, and About information.
+- Tabbed Settings editor with General, one tab per wallpaper mode, and About & Updates while retaining an explicit active-mode selector.
+- Configurable Polaroid layouts with 1–20 native-aspect prints per screen, a Small-to-Large size slider, and randomized fully visible placement, tilt, overlap, and stacking.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
 - Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
 - User-triggered managed updates from Settings with versioned per-user installs, atomic activation, restart, and rollback.
@@ -23,6 +24,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.20 - 2026-07-27
+
+- Reorganized Settings into General, one tab per wallpaper mode, and About & Updates. Shared sources remain in General; monitor assignments live under Per-monitor.
+- Added per-profile Polaroid photo-count and size controls with backward-compatible defaults of four medium prints.
+- Removed Polaroid letterbox bars and changed each render to use snug native-aspect frames with randomized positions, tilt, overlap, and stacking order.
+- Bumped the package version to `0.1.20`.
 
 ### 0.1.19 - 2026-07-27
 

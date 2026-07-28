@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.20] - 2026-07-27
+
+### Added
+
+- A tabbed Settings layout with General, one tab for every wallpaper mode, and About & Updates; the active mode remains an explicit General setting.
+- Per-profile Polaroid controls for 1–20 photos per screen and a continuous Small-to-Large size slider, with existing profiles defaulting to four medium prints.
+
+### Changed
+
+- Polaroid prints now preserve each source image's native aspect ratio without inserted letterbox bars, fit the white frame snugly to the photo, and randomize fully visible coordinates, tilt, overlap, and stacking order for every render.
+- Shared image-source folders now live under General, per-monitor assignments live under Per-monitor, and update/rollback controls live under About & Updates.
+- Bumped the package version to `0.1.20`.
+
 ## [0.1.19] - 2026-07-27
 
 ### Fixed

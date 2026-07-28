@@ -6,6 +6,7 @@ import calendar
 from datetime import date
 import os
 from pathlib import Path
+import random
 import tempfile
 from typing import Iterable
 import warnings
@@ -522,18 +523,22 @@ def _polaroid_tile(
     *,
     bar_color: str,
 ) -> Image.Image:
-    """Return one uncropped photo in a bottom-heavy Polaroid-style frame."""
+    """Return one uncropped native-aspect photo in a snug bottom-heavy frame."""
 
+    del bar_color  # Retained for API compatibility; Polaroid photos no longer use letterbox bars.
     cell_width, cell_height = cell_size
-    photo_width = max(1, round(cell_width * 0.70))
-    photo_height = max(1, round(cell_height * 0.56))
     border = max(1, min(cell_width, cell_height) // 30)
     bottom_border = max(border * 4, round(cell_height * 0.12))
+    photo_max_width = max(1, cell_width - 2 * border)
+    photo_max_height = max(1, cell_height - border - bottom_border)
     try:
         source = open_image(image_path)
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
         raise ImageDecodeError(image_path) from exc
-    fitted = fit_with_black_bars(source, (photo_width, photo_height), bar_color)
+    scale = min(photo_max_width / source.width, photo_max_height / source.height)
+    photo_width = max(1, round(source.width * scale))
+    photo_height = max(1, round(source.height * scale))
+    fitted = source.resize((photo_width, photo_height), Image.Resampling.LANCZOS)
     card = Image.new(
         "RGBA",
         (photo_width + 2 * border, photo_height + border + bottom_border),
@@ -545,39 +550,55 @@ def _polaroid_tile(
     return rotated
 
 
+def _random_card_position(
+    panel_size: tuple[int, int],
+    card_size: tuple[int, int],
+    rng: random.Random,
+) -> tuple[int, int]:
+    """Choose a random position that keeps the entire card inside its monitor."""
+
+    max_x = max(0, panel_size[0] - card_size[0])
+    max_y = max(0, panel_size[1] - card_size[1])
+    return rng.randint(0, max_x), rng.randint(0, max_y)
+
+
 def compose_polaroid(
     monitors: list[Monitor],
     images_by_monitor: dict[str, list[str]],
     output_path: str | Path,
     *,
     bar_color: str = "black",
+    size: float = 0.5,
+    rng: random.Random | None = None,
 ) -> Path:
-    """Compose four locally selected photos as tilted Polaroid-style prints per monitor."""
+    """Compose randomly placed, tilted, overlapping Polaroid prints per monitor."""
 
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
+    rng = rng or random.SystemRandom()
+    size = max(0.0, min(1.0, float(size)))
+    size_fraction = 0.20 + size * 0.35
     width, height, min_x, min_y = virtual_canvas(monitors)
     combined = Image.new("RGB", (width, height), (0, 0, 0))
-    angles = (7.0, -8.0, -6.0, 8.0)
     for monitor in monitors:
         panel = Image.new("RGB", (monitor.width, monitor.height), POLAROID_BACKGROUND_COLOR)
-        split_x = monitor.width // 2
-        split_y = monitor.height // 2
-        cells = (
-            (0, 0, split_x, split_y),
-            (split_x, 0, monitor.width, split_y),
-            (0, split_y, split_x, monitor.height),
-            (split_x, split_y, monitor.width, monitor.height),
+        max_card_size = (
+            max(1, round(monitor.width * size_fraction)),
+            max(1, round(monitor.height * size_fraction)),
         )
-        image_paths = images_by_monitor.get(monitor.name, [])
-        for image_path, angle, (left, top, right, bottom) in zip(image_paths, angles, cells):
-            cell_width = right - left
-            cell_height = bottom - top
-            if cell_width <= 0 or cell_height <= 0:
-                continue
-            card = _polaroid_tile(image_path, (cell_width, cell_height), angle, bar_color=bar_color)
-            x = left + (cell_width - card.width) // 2
-            y = top + (cell_height - card.height) // 2
+        card_specs = [
+            (image_path, rng.uniform(-10.0, 10.0))
+            for image_path in images_by_monitor.get(monitor.name, [])
+        ]
+        rng.shuffle(card_specs)
+        for image_path, angle in card_specs:
+            card = _polaroid_tile(
+                image_path,
+                max_card_size,
+                angle,
+                bar_color=bar_color,
+            )
+            x, y = _random_card_position((monitor.width, monitor.height), card.size, rng)
             panel.paste(card, (x, y), card)
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     return _save_png_atomic(combined, output_path)

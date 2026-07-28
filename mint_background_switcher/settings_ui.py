@@ -146,6 +146,8 @@ class SettingsApp(tk.Tk):
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
+        self.polaroid_count_var = tk.IntVar(value=4)
+        self.polaroid_size_var = tk.DoubleVar(value=0.5)
         self.monitor_folder_var = tk.StringVar()
         self.update_status_var = tk.StringVar()
         working_directory = configured_working_directory(self.config_data)
@@ -199,7 +201,28 @@ class SettingsApp(tk.Tk):
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
 
-        top = ttk.Frame(root)
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        self.general_tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(self.general_tab, text="General")
+        self.mode_tabs: dict[str, ttk.Frame] = {}
+        for mode, title in (
+            ("shared", "Shared"),
+            ("same", "Same"),
+            ("montage", "Montage"),
+            ("collage", "Collage"),
+            ("postcard", "Postcard"),
+            ("polaroid", "Polaroid"),
+            ("per-monitor", "Per-monitor"),
+            ("span", "Span"),
+        ):
+            tab = ttk.Frame(self.notebook, padding=12)
+            self.mode_tabs[mode] = tab
+            self.notebook.add(tab, text=title)
+        self.about_tab = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(self.about_tab, text="About & Updates")
+
+        top = ttk.Frame(self.general_tab)
         top.pack(fill=tk.X)
         ttk.Label(top, text="Profile:").pack(side=tk.LEFT)
         self.profile_combo = ttk.Combobox(top, textvariable=self.profile_var, values=sorted(self.config_data.profiles), state="readonly")
@@ -214,7 +237,7 @@ class SettingsApp(tk.Tk):
         self.profile_save_button = ttk.Button(top, text="Save", command=self._save_current)
         self.profile_save_button.pack(side=tk.RIGHT, padx=2)
 
-        form = ttk.LabelFrame(root, text="Profile settings", padding=10)
+        form = ttk.LabelFrame(self.general_tab, text="Settings applying to all modes", padding=10)
         form.pack(fill=tk.X, pady=8)
         ttk.Label(form, text="Interval minutes:").grid(row=0, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.interval_var, width=10).grid(row=0, column=1, sticky="w", padx=5)
@@ -244,19 +267,89 @@ class SettingsApp(tk.Tk):
         ttk.Label(form, text="Letterbox bars:").grid(row=3, column=0, sticky="w", pady=(5, 0))
         ttk.OptionMenu(form, self.bar_color_var, "black", "black", "auto").grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
 
-        folders = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-        folders.pack(fill=tk.BOTH, expand=True, pady=8)
-
-        shared_frame = ttk.LabelFrame(folders, text="Shared folders / span folders", padding=8)
-        self.shared_text = tk.Text(shared_frame, height=6, width=40)
+        shared_frame = ttk.LabelFrame(self.general_tab, text="Shared image-source folders", padding=8)
+        shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)
+        ttk.Label(
+            shared_frame,
+            text="Used by Shared, Same, Montage, Collage, Postcard, Polaroid, and Span modes.",
+        ).pack(anchor="w", pady=(0, 4))
+        self.shared_text = tk.Text(shared_frame, height=5, width=40)
         self.shared_text.pack(fill=tk.BOTH, expand=True)
         shared_buttons = ttk.Frame(shared_frame)
         shared_buttons.pack(fill=tk.X, pady=4)
         ttk.Button(shared_buttons, text="Add folder...", command=self._add_shared_folder).pack(side=tk.LEFT)
-        ttk.Button(shared_buttons, text="Browse hard drives...", command=self._add_shared_folder_from_root).pack(side=tk.LEFT, padx=4)
-        folders.add(shared_frame, weight=1)
+        ttk.Button(shared_buttons, text="Browse hard drives...", command=self._add_shared_folder_from_root).pack(
+            side=tk.LEFT, padx=4
+        )
 
-        monitor_frame = ttk.LabelFrame(folders, text="Per-monitor folders", padding=8)
+        working = ttk.LabelFrame(self.general_tab, text="Working files", padding=(8, 5))
+        working.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(working, text="Generated wallpapers and library index:").grid(row=0, column=0, sticky="w")
+        self.working_directory_entry = ttk.Entry(working, textvariable=self.working_directory_var, width=19)
+        self.working_directory_entry.grid(row=0, column=1, sticky="ew", padx=6)
+        self.working_browse_button = ttk.Button(working, text="Browse...", command=self._browse_working_directory)
+        self.working_browse_button.grid(row=0, column=2, padx=2)
+        self.working_create_button = ttk.Button(working, text="Create Folder...", command=self._create_working_directory)
+        self.working_create_button.grid(row=0, column=3, padx=2)
+        self.working_use_button = ttk.Button(working, text="Use Folder...", command=self._use_working_directory)
+        self.working_use_button.grid(row=0, column=4, padx=2)
+        self.working_cancel_button = ttk.Button(working, text="Cancel Move", command=self._cancel_working_migration)
+        self.working_cancel_button.grid(row=0, column=5, padx=(2, 0))
+        self.working_cancel_button.state(["disabled"])
+        ttk.Label(working, textvariable=self.working_status_var, anchor="w").grid(
+            row=1,
+            column=0,
+            columnspan=6,
+            sticky="ew",
+            pady=(4, 0),
+        )
+        working.columnconfigure(1, weight=1)
+
+        mode_descriptions = {
+            "shared": "Shows a different image from the General shared source folders on each screen.",
+            "same": "Shows the same image from the General shared source folders on every screen.",
+            "montage": "Arranges four images from the General shared source folders in a grid on each screen.",
+            "collage": "Arranges five images from the General shared source folders in an asymmetric collage.",
+            "postcard": "Arranges postcard-style images from the General shared source folders.",
+            "span": "Spans one image from the General shared source folders across the virtual desktop.",
+        }
+        for mode, description in mode_descriptions.items():
+            ttk.Label(self.mode_tabs[mode], text=description, justify=tk.LEFT, wraplength=760).pack(anchor="w")
+
+        polaroid_tab = self.mode_tabs["polaroid"]
+        ttk.Label(
+            polaroid_tab,
+            text=(
+                "Places randomly positioned and tilted Polaroid-style prints from the General shared "
+                "source folders. Prints may overlap."
+            ),
+            justify=tk.LEFT,
+            wraplength=760,
+        ).pack(anchor="w", pady=(0, 12))
+        self.polaroid_options = ttk.LabelFrame(polaroid_tab, text="Polaroid options", padding=10)
+        self.polaroid_options.pack(fill=tk.X)
+        ttk.Label(self.polaroid_options, text="Polaroid photos per screen:").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            self.polaroid_options,
+            from_=1,
+            to=20,
+            textvariable=self.polaroid_count_var,
+            width=4,
+        ).pack(side=tk.LEFT, padx=(5, 18))
+        ttk.Label(self.polaroid_options, text="Photo size:").pack(side=tk.LEFT)
+        ttk.Label(self.polaroid_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
+        ttk.Scale(
+            self.polaroid_options,
+            from_=0.0,
+            to=1.0,
+            variable=self.polaroid_size_var,
+            orient=tk.HORIZONTAL,
+            length=180,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(self.polaroid_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
+
+        monitor_frame = ttk.LabelFrame(self.mode_tabs["per-monitor"], text="Per-monitor folders", padding=8)
+        monitor_frame.pack(fill=tk.BOTH, expand=True)
         monitors = self.detected_monitors
         self.monitor_names = [m.name for m in monitors]
         if self.monitor_names:
@@ -282,33 +375,23 @@ class SettingsApp(tk.Tk):
         ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(6, 0))
         self.monitor_text = tk.Text(monitor_frame, height=6, width=48)
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
-        folders.add(monitor_frame, weight=1)
 
-        working = ttk.LabelFrame(root, text="Working files", padding=(8, 5))
-        working.pack(fill=tk.X, pady=(0, 4))
-        ttk.Label(working, text="Generated wallpapers and library index:").grid(row=0, column=0, sticky="w")
-        self.working_directory_entry = ttk.Entry(working, textvariable=self.working_directory_var, width=19)
-        self.working_directory_entry.grid(row=0, column=1, sticky="ew", padx=6)
-        self.working_browse_button = ttk.Button(working, text="Browse...", command=self._browse_working_directory)
-        self.working_browse_button.grid(row=0, column=2, padx=2)
-        self.working_create_button = ttk.Button(working, text="Create Folder...", command=self._create_working_directory)
-        self.working_create_button.grid(row=0, column=3, padx=2)
-        self.working_use_button = ttk.Button(working, text="Use Folder...", command=self._use_working_directory)
-        self.working_use_button.grid(row=0, column=4, padx=2)
-        self.working_cancel_button = ttk.Button(working, text="Cancel Move", command=self._cancel_working_migration)
-        self.working_cancel_button.grid(row=0, column=5, padx=(2, 0))
-        self.working_cancel_button.state(["disabled"])
-        ttk.Label(working, textvariable=self.working_status_var, anchor="w").grid(
-            row=1,
-            column=0,
-            columnspan=6,
-            sticky="ew",
-            pady=(4, 0),
-        )
-        working.columnconfigure(1, weight=1)
-
-        maintenance = ttk.Frame(root)
-        maintenance.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(
+            self.about_tab,
+            text=f"{APP_NAME}\nVersion {__version__}",
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(0, 8))
+        ttk.Label(
+            self.about_tab,
+            text=(
+                "A local Linux Mint/Cinnamon wallpaper switcher with per-profile layouts, effects, "
+                "multi-monitor composition, and source-preserving generated wallpapers."
+            ),
+            justify=tk.LEFT,
+            wraplength=760,
+        ).pack(anchor="w", pady=(0, 16))
+        maintenance = ttk.LabelFrame(self.about_tab, text="Application updates", padding=10)
+        maintenance.pack(fill=tk.X)
         ttk.Label(maintenance, text="Application updates:").pack(side=tk.LEFT, padx=(3, 6))
         self.update_button = ttk.Button(maintenance, text="Check for Updates...", command=self._check_for_updates)
         self.update_button.pack(side=tk.LEFT, padx=3)
@@ -332,7 +415,11 @@ class SettingsApp(tk.Tk):
         self.current_pictures_button.pack(side=tk.LEFT, padx=3)
         self.close_button = ttk.Button(bottom, text="Close", command=self._request_close)
         self.close_button.pack(side=tk.RIGHT, padx=3)
-        self.about_button = ttk.Button(bottom, text="About", command=self._show_about)
+        self.about_button = ttk.Button(
+            bottom,
+            text="About & Updates",
+            command=lambda: self.notebook.select(self.about_tab),
+        )
         self.about_button.pack(side=tk.RIGHT, padx=3)
         ttk.Label(bottom, text=f"Version {__version__}").pack(side=tk.RIGHT, padx=(3, 10))
         self._refresh_rollback_button()
@@ -347,6 +434,8 @@ class SettingsApp(tk.Tk):
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
+        self.polaroid_count_var.set(profile.polaroid_count)
+        self.polaroid_size_var.set(profile.polaroid_size)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
@@ -376,6 +465,10 @@ class SettingsApp(tk.Tk):
         return result
 
     def _profile_from_fields(self, name: str) -> Profile:
+        count_var = vars(self).get("polaroid_count_var")
+        size_var = vars(self).get("polaroid_size_var")
+        polaroid_count = max(1, min(20, int(count_var.get()))) if count_var is not None else 4
+        polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -387,6 +480,8 @@ class SettingsApp(tk.Tk):
             desktop=self.desktop_var.get(),
             effect=self.effect_var.get(),
             bar_color=self.bar_color_var.get(),
+            polaroid_count=polaroid_count,
+            polaroid_size=polaroid_size,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:

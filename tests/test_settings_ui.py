@@ -831,14 +831,17 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         menu = app.nametowidget(app.mode_menu["menu"])
         labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
         saved_modes = []
+        saved_polaroid_options = []
         applied_profiles = []
         messages = []
         errors = []
-        monkeypatch.setattr(
-            settings_ui,
-            "save_config",
-            lambda config: saved_modes.append(config.get_profile("Default").mode),
-        )
+
+        def capture_config(config):
+            profile = config.get_profile("Default")
+            saved_modes.append(profile.mode)
+            saved_polaroid_options.append((profile.polaroid_count, profile.polaroid_size))
+
+        monkeypatch.setattr(settings_ui, "save_config", capture_config)
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
@@ -857,14 +860,45 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         )
 
         assert "polaroid" in labels
+        tab_labels = [app.notebook.tab(tab_id, "text") for tab_id in app.notebook.tabs()]
+        assert tab_labels == [
+            "General",
+            "Shared",
+            "Same",
+            "Montage",
+            "Collage",
+            "Postcard",
+            "Polaroid",
+            "Per-monitor",
+            "Span",
+            "About & Updates",
+        ]
+        assert str(app.shared_text).startswith(str(app.general_tab))
+        assert str(app.monitor_text).startswith(str(app.mode_tabs["per-monitor"]))
+        assert str(app.update_button).startswith(str(app.about_tab))
         assert app.mode_menu.winfo_ismapped()
         assert app.mode_menu.winfo_width() > 1
         assert app.title() == f"{settings_ui.APP_NAME} Settings — {settings_ui.__version__}"
+        assert app.mode_var.get() == "shared"
+        assert not app.polaroid_options.winfo_ismapped()
+        app.notebook.select(app.mode_tabs["polaroid"])
+        app.update_idletasks()
+        assert app.polaroid_options.winfo_ismapped()
+        assert app.mode_var.get() == "shared"
+        app.notebook.select(app.general_tab)
         menu.invoke(labels.index("polaroid"))
+        app.update_idletasks()
         assert app.mode_var.get() == "polaroid"
+        assert not app.polaroid_options.winfo_ismapped()
+        app.notebook.select(app.mode_tabs["polaroid"])
+        app.update_idletasks()
+        assert app.polaroid_options.winfo_ismapped()
+        app.polaroid_count_var.set(7)
+        app.polaroid_size_var.set(0.8)
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["polaroid"]
+        assert saved_polaroid_options == [(7, 0.8)]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
 
@@ -883,6 +917,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["polaroid", "polaroid"]
+        assert saved_polaroid_options == [(7, 0.8), (7, 0.8)]
         assert messages[-1][0] == "Safe black fallback"
         assert "No usable source images" in messages[-1][1]
 
@@ -894,6 +929,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["polaroid", "polaroid", "polaroid"]
+        assert saved_polaroid_options == [(7, 0.8), (7, 0.8), (7, 0.8)]
         assert errors == [("Apply failed", "polaroid preview failed")]
     finally:
         app.destroy()
@@ -1507,6 +1543,9 @@ def test_settings_exposes_update_and_rollback_controls(monkeypatch, tmp_path):
         app.update_idletasks()
         app.update()
         assert app.update_button.cget("text") == "Check for Updates..."
+        assert not app.update_button.winfo_ismapped()
+        app.notebook.select(app.about_tab)
+        app.update_idletasks()
         assert app.update_button.winfo_ismapped()
         assert app.rollback_button.cget("text") == "Roll Back..."
         assert app.rollback_button.winfo_ismapped()

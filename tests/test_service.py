@@ -802,17 +802,29 @@ def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeyp
         ]
 
 
-def test_polaroid_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
+def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
     cfg.get_profile("P").mode = "polaroid"
+    cfg.get_profile("P").polaroid_count = 7
+    cfg.get_profile("P").polaroid_size = 0.8
     save_config(cfg)
     captured = {}
 
-    def fake_compose_polaroid(monitors, images_by_monitor, output_path, *, bar_color="black"):
+    def fake_compose_polaroid(
+        monitors,
+        images_by_monitor,
+        output_path,
+        *,
+        bar_color="black",
+        size=0.5,
+        rng=None,
+    ):
         captured["monitors"] = [monitor.name for monitor in monitors]
         captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
         captured["bar_color"] = bar_color
+        captured["size"] = size
+        captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"polaroid")
         return Path(output_path)
@@ -831,13 +843,17 @@ def test_polaroid_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path)
     state = load_state()
 
     assert result.action == "next"
-    assert len(result.images) == 8
+    assert len(result.images) == 14
+    assert len(set(result.images[:4])) == 4
+    assert len(set(result.images)) == 4
     assert captured["monitors"] == ["A", "B"]
-    assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
-    assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
+    assert captured["images_by_monitor"] == {"A": result.images[:7], "B": result.images[7:]}
+    assert all(len(paths) == 7 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
+    assert captured["size"] == 0.8
+    assert isinstance(captured["rng"], random.Random)
     assert "profile:P:polaroid" not in state.remaining
-    assert draw_counts == [("profile:P:polaroid", 8)]
+    assert draw_counts == [("profile:P:polaroid", 14)]
 
 
 def test_polaroid_dry_run_skips_malformed_images_without_changing_sources_or_state(
@@ -930,13 +946,28 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
     attempts = []
     removed = []
 
-    def remove_one_selected_source(monitors, images_by_monitor, output_path, *, bar_color="black"):
+    def remove_one_selected_source(
+        monitors,
+        images_by_monitor,
+        output_path,
+        *,
+        bar_color="black",
+        size=0.5,
+        rng=None,
+    ):
         attempts.append({name: list(paths) for name, paths in images_by_monitor.items()})
         if not removed:
             victim = Path(images_by_monitor["A"][0])
             victim.unlink()
             removed.append(victim)
-        return compose_polaroid(monitors, images_by_monitor, output_path, bar_color=bar_color)
+        return compose_polaroid(
+            monitors,
+            images_by_monitor,
+            output_path,
+            bar_color=bar_color,
+            size=size,
+            rng=rng,
+        )
 
     monkeypatch.setattr(service, "compose_polaroid", remove_one_selected_source)
 
