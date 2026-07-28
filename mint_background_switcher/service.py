@@ -513,31 +513,51 @@ def _switch_once_with_state(
             )
             action = "black-fallback"
         else:
-            chosen = _draw_from_pool(
-                state,
-                pool,
-                _profile_bucket(profile, "postcard"),
-                len(monitors) * 4,
-                rng=rng,
-                require_usable=True,
-            )
-            if not chosen:
-                wallpaper = _apply_black_fallback(
-                    profile,
-                    monitors,
-                    wallpaper_path,
-                    dry_run=dry_run,
-                    cancelled=cancelled,
+            bucket = _profile_bucket(profile, "postcard")
+            count_per_monitor = profile.postcard_count
+            requested_count = count_per_monitor if profile.postcard_span else len(monitors) * count_per_monitor
+            while True:
+                _cancel_if_requested(cancelled)
+                chosen = _draw_from_pool(
+                    state,
+                    pool,
+                    bucket,
+                    requested_count,
+                    rng=rng,
                 )
-                action = "black-fallback"
-            else:
-                postcard_by_monitor = {
-                    monitor.name: chosen[index * 4 : (index + 1) * 4]
-                    for index, monitor in enumerate(monitors)
-                }
+                if not chosen:
+                    wallpaper = _apply_black_fallback(
+                        profile,
+                        monitors,
+                        wallpaper_path,
+                        dry_run=dry_run,
+                        cancelled=cancelled,
+                    )
+                    action = "black-fallback"
+                    break
+                if profile.postcard_span:
+                    postcard_by_monitor = {monitors[0].name: chosen}
+                else:
+                    postcard_by_monitor = {
+                        monitor.name: chosen[index * count_per_monitor : (index + 1) * count_per_monitor]
+                        for index, monitor in enumerate(monitors)
+                    }
+                try:
+                    wallpaper = compose_postcard(
+                        monitors,
+                        postcard_by_monitor,
+                        wallpaper_path,
+                        bar_color=profile.bar_color,
+                        size=profile.postcard_size,
+                        span=profile.postcard_span,
+                        rng=rng,
+                    )
+                except ImageDecodeError as exc:
+                    _discard_from_pool(pool, exc.image_path)
+                    continue
                 images_used = chosen
-                wallpaper = compose_postcard(monitors, postcard_by_monitor, wallpaper_path, bar_color=profile.bar_color)
                 _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+                break
     elif profile.mode == "polaroid":
         pool = _load_image_pool(
             profile.shared_folders,

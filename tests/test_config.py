@@ -71,6 +71,40 @@ def test_postcard_mode_is_valid():
     assert cfg.get_profile().mode == "postcard"
 
 
+def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds():
+    defaults = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "postcard"}}})
+    assert defaults.get_profile().postcard_count == 4
+    assert defaults.get_profile().postcard_size == 0.5
+    assert defaults.get_profile().postcard_span is False
+
+    configured = Config.from_dict(
+        {
+            "active_profile": "P",
+            "profiles": {
+                "P": {
+                    "mode": "postcard",
+                    "postcard_count": "7",
+                    "postcard_size": "0.8",
+                    "postcard_span": True,
+                }
+            },
+        }
+    )
+    profile = configured.get_profile()
+    assert (profile.postcard_count, profile.postcard_size, profile.postcard_span) == (7, 0.8, True)
+    saved = configured.to_dict()["profiles"]["P"]
+    assert (saved["postcard_count"], saved["postcard_size"], saved["postcard_span"]) == (7, 0.8, True)
+
+    high = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"postcard_count": 999, "postcard_size": 2}}}
+    )
+    low = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"postcard_count": 0, "postcard_size": -1}}}
+    )
+    assert (high.get_profile().postcard_count, high.get_profile().postcard_size) == (100, 1.0)
+    assert (low.get_profile().postcard_count, low.get_profile().postcard_size) == (1, 0.0)
+
+
 def test_polaroid_mode_is_valid():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "POLAROID"}}})
     assert cfg.get_profile().mode == "polaroid"

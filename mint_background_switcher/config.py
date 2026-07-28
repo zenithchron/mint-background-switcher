@@ -43,14 +43,14 @@ def _coerce_interval(value: Any, default: float = 10.0) -> float:
         return default
 
 
-def _coerce_polaroid_count(value: Any, default: int = 4) -> int:
+def _coerce_photo_count(value: Any, default: int = 4) -> int:
     try:
         return max(1, min(100, int(value)))
     except (TypeError, ValueError, OverflowError):
         return default
 
 
-def _coerce_polaroid_size(value: Any, default: float = 0.5) -> float:
+def _coerce_photo_size(value: Any, default: float = 0.5) -> float:
     try:
         size = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -103,6 +103,9 @@ class Profile:
     desktop: str = "auto"
     effect: str = "none"
     bar_color: str = "black"
+    postcard_count: int = 4
+    postcard_size: float = 0.5
+    postcard_span: bool = False
     polaroid_count: int = 4
     polaroid_size: float = 0.5
     polaroid_span: bool = False
@@ -129,8 +132,11 @@ class Profile:
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
-            polaroid_count=_coerce_polaroid_count(data.get("polaroid_count", 4)),
-            polaroid_size=_coerce_polaroid_size(data.get("polaroid_size", 0.5)),
+            postcard_count=_coerce_photo_count(data.get("postcard_count", 4)),
+            postcard_size=_coerce_photo_size(data.get("postcard_size", 0.5)),
+            postcard_span=_coerce_bool(data.get("postcard_span", False)),
+            polaroid_count=_coerce_photo_count(data.get("polaroid_count", 4)),
+            polaroid_size=_coerce_photo_size(data.get("polaroid_size", 0.5)),
             polaroid_span=_coerce_bool(data.get("polaroid_span", False)),
         )
 
@@ -145,6 +151,9 @@ class Profile:
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,
+            "postcard_count": self.postcard_count,
+            "postcard_size": self.postcard_size,
+            "postcard_span": self.postcard_span,
             "polaroid_count": self.polaroid_count,
             "polaroid_size": self.polaroid_size,
             "polaroid_span": self.polaroid_span,

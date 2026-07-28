@@ -851,14 +851,17 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         menu = app.nametowidget(app.mode_menu["menu"])
         labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
         saved_modes = []
+        saved_postcard_options = []
         applied_profiles = []
         messages = []
         errors = []
-        monkeypatch.setattr(
-            settings_ui,
-            "save_config",
-            lambda config: saved_modes.append(config.get_profile("Default").mode),
-        )
+
+        def capture_config(config):
+            profile = config.get_profile("Default")
+            saved_modes.append(profile.mode)
+            saved_postcard_options.append((profile.postcard_count, profile.postcard_size, profile.postcard_span))
+
+        monkeypatch.setattr(settings_ui, "save_config", capture_config)
         monkeypatch.setattr(
             settings_ui,
             "switch_once",
@@ -879,11 +882,26 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         assert "postcard" in labels
         assert app.mode_menu.winfo_ismapped()
         assert app.mode_menu.winfo_width() > 1
+        app.notebook.select(app.mode_tabs["postcard"])
+        app.update_idletasks()
+        assert app.postcard_options.winfo_ismapped()
+        assert int(float(app.postcard_count_spinbox.cget("to"))) == 100
+        assert app.postcard_count_label.cget("text") == "Postcard photos per screen:"
+        assert app.postcard_span_checkbutton.winfo_ismapped()
+        scale_style = app.postcard_size_scale.cget("style")
+        assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
+        app.notebook.select(app.general_tab)
         menu.invoke(labels.index("postcard"))
         assert app.mode_var.get() == "postcard"
+        app.postcard_count_var.set(7)
+        app.postcard_size_var.set(0.8)
+        app.postcard_span_var.set(True)
+        app.update_idletasks()
+        assert app.postcard_count_label.cget("text") == "Postcard photos across all screens:"
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard"]
+        assert saved_postcard_options == [(7, 0.8, True)]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
 
@@ -895,6 +913,7 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard", "postcard"]
+        assert saved_postcard_options == [(7, 0.8, True), (7, 0.8, True)]
         assert errors == [("Apply failed", "postcard preview failed")]
     finally:
         app.destroy()

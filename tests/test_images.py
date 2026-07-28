@@ -11,7 +11,6 @@ from mint_background_switcher.images import (
     POLAROID_BACKGROUND_COLOR,
     POLAROID_FRAME_COLOR,
     POSTCARD_BACKGROUND_COLOR,
-    POSTCARD_PIN_COLOR,
     _collage_tile,
     _polaroid_tile,
     _postcard_tile,
@@ -344,7 +343,8 @@ def test_collage_tile_rejects_pillow_decompression_bomb_warnings(monkeypatch, tm
         _collage_tile(str(path), (30, 20), bar_color="black")
 
 
-def test_compose_postcard_frames_four_uncropped_images_on_each_monitor(tmp_path: Path):
+def test_compose_postcard_randomizes_bare_uncropped_images_without_frames_or_pins(tmp_path: Path):
+    legacy_pin_color = (188, 42, 42)
     colors = ((40, 180, 80), (40, 80, 220), (220, 200, 40), (40, 200, 200))
     paths = []
     for index, color in enumerate(colors):
@@ -353,8 +353,24 @@ def test_compose_postcard_frames_four_uncropped_images_on_each_monitor(tmp_path:
         paths.append(str(path))
     monitors = [Monitor("A", 240, 160, 0, 0)]
 
-    output = compose_postcard(monitors, {"A": paths}, tmp_path / "postcard.png")
+    source_bytes = {path: Path(path).read_bytes() for path in paths}
+    output = compose_postcard(monitors, {"A": paths}, tmp_path / "postcard.png", rng=random.Random(13))
+    repeated = compose_postcard(
+        monitors,
+        {"A": paths},
+        tmp_path / "postcard-repeated.png",
+        rng=random.Random(13),
+    )
+    moved = compose_postcard(
+        monitors,
+        {"A": paths},
+        tmp_path / "postcard-moved.png",
+        rng=random.Random(14),
+    )
 
+    assert output.read_bytes() == repeated.read_bytes()
+    assert output.read_bytes() != moved.read_bytes()
+    assert {path: Path(path).read_bytes() for path in paths} == source_bytes
     with Image.open(output) as postcard:
         assert postcard.mode == "RGB"
         assert postcard.size == (240, 160)
@@ -365,15 +381,12 @@ def test_compose_postcard_frames_four_uncropped_images_on_each_monitor(tmp_path:
             if isinstance(color, tuple) and len(color) == 3
         }
         assert set(colors).issubset(rendered_colors)
-        pin_red, pin_green, pin_blue = POSTCARD_PIN_COLOR[:3]
-        assert any(
-            abs(red - pin_red) < 30 and abs(green - pin_green) < 30 and abs(blue - pin_blue) < 30
-            for red, green, blue in rendered_colors
-        )
-        assert (248, 246, 238) in rendered_colors
+        assert legacy_pin_color not in rendered_colors
+        assert POLAROID_FRAME_COLOR[:3] not in rendered_colors
 
 
 def test_postcard_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):
+    legacy_pin_color = (188, 42, 42, 255)
     source = Image.new("RGB", (120, 80), (90, 90, 90))
     marker_colors = ((250, 20, 20), (20, 250, 20), (20, 20, 250), (250, 220, 20))
     marker_boxes = ((0, 0, 11, 11), (108, 0, 119, 11), (0, 68, 11, 79), (108, 68, 119, 79))
@@ -385,8 +398,11 @@ def test_postcard_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path:
     source.save(path)
 
     straight = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black")
+    assert straight.size == (240, 160)
     straight_colors = {color for _count, color in straight.getcolors(maxcolors=straight.width * straight.height) or []}
     assert {(*color, 255) for color in marker_colors}.issubset(straight_colors)
+    assert legacy_pin_color not in straight_colors
+    assert POLAROID_FRAME_COLOR not in straight_colors
 
     ultrawide = _postcard_tile(str(path), (1920, 540), -8.0, bar_color="black")
     assert ultrawide.width <= 1920

@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.23] - 2026-07-28
+
+### Added
+
+- Per-profile Postcard controls for 1–100 photos, Small-to-Large size, and optional spanning across all screens, matching Polaroid count and placement behavior.
+
+### Changed
+
+- Postcard mode now displays bare native-aspect photos in randomized positions, tilt, overlap, and stacking order on the Polaroid dark background, with no generated white frames or pins.
+- Postcard Span uses one combined virtual-desktop layout so photos may cross monitor seams or be clipped by the outer desktop edge.
+- Bumped the package version to `0.1.23`.
+
 ## [0.1.22] - 2026-07-28
 
 ### Added

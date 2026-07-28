@@ -10,6 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Tabbed Settings editor with General, one tab per wallpaper mode, and About & Updates while retaining an explicit active-mode selector.
+- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/tilt/stacking, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/tilt/stacking, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
 - Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
@@ -24,6 +25,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.23 - 2026-07-28
+
+- Replaced Postcard frames, pins, fixed four-cell layout, and corkboard background with bare native-aspect photos using Polaroid-style randomized placement, tilt, overlap, stacking, and dark background.
+- Added separate per-profile Postcard controls for 1–100 photos, Small-to-Large size, and Span across all screens.
+- Postcard count is per screen normally and total across the combined desktop while spanning; spanning photos may cross monitor seams or be clipped at the outer desktop edge.
+- Bumped the package version to `0.1.23`.
 
 ### 0.1.22 - 2026-07-28
 
@@ -353,7 +361,7 @@ Each profile has a mode:
 - `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `montage`: four images from the shared pool are arranged in a 2x2 grid on each monitor, with every complete image fitted inside its tile instead of cropped.
 - `collage`: five images from the shared pool are fitted without cropping into a deterministic asymmetric mosaic independently on each monitor.
-- `postcard`: four images from the shared pool are fitted without cropping, placed in angled white frames with pushpins, and arranged on a corkboard-colored background independently for each monitor.
+- `postcard`: 1–100 bare images from the shared pool are placed at native aspect ratios with randomized positions, tilt, overlap, and stacking on a dark background. By default the count applies per screen and each photo stays fully visible on its screen; optional Postcard Span makes the count desktop-wide and allows photos to cross screen boundaries or be clipped at the virtual desktop edge.
 - `polaroid`: 1–100 images from the shared pool are placed at native aspect ratios inside tilted, bottom-heavy white print frames. By default the count applies per screen and each print stays fully visible on its screen; optional Polaroid Span makes the count desktop-wide and allows prints to cross screen boundaries or be clipped at the virtual desktop edge.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
 - `span`: one image is fit with configured letterbox bars across the full virtual desktop canvas.
@@ -381,7 +389,7 @@ Live wallpaper changes are rendered to an off-screen active file first, then app
 
 `save-current` copies that generated PNG, including the complete multi-monitor composition, without selecting new source images or changing runtime state. In Settings, choose **Save Current Wallpaper...** and select a PNG destination; Settings asks before replacing an existing file. From the CLI, the destination must end in `.png` and existing files are protected unless `--force` is supplied.
 
-**View Current Pictures...** reads the last successful wallpaper's source list without advancing rotation or changing persistent state. Its local selection window de-duplicates originals used across monitors, montage tiles, or postcard frames, refreshes when revisited, and revalidates the list immediately before asynchronously sending the selected existing file or its resolved parent folder to `xdg-open`. Choose **Open Picture** for the default image application or **Open Containing Folder** for the desktop file manager. Missing files, unavailable launchers, and nonzero opener exits stay in Settings as actionable errors. The source library remains read-only.
+**View Current Pictures...** reads the last successful wallpaper's source list without advancing rotation or changing persistent state. Its local selection window de-duplicates originals used across monitors or multi-photo layouts, refreshes when revisited, and revalidates the list immediately before asynchronously sending the selected existing file or its resolved parent folder to `xdg-open`. Choose **Open Picture** for the default image application or **Open Containing Folder** for the desktop file manager. Missing files, unavailable launchers, and nonzero opener exits stay in Settings as actionable errors. The source library remains read-only.
 
 Black-screen mode uses Cinnamon/GNOME solid-black color mode before doing monitor detection or fallback PNG work, so the visible switch should be near-instant. If a configured image folder is empty or temporarily unavailable, normal rotation applies a non-sticky black fallback instead of erroring, then retries on the next rotation.
 

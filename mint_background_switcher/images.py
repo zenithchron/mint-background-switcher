@@ -18,10 +18,9 @@ from .paths import xdg_cache_dir
 
 SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff")
 CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
-POSTCARD_BACKGROUND_COLOR = (112, 78, 46)
-POSTCARD_PIN_COLOR = (188, 42, 42, 255)
 POLAROID_BACKGROUND_COLOR = (39, 44, 52)
 POLAROID_FRAME_COLOR = (248, 246, 238, 255)
+POSTCARD_BACKGROUND_COLOR = POLAROID_BACKGROUND_COLOR
 _MONTH_NAMES = (
     "",
     "January",
@@ -452,29 +451,20 @@ def _postcard_tile(
     *,
     bar_color: str,
 ) -> Image.Image:
-    """Return one uncropped, framed photo sized to remain inside a pile cell."""
+    """Return one bare, uncropped native-aspect photo with no frame or pin."""
 
+    del bar_color  # Retained for API compatibility; bare photos never insert letterbox bars.
     cell_width, cell_height = cell_size
-    photo_width = max(1, round(cell_width * 0.68))
-    photo_height = max(1, round(cell_height * 0.58))
-    border = max(1, min(cell_width, cell_height) // 30)
-    fitted = fit_with_black_bars(open_image(image_path), (photo_width, photo_height), bar_color)
-    card = Image.new(
-        "RGBA",
-        (photo_width + 2 * border, photo_height + 4 * border),
-        (248, 246, 238, 255),
-    )
-    card.paste(fitted, (border, border))
-    draw = ImageDraw.Draw(card)
-    pin_radius = max(1, border // 2)
-    pin_x = card.width // 2
-    pin_y = max(pin_radius + 1, border // 2)
-    draw.ellipse(
-        (pin_x - pin_radius, pin_y - pin_radius, pin_x + pin_radius, pin_y + pin_radius),
-        fill=POSTCARD_PIN_COLOR,
-    )
-    rotated = card.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
-    rotated.thumbnail((cell_width, cell_height), Image.Resampling.LANCZOS)
+    try:
+        source = open_image(image_path)
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
+        raise ImageDecodeError(image_path) from exc
+    scale = min(cell_width / source.width, cell_height / source.height)
+    photo_width = max(1, round(source.width * scale))
+    photo_height = max(1, round(source.height * scale))
+    photo = source.resize((photo_width, photo_height), Image.Resampling.LANCZOS).convert("RGBA")
+    rotated = photo.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+    rotated.thumbnail((max(1, cell_width), max(1, cell_height)), Image.Resampling.LANCZOS)
     return rotated
 
 
@@ -484,36 +474,22 @@ def compose_postcard(
     output_path: str | Path,
     *,
     bar_color: str = "black",
+    size: float = 0.5,
+    span: bool = False,
+    rng: random.Random | None = None,
 ) -> Path:
-    """Compose four locally selected photos as a framed postcard pile per monitor."""
+    """Compose random bare photos using the same layout behavior as Polaroid."""
 
-    if not monitors:
-        raise ValueError("Cannot compose wallpaper without monitors")
-    width, height, min_x, min_y = virtual_canvas(monitors)
-    combined = Image.new("RGB", (width, height), (0, 0, 0))
-    angles = (-8.0, 7.0, 5.0, -6.0)
-    for monitor in monitors:
-        panel = Image.new("RGB", (monitor.width, monitor.height), POSTCARD_BACKGROUND_COLOR)
-        split_x = monitor.width // 2
-        split_y = monitor.height // 2
-        cells = (
-            (0, 0, split_x, split_y),
-            (split_x, 0, monitor.width, split_y),
-            (0, split_y, split_x, monitor.height),
-            (split_x, split_y, monitor.width, monitor.height),
-        )
-        image_paths = images_by_monitor.get(monitor.name, [])
-        for image_path, angle, (left, top, right, bottom) in zip(image_paths, angles, cells):
-            cell_width = right - left
-            cell_height = bottom - top
-            if cell_width <= 0 or cell_height <= 0:
-                continue
-            card = _postcard_tile(image_path, (cell_width, cell_height), angle, bar_color=bar_color)
-            x = left + (cell_width - card.width) // 2
-            y = top + (cell_height - card.height) // 2
-            panel.paste(card, (x, y), card)
-        combined.paste(panel, normalized_position(monitor, min_x, min_y))
-    return _save_png_atomic(combined, output_path)
+    return _compose_scattered_photos(
+        monitors,
+        images_by_monitor,
+        output_path,
+        framed=False,
+        bar_color=bar_color,
+        size=size,
+        span=span,
+        rng=rng,
+    )
 
 
 def _polaroid_tile(
@@ -580,23 +556,25 @@ def _random_spanning_card_position(
     return center_x - card_size[0] // 2, center_y - card_size[1] // 2
 
 
-def compose_polaroid(
+def _compose_scattered_photos(
     monitors: list[Monitor],
     images_by_monitor: dict[str, list[str]],
     output_path: str | Path,
     *,
+    framed: bool,
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
     rng: random.Random | None = None,
 ) -> Path:
-    """Compose random Polaroid prints per monitor or across the virtual desktop."""
+    """Compose random framed or bare photos per monitor or across the virtual desktop."""
 
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
     rng = rng or random.SystemRandom()
     size = max(0.0, min(1.0, float(size)))
     size_fraction = 0.20 + size * 0.35
+    tile_factory = _polaroid_tile if framed else _postcard_tile
     width, height, min_x, min_y = virtual_canvas(monitors)
     if span:
         combined = Image.new("RGB", (width, height), POLAROID_BACKGROUND_COLOR)
@@ -616,7 +594,7 @@ def compose_polaroid(
         for index, (image_path, angle) in enumerate(card_specs):
             if index and index % len(anchors) == 0:
                 rng.shuffle(anchors)
-            card = _polaroid_tile(image_path, max_card_size, angle, bar_color=bar_color)
+            card = tile_factory(image_path, max_card_size, angle, bar_color=bar_color)
             anchor = anchors[index % len(anchors)]
             anchor_x, anchor_y = normalized_position(anchor, min_x, min_y)
             x, y = _random_spanning_card_position(
@@ -641,7 +619,7 @@ def compose_polaroid(
         ]
         rng.shuffle(card_specs)
         for image_path, angle in card_specs:
-            card = _polaroid_tile(
+            card = tile_factory(
                 image_path,
                 max_card_size,
                 angle,
@@ -651,6 +629,30 @@ def compose_polaroid(
             panel.paste(card, (x, y), card)
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     return _save_png_atomic(combined, output_path)
+
+
+def compose_polaroid(
+    monitors: list[Monitor],
+    images_by_monitor: dict[str, list[str]],
+    output_path: str | Path,
+    *,
+    bar_color: str = "black",
+    size: float = 0.5,
+    span: bool = False,
+    rng: random.Random | None = None,
+) -> Path:
+    """Compose random framed Polaroid prints per monitor or across the virtual desktop."""
+
+    return _compose_scattered_photos(
+        monitors,
+        images_by_monitor,
+        output_path,
+        framed=True,
+        bar_color=bar_color,
+        size=size,
+        span=span,
+        rng=rng,
+    )
 
 
 def compose_span(

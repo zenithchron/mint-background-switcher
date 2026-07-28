@@ -174,6 +174,9 @@ class SettingsApp(tk.Tk):
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
+        self.postcard_count_var = tk.IntVar(value=4)
+        self.postcard_size_var = tk.DoubleVar(value=0.5)
+        self.postcard_span_var = tk.BooleanVar(value=False)
         self.polaroid_count_var = tk.IntVar(value=4)
         self.polaroid_size_var = tk.DoubleVar(value=0.5)
         self.polaroid_span_var = tk.BooleanVar(value=False)
@@ -201,6 +204,7 @@ class SettingsApp(tk.Tk):
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
+        self.postcard_span_var.trace_add("write", self._refresh_postcard_count_label)
         self.polaroid_span_var.trace_add("write", self._refresh_polaroid_count_label)
         self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._load_profile(self.profile_var.get())
@@ -340,11 +344,47 @@ class SettingsApp(tk.Tk):
             "same": "Shows the same image from the General shared source folders on every screen.",
             "montage": "Arranges four images from the General shared source folders in a grid on each screen.",
             "collage": "Arranges five images from the General shared source folders in an asymmetric collage.",
-            "postcard": "Arranges postcard-style images from the General shared source folders.",
+            "postcard": "Randomly places bare photos from the General shared source folders without frames or pins.",
             "span": "Spans one image from the General shared source folders across the virtual desktop.",
         }
         for mode, description in mode_descriptions.items():
             ttk.Label(self.mode_tabs[mode], text=description, justify=tk.LEFT, wraplength=760).pack(anchor="w")
+
+        photo_scale_style = ttk.Style(self)
+        photo_scale_style.configure("ScatteredPhoto.Horizontal.TScale", sliderlength=36)
+
+        postcard_tab = self.mode_tabs["postcard"]
+        self.postcard_options = ttk.LabelFrame(postcard_tab, text="Postcard options", padding=10)
+        self.postcard_options.pack(fill=tk.X, pady=(12, 0))
+        self.postcard_count_label = ttk.Label(self.postcard_options, text="Postcard photos per screen:")
+        self.postcard_count_label.pack(side=tk.LEFT)
+        self.postcard_count_spinbox = ttk.Spinbox(
+            self.postcard_options,
+            from_=1,
+            to=100,
+            textvariable=self.postcard_count_var,
+            width=4,
+        )
+        self.postcard_count_spinbox.pack(side=tk.LEFT, padx=(5, 18))
+        ttk.Label(self.postcard_options, text="Photo size:").pack(side=tk.LEFT)
+        ttk.Label(self.postcard_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
+        self.postcard_size_scale = ttk.Scale(
+            self.postcard_options,
+            from_=0.0,
+            to=1.0,
+            variable=self.postcard_size_var,
+            orient=tk.HORIZONTAL,
+            length=180,
+            style="ScatteredPhoto.Horizontal.TScale",
+        )
+        self.postcard_size_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(self.postcard_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
+        self.postcard_span_checkbutton = ttk.Checkbutton(
+            self.postcard_options,
+            text="Span across all screens",
+            variable=self.postcard_span_var,
+        )
+        self.postcard_span_checkbutton.pack(side=tk.LEFT, padx=(18, 0))
 
         polaroid_tab = self.mode_tabs["polaroid"]
         ttk.Label(
@@ -370,8 +410,6 @@ class SettingsApp(tk.Tk):
         self.polaroid_count_spinbox.pack(side=tk.LEFT, padx=(5, 18))
         ttk.Label(self.polaroid_options, text="Photo size:").pack(side=tk.LEFT)
         ttk.Label(self.polaroid_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
-        polaroid_scale_style = ttk.Style(self)
-        polaroid_scale_style.configure("Polaroid.Horizontal.TScale", sliderlength=36)
         self.polaroid_size_scale = ttk.Scale(
             self.polaroid_options,
             from_=0.0,
@@ -379,7 +417,7 @@ class SettingsApp(tk.Tk):
             variable=self.polaroid_size_var,
             orient=tk.HORIZONTAL,
             length=180,
-            style="Polaroid.Horizontal.TScale",
+            style="ScatteredPhoto.Horizontal.TScale",
         )
         self.polaroid_size_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Label(self.polaroid_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
@@ -476,12 +514,19 @@ class SettingsApp(tk.Tk):
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
+        self.postcard_count_var.set(profile.postcard_count)
+        self.postcard_size_var.set(profile.postcard_size)
+        self.postcard_span_var.set(profile.postcard_span)
         self.polaroid_count_var.set(profile.polaroid_count)
         self.polaroid_size_var.set(profile.polaroid_size)
         self.polaroid_span_var.set(profile.polaroid_span)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
+
+    def _refresh_postcard_count_label(self, *_args: object) -> None:
+        text = "Postcard photos across all screens:" if self.postcard_span_var.get() else "Postcard photos per screen:"
+        self.postcard_count_label.configure(text=text)
 
     def _refresh_polaroid_count_label(self, *_args: object) -> None:
         text = "Polaroid photos across all screens:" if self.polaroid_span_var.get() else "Polaroid photos per screen:"
@@ -512,9 +557,17 @@ class SettingsApp(tk.Tk):
         return result
 
     def _profile_from_fields(self, name: str) -> Profile:
+        postcard_count_var = vars(self).get("postcard_count_var")
+        postcard_size_var = vars(self).get("postcard_size_var")
+        postcard_span_var = vars(self).get("postcard_span_var")
         count_var = vars(self).get("polaroid_count_var")
         size_var = vars(self).get("polaroid_size_var")
         span_var = vars(self).get("polaroid_span_var")
+        postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
+        postcard_size = (
+            max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
+        )
+        postcard_span = bool(postcard_span_var.get()) if postcard_span_var is not None else False
         polaroid_count = max(1, min(100, int(count_var.get()))) if count_var is not None else 4
         polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
         polaroid_span = bool(span_var.get()) if span_var is not None else False
@@ -529,6 +582,9 @@ class SettingsApp(tk.Tk):
             desktop=self.desktop_var.get(),
             effect=self.effect_var.get(),
             bar_color=self.bar_color_var.get(),
+            postcard_count=postcard_count,
+            postcard_size=postcard_size,
+            postcard_span=postcard_span,
             polaroid_count=polaroid_count,
             polaroid_size=polaroid_size,
             polaroid_span=polaroid_span,
