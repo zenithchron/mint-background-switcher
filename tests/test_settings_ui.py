@@ -134,6 +134,33 @@ def test_open_picture_uses_default_desktop_opener_without_a_shell(monkeypatch, t
     assert calls[1] == ("wait", 5.0)
 
 
+def test_open_containing_folder_uses_default_desktop_opener_without_a_shell(monkeypatch, tmp_path):
+    folder = tmp_path / "folder with spaces"
+    folder.mkdir()
+    picture = folder / "picture.png"
+    picture.write_bytes(b"picture")
+    calls = []
+    monkeypatch.setattr(settings_ui.shutil, "which", lambda command: "/usr/bin/xdg-open" if command == "xdg-open" else None)
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(wait=lambda *, timeout: calls.append(("wait", timeout)) or 0)
+
+    monkeypatch.setattr(settings_ui.subprocess, "Popen", fake_popen)
+
+    opened = settings_ui._open_containing_folder(picture)
+
+    assert opened == folder.resolve()
+    assert calls[0][0] == ["/usr/bin/xdg-open", str(folder.resolve())]
+    assert calls[0][1]["shell"] is False
+    assert calls[0][1]["close_fds"] is True
+    assert calls[0][1]["start_new_session"] is True
+    assert calls[0][1]["stdin"] is settings_ui.subprocess.DEVNULL
+    assert calls[0][1]["stdout"] is settings_ui.subprocess.DEVNULL
+    assert calls[0][1]["stderr"] is settings_ui.subprocess.DEVNULL
+    assert calls[1] == ("wait", 5.0)
+
+
 def test_open_picture_rejects_a_missing_source_before_launch(monkeypatch, tmp_path):
     monkeypatch.setattr(
         settings_ui.subprocess,
@@ -143,6 +170,17 @@ def test_open_picture_rejects_a_missing_source_before_launch(monkeypatch, tmp_pa
 
     with pytest.raises(FileNotFoundError, match="Current source picture is missing"):
         settings_ui._open_picture(tmp_path / "missing.png")
+
+
+def test_open_containing_folder_rejects_a_missing_source_before_launch(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        settings_ui.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("missing source must not launch")),
+    )
+
+    with pytest.raises(FileNotFoundError, match="Current source picture is missing"):
+        settings_ui._open_containing_folder(tmp_path / "missing.png")
 
 
 def test_open_picture_reports_when_desktop_opener_is_unavailable(monkeypatch, tmp_path):
@@ -166,6 +204,20 @@ def test_open_picture_reports_a_nonzero_desktop_opener_exit(monkeypatch, tmp_pat
 
     with pytest.raises(RuntimeError, match=r"exit status 3.*default image application"):
         settings_ui._open_picture(picture)
+
+
+def test_open_containing_folder_reports_a_nonzero_desktop_opener_exit(monkeypatch, tmp_path):
+    picture = tmp_path / "picture.png"
+    picture.write_bytes(b"picture")
+    monkeypatch.setattr(settings_ui.shutil, "which", lambda _command: "/usr/bin/xdg-open")
+    monkeypatch.setattr(
+        settings_ui.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: SimpleNamespace(wait=lambda *, timeout: 4),
+    )
+
+    with pytest.raises(RuntimeError, match=r"exit status 4.*desktop file manager"):
+        settings_ui._open_containing_folder(picture)
 
 
 def test_open_picture_accepts_a_long_running_desktop_handoff(monkeypatch, tmp_path):
@@ -216,7 +268,9 @@ def test_settings_view_current_pictures_is_visible_refreshes_and_opens_selected_
     sources = [first, second]
     monkeypatch.setattr(settings_ui, "current_source_images", lambda: list(sources))
     opened = []
+    opened_folders = []
     opener_threads = []
+    folder_opener_threads = []
     errors = []
 
     def fake_open(path):
@@ -224,7 +278,13 @@ def test_settings_view_current_pictures_is_visible_refreshes_and_opens_selected_
         opened.append(path)
         return path
 
+    def fake_open_folder(path):
+        folder_opener_threads.append(threading.get_ident())
+        opened_folders.append(path)
+        return path.parent
+
     monkeypatch.setattr(settings_ui, "_open_picture", fake_open)
+    monkeypatch.setattr(settings_ui, "_open_containing_folder", fake_open_folder)
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showerror",
@@ -266,10 +326,20 @@ def test_settings_view_current_pictures_is_visible_refreshes_and_opens_selected_
         assert app._current_pictures_window.winfo_height() <= app.winfo_screenheight()
         assert app.current_pictures_list.winfo_ismapped()
         assert app.open_picture_button.winfo_ismapped()
+        assert app.open_picture_folder_button.winfo_ismapped()
+        assert app.open_picture_folder_button.winfo_width() > 1
         assert app.current_pictures_list.get(0, settings_ui.tk.END) == (str(first), str(second))
 
         app.current_pictures_list.selection_clear(0, settings_ui.tk.END)
         app.current_pictures_list.selection_set(1)
+        app.open_picture_folder_button.invoke()
+        _pump_until(
+            app,
+            lambda: opened_folders == [second]
+            and "folder containing" in app.current_picture_status_var.get().lower(),
+        )
+        assert folder_opener_threads and folder_opener_threads[-1] != main_thread
+
         app.open_picture_button.invoke()
         _pump_until(app, lambda: opened == [second] and second.name in app.current_picture_status_var.get())
         assert opener_threads and opener_threads[-1] != main_thread
@@ -296,11 +366,22 @@ def test_settings_view_current_pictures_is_visible_refreshes_and_opens_selected_
 
         monkeypatch.setattr(
             settings_ui,
+            "_open_containing_folder",
+            lambda _path: (_ for _ in ()).throw(RuntimeError("file manager failed")),
+        )
+        app.open_picture_folder_button.invoke()
+        _pump_until(app, lambda: len(errors) == 1)
+        assert errors[-1][0] == "Open folder failed"
+        assert errors[-1][1] == "file manager failed"
+        assert errors[-1][2]["parent"] is app._current_pictures_window
+
+        monkeypatch.setattr(
+            settings_ui,
             "_open_picture",
             lambda _path: (_ for _ in ()).throw(RuntimeError("viewer failed")),
         )
         app.open_picture_button.invoke()
-        _pump_until(app, lambda: bool(errors))
+        _pump_until(app, lambda: len(errors) == 2)
         assert errors[-1][0] == "Open picture failed"
         assert errors[-1][1] == "viewer failed"
         assert errors[-1][2]["parent"] is app._current_pictures_window

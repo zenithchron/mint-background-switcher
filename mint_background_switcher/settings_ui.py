@@ -35,17 +35,23 @@ SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 
 
-def _open_picture(path: str | Path) -> Path:
-    """Launch one existing picture through the desktop's default application."""
+def _current_picture_path(path: str | Path) -> Path:
+    """Resolve and revalidate one source recorded for the current wallpaper."""
 
     picture = Path(path).expanduser().resolve(strict=False)
     if not picture.is_file():
         raise FileNotFoundError(f"Current source picture is missing: {picture}")
+    return picture
+
+
+def _open_desktop_target(target: Path, *, failure_subject: str, recovery: str) -> Path:
+    """Launch one validated path through xdg-open without invoking a shell."""
+
     opener = shutil.which("xdg-open")
     if opener is None:
-        raise RuntimeError("xdg-open is unavailable; install xdg-utils to open source pictures")
+        raise RuntimeError("xdg-open is unavailable; install xdg-utils to open source pictures or folders")
     process = subprocess.Popen(
-        [opener, str(picture)],
+        [opener, str(target)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -58,14 +64,36 @@ def _open_picture(path: str | Path) -> Path:
     except subprocess.TimeoutExpired:
         # Some desktop openers remain attached to the launched application. Once
         # the validated opener has stayed alive this long, let the detached handoff
-        # continue instead of blocking Settings or terminating the viewer.
-        return picture
+        # continue instead of blocking Settings or terminating the application.
+        return target
     if return_code != 0:
         raise RuntimeError(
-            f"xdg-open could not open the selected picture (exit status {return_code}). "
-            "Check the default image application."
+            f"xdg-open could not open {failure_subject} (exit status {return_code}). "
+            f"{recovery}"
         )
-    return picture
+    return target
+
+
+def _open_picture(path: str | Path) -> Path:
+    """Launch one existing picture through the desktop's default application."""
+
+    picture = _current_picture_path(path)
+    return _open_desktop_target(
+        picture,
+        failure_subject="the selected picture",
+        recovery="Check the default image application.",
+    )
+
+
+def _open_containing_folder(path: str | Path) -> Path:
+    """Launch the resolved parent folder for one existing current picture."""
+
+    picture = _current_picture_path(path)
+    return _open_desktop_target(
+        picture.parent,
+        failure_subject="the selected picture's containing folder",
+        recovery="Check the desktop file manager.",
+    )
 
 
 def _monitor_window_rect(
@@ -1081,7 +1109,7 @@ class SettingsApp(tk.Tk):
         picture_list.selection_set(0)
         picture_list.activate(0)
 
-        status_var = tk.StringVar(value="Select a source picture, then open it with the default desktop application.")
+        status_var = tk.StringVar(value="Select a source picture, then open it or its containing folder.")
         ttk.Label(content, textvariable=status_var, anchor="w").pack(fill=tk.X, pady=(8, 4))
         buttons = ttk.Frame(content)
         buttons.pack(fill=tk.X)
@@ -1089,6 +1117,13 @@ class SettingsApp(tk.Tk):
 
         open_button = ttk.Button(buttons, text="Open Picture")
         open_button.pack(side=tk.LEFT)
+        open_folder_button = ttk.Button(buttons, text="Open Containing Folder")
+        open_folder_button.pack(side=tk.LEFT, padx=(6, 0))
+
+        def set_open_controls_enabled(enabled: bool) -> None:
+            state = ["!disabled"] if enabled else ["disabled"]
+            open_button.state(state)
+            open_folder_button.state(state)
 
         def refresh_sources() -> bool:
             latest = current_source_images()
@@ -1106,14 +1141,14 @@ class SettingsApp(tk.Tk):
                 picture_list.selection_set(0)
                 picture_list.activate(0)
                 if not opening[0]:
-                    open_button.state(["!disabled"])
+                    set_open_controls_enabled(True)
                 status_var.set("The wallpaper changed; the source list was refreshed. Select a picture to open.")
             else:
-                open_button.state(["disabled"])
+                set_open_controls_enabled(False)
                 status_var.set("The current wallpaper has no recorded source pictures.")
             return True
 
-        def open_selected() -> None:
+        def open_selected(*, containing_folder: bool = False) -> None:
             if opening[0]:
                 return
             if refresh_sources():
@@ -1125,12 +1160,17 @@ class SettingsApp(tk.Tk):
             selected_picture = images[int(selected[0])]
             result_queue: queue.Queue[tuple[Path | None, Exception | None]] = queue.Queue()
             opening[0] = True
-            open_button.state(["disabled"])
-            status_var.set("Opening the selected picture...")
+            set_open_controls_enabled(False)
+            status_var.set(
+                "Opening the selected picture's containing folder..."
+                if containing_folder
+                else "Opening the selected picture..."
+            )
 
             def launch() -> None:
                 try:
-                    opened = _open_picture(selected_picture)
+                    opener = _open_containing_folder if containing_folder else _open_picture
+                    opened = opener(selected_picture)
                 except Exception as exc:
                     result_queue.put((None, exc))
                 else:
@@ -1148,27 +1188,52 @@ class SettingsApp(tk.Tk):
                 opening[0] = False
                 try:
                     if images:
-                        open_button.state(["!disabled"])
+                        set_open_controls_enabled(True)
                     if error is not None:
-                        status_var.set("The selected picture could not be opened.")
-                        messagebox.showerror("Open picture failed", str(error), parent=window)
+                        status_var.set(
+                            "The containing folder could not be opened."
+                            if containing_folder
+                            else "The selected picture could not be opened."
+                        )
+                        messagebox.showerror(
+                            "Open folder failed" if containing_folder else "Open picture failed",
+                            str(error),
+                            parent=window,
+                        )
                     elif opened is not None:
-                        status_var.set(f"Sent {opened.name} to the default desktop application.")
+                        status_var.set(
+                            f"Sent the folder containing {selected_picture.name} to the desktop file manager."
+                            if containing_folder
+                            else f"Sent {opened.name} to the default desktop application."
+                        )
                 except tk.TclError:
                     pass
 
-            worker = threading.Thread(target=launch, name="mbs-picture-opener", daemon=False)
+            worker = threading.Thread(
+                target=launch,
+                name="mbs-picture-folder-opener" if containing_folder else "mbs-picture-opener",
+                daemon=False,
+            )
             try:
                 worker.start()
             except Exception as exc:
                 opening[0] = False
-                open_button.state(["!disabled"])
-                status_var.set("The selected picture could not be opened.")
-                messagebox.showerror("Open picture failed", str(exc), parent=window)
+                set_open_controls_enabled(True)
+                status_var.set(
+                    "The containing folder could not be opened."
+                    if containing_folder
+                    else "The selected picture could not be opened."
+                )
+                messagebox.showerror(
+                    "Open folder failed" if containing_folder else "Open picture failed",
+                    str(exc),
+                    parent=window,
+                )
                 return
             window.after(50, poll_result)
 
         open_button.configure(command=open_selected)
+        open_folder_button.configure(command=lambda: open_selected(containing_folder=True))
         ttk.Button(buttons, text="Refresh", command=refresh_sources).pack(side=tk.LEFT, padx=(6, 0))
 
         def close_window() -> None:
@@ -1184,6 +1249,7 @@ class SettingsApp(tk.Tk):
 
         self.current_pictures_list = picture_list
         self.open_picture_button = open_button
+        self.open_picture_folder_button = open_folder_button
         self.current_picture_status_var = status_var
         self._refresh_current_pictures = refresh_sources
 

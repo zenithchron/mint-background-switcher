@@ -4,6 +4,22 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.21] - 2026-07-28
+
+### Added
+
+- **Open Containing Folder** under **Settings → View Current Pictures...**, inspired by John’s Background Switcher, for opening the selected current source's resolved parent in the desktop file manager.
+- Responsive background launching plus visible success, missing-source, unavailable-opener, and nonzero launch-error feedback in the Current Pictures window.
+- Fixed-argument opener tests and Xvfb-backed Settings coverage for button visibility, selected-source behavior, success, and errors.
+
+### Changed
+
+- Bumped the package version to `0.1.21`.
+
+### Security
+
+- Settings revalidates the selected source as an existing regular file immediately before opening its folder and invokes `xdg-open` with a fixed argument vector and no shell.
+
 ## [0.1.20] - 2026-07-27
 
 ### Added

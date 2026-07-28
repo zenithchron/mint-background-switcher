@@ -1,5 +1,5 @@
 """Mint Background Switcher package."""
 
-__version__ = "0.1.20"
+__version__ = "0.1.21"
 APP_ID = "mint-background-switcher"
 APP_NAME = "Mint Background Switcher"
