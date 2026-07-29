@@ -131,6 +131,27 @@ def test_apply_desaturate_effect_halves_color_and_preserves_rgb(tmp_path: Path):
     assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
 
 
+def test_apply_saturate_effect_boosts_color_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "color.png"
+    source = Image.new("RGB", (3, 1))
+    source.putpixel((0, 0), (200, 40, 10))
+    source.putpixel((1, 0), (10, 100, 250))
+    source.putpixel((2, 0), (128, 128, 128))
+    before = source.tobytes()
+    source.save(path)
+
+    assert apply_effect(path, "saturate") == path
+
+    assert source.tobytes() == before
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.size == source.size
+        assert processed.getpixel((0, 0)) == (255, 18, 0)
+        assert processed.getpixel((1, 0)) == (0, 105, 255)
+        assert processed.getpixel((2, 0)) == (128, 128, 128)
+    assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
+
+
 def test_apply_sepia_effect_adds_warm_tone_and_preserves_rgb(tmp_path: Path):
     path = tmp_path / "color.png"
     Image.new("RGB", (8, 6), (200, 40, 10)).save(path)

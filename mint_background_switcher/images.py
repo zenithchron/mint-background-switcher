@@ -11,7 +11,7 @@ import tempfile
 from typing import Iterable
 import warnings
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageStat
 
 from .monitor import Monitor, normalized_position, virtual_canvas
 from .paths import xdg_cache_dir
@@ -21,6 +21,7 @@ CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
 POLAROID_BACKGROUND_COLOR = (39, 44, 52)
 POLAROID_FRAME_COLOR = (248, 246, 238, 255)
 POSTCARD_BACKGROUND_COLOR = POLAROID_BACKGROUND_COLOR
+SATURATION_FACTOR = 1.5
 _MONTH_NAMES = (
     "",
     "January",
@@ -313,6 +314,8 @@ def apply_effect(image_path: str | Path, effect: str) -> Path:
             rgb_source = source.convert("RGB")
             grayscale = ImageOps.grayscale(rgb_source).convert("RGB")
             processed = Image.blend(rgb_source, grayscale, 0.5)
+        elif effect == "saturate":
+            processed = ImageEnhance.Color(source.convert("RGB")).enhance(SATURATION_FACTOR)
         elif effect == "grayscale":
             grayscale = ImageOps.grayscale(source)
             processed = grayscale.convert("RGB")

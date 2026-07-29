@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.24] - 2026-07-29
+
+### Added
+
+- An optional per-profile Saturate effect, inspired by John’s Background Switcher, that boosts the complete generated wallpaper to 1.5× color intensity while preserving neutral tones.
+- **saturate** under **Settings → General → Settings applying to all modes → Effect**, with Save and **Apply Next Now** success/error feedback.
+- Exact-pixel, source-safety, dry-run/state-safety, black-screen, and Xvfb-backed Settings coverage for the new effect.
+
+### Changed
+
+- Bumped the package version to `0.1.24`.
+
 ## [0.1.23] - 2026-07-28
 
 ### Added

@@ -26,6 +26,7 @@ EFFECT_CHOICES = (
     "none",
     "grayscale",
     "desaturate",
+    "saturate",
     "sepia",
     "invert",
     "blur",

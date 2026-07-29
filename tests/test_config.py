@@ -161,6 +161,12 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert desaturate.get_profile().effect == "desaturate"
     assert desaturate.to_dict()["profiles"]["P"]["effect"] == "desaturate"
 
+    saturate = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"effect": "SATURATE"}}}
+    )
+    assert saturate.get_profile().effect == "saturate"
+    assert saturate.to_dict()["profiles"]["P"]["effect"] == "saturate"
+
     blur = Config.from_dict({"active_profile": "P", "profiles": {"P": {"effect": "BLUR"}}})
     assert blur.get_profile().effect == "blur"
     assert blur.to_dict()["profiles"]["P"]["effect"] == "blur"
