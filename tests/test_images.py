@@ -6,6 +6,7 @@ from PIL import Image
 import pytest
 
 from mint_background_switcher import images as images_module
+from mint_background_switcher.config import RANDOM_EFFECT_CHOICES
 from mint_background_switcher.images import (
     CALENDAR_HIGHLIGHT_COLOR,
     POLAROID_BACKGROUND_COLOR,
@@ -149,6 +150,36 @@ def test_apply_saturate_effect_boosts_color_and_preserves_rgb(tmp_path: Path):
         assert processed.getpixel((0, 0)) == (255, 18, 0)
         assert processed.getpixel((1, 0)) == (0, 105, 255)
         assert processed.getpixel((2, 0)) == (128, 128, 128)
+    assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
+
+
+def test_apply_random_effect_selects_one_concrete_effect(tmp_path: Path):
+    class InvertRandom(random.Random):
+        def choice(self, seq):
+            assert tuple(seq[index] for index in range(len(seq))) == RANDOM_EFFECT_CHOICES
+            return "invert"
+
+    path = tmp_path / "random.png"
+    expected_path = tmp_path / "expected.png"
+    source = Image.new("RGB", (3, 1))
+    source.putpixel((0, 0), (0, 64, 255))
+    source.putpixel((1, 0), (12, 34, 56))
+    source.putpixel((2, 0), (128, 128, 128))
+    before = source.tobytes()
+    source.save(path)
+    source.save(expected_path)
+
+    assert apply_effect(path, "random", rng=InvertRandom()) == path
+    assert apply_effect(expected_path, "invert") == expected_path
+
+    assert source.tobytes() == before
+    assert path.read_bytes() == expected_path.read_bytes()
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.size == source.size
+        assert processed.getpixel((0, 0)) == (255, 191, 0)
+        assert processed.getpixel((1, 0)) == (243, 221, 199)
+        assert processed.getpixel((2, 0)) == (127, 127, 127)
     assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
 
 

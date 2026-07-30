@@ -22,8 +22,7 @@ VALID_MODES = {
     "per-monitor",
     "span",
 }
-EFFECT_CHOICES = (
-    "none",
+RANDOM_EFFECT_CHOICES = (
     "grayscale",
     "desaturate",
     "saturate",
@@ -33,6 +32,7 @@ EFFECT_CHOICES = (
     "vignette",
     "calendar",
 )
+EFFECT_CHOICES = ("none", "random", *RANDOM_EFFECT_CHOICES)
 VALID_EFFECTS = set(EFFECT_CHOICES)
 VALID_BAR_COLORS = {"black", "auto"}
 

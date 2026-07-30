@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.25] - 2026-07-30
+
+### Added
+
+- A per-profile Random effect, inspired by John’s Background Switcher, that independently chooses one existing concrete wallpaper effect for each successful rotation.
+- **random** under **Settings → General → Settings applying to all modes → Effect**, with Save and **Apply Next Now** success/error feedback.
+- Deterministic effect-selection, source-safety, dry-run/state-safety, and Xvfb-backed Settings coverage for the new option.
+
+### Changed
+
+- Bumped the package version to `0.1.25`.
+
 ## [0.1.24] - 2026-07-29
 
 ### Added

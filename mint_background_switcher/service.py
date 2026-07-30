@@ -261,10 +261,11 @@ def _apply_composed_wallpaper(
     wallpaper: Path,
     *,
     dry_run: bool,
+    rng: random.Random | None,
     cancelled: Callable[[], bool] | None,
 ) -> None:
     _cancel_if_requested(cancelled)
-    apply_effect(wallpaper, profile.effect)
+    apply_effect(wallpaper, profile.effect, rng=rng)
     _cancel_if_requested(cancelled)
     DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
 
@@ -389,7 +390,7 @@ def _switch_once_with_state(
             )
             wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color)
             images_used = [image]
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "montage":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -423,7 +424,7 @@ def _switch_once_with_state(
             }
             images_used = chosen
             wallpaper = compose_montage(monitors, montage_by_monitor, wallpaper_path, bar_color=profile.bar_color)
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "collage":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -491,7 +492,7 @@ def _switch_once_with_state(
                         break
                     continue
                 images_used = chosen
-                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
                 break
     elif profile.mode == "postcard":
         pool = _load_image_pool(
@@ -556,7 +557,7 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     continue
                 images_used = chosen
-                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
                 break
     elif profile.mode == "polaroid":
         pool = _load_image_pool(
@@ -621,7 +622,7 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     continue
                 images_used = chosen
-                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
                 break
     elif profile.mode == "same":
         pool = _load_image_pool(
@@ -652,7 +653,7 @@ def _switch_once_with_state(
             selections = {monitor.name: image for monitor in monitors}
             images_used = [image]
             wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "shared":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -684,7 +685,7 @@ def _switch_once_with_state(
                 selections[monitor.name] = image
             images_used = chosen
             wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     else:
         pools_by_monitor: dict[str, _ImagePool] = {}
         missing_monitors: list[str] = []
@@ -723,7 +724,7 @@ def _switch_once_with_state(
                 selections[monitor.name] = image
                 images_used.append(image)
             wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, cancelled=cancelled)
+            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
 
     if next_slot is not None:
         state.wallpaper_slot = next_slot

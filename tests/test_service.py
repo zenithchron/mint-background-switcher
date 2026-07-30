@@ -7,7 +7,7 @@ import pytest
 from PIL import Image, ImageEnhance, ImageOps
 
 from mint_background_switcher import service
-from mint_background_switcher.config import Config, Profile, save_config
+from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, save_config
 from mint_background_switcher.service import (
     black_screen,
     current_source_images,
@@ -1120,6 +1120,53 @@ def test_grayscale_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Pat
         assert wallpaper.mode == "RGB"
         assert wallpaper.getchannel("R").tobytes() == wallpaper.getchannel("G").tobytes()
         assert wallpaper.getchannel("G").tobytes() == wallpaper.getchannel("B").tobytes()
+
+
+def test_random_effect_dry_run_uses_rotation_rng_and_preserves_sources_and_state(
+    monkeypatch, tmp_path: Path
+):
+    choices = []
+
+    class InvertRandom(random.Random):
+        def choice(self, seq):
+            choices.append(tuple(seq[index] for index in range(len(seq))))
+            return "invert"
+
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "same"
+    cfg.get_profile("P").effect = "random"
+    save_config(cfg)
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:same": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+    image_dir = tmp_path / "images"
+    source_bytes = {path: path.read_bytes() for path in image_dir.glob("*.png")}
+
+    result = switch_once("P", dry_run=True, rng=InvertRandom(7))
+
+    assert choices == [RANDOM_EFFECT_CHOICES]
+    assert result.applied is False
+    assert len(result.images) == 1
+    with Image.open(result.images[0]) as selected:
+        source_pixel = selected.convert("RGB").getpixel((0, 0))
+        assert isinstance(source_pixel, tuple)
+        expected_pixel = tuple(255 - int(channel) for channel in source_pixel[:3])
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.mode == "RGB"
+        assert wallpaper.size == (220, 80)
+        assert wallpaper.getpixel((50, 40)) == expected_pixel
+        assert wallpaper.getpixel((0, 0)) == (255, 255, 255)
+    assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+    assert load_state().to_dict() == before_state
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
 
 
 def test_sepia_effect_is_applied_before_wallpaper(monkeypatch, tmp_path: Path):

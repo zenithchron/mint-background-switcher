@@ -13,6 +13,7 @@ import warnings
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageStat
 
+from .config import RANDOM_EFFECT_CHOICES
 from .monitor import Monitor, normalized_position, virtual_canvas
 from .paths import xdg_cache_dir
 
@@ -290,9 +291,16 @@ def add_three_month_calendar(image: Image.Image, *, today: date | None = None) -
     return Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
 
 
-def apply_effect(image_path: str | Path, effect: str) -> Path:
+def apply_effect(
+    image_path: str | Path,
+    effect: str,
+    *,
+    rng: random.Random | None = None,
+) -> Path:
     """Apply a configured post-processing effect to a composed wallpaper."""
     path = Path(image_path)
+    if effect == "random":
+        effect = rng.choice(RANDOM_EFFECT_CHOICES) if rng is not None else random.choice(RANDOM_EFFECT_CHOICES)
     if effect == "none":
         return path
     with Image.open(path) as source:

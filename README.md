@@ -18,13 +18,20 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
 - View every unique original picture used in the current wallpaper and open a selected source or its containing folder from Settings.
-- Optional per-profile grayscale, half-color desaturation, 1.5× saturation, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
+- Optional per-profile random selection, grayscale, half-color desaturation, 1.5× saturation, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Optional automatic letterbox-bar colors matched to each source image.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.25 - 2026-07-30
+
+- Added a **random** per-profile effect that independently chooses one existing concrete wallpaper effect for every successful rotation.
+- Added **random** under **Settings → General → Settings applying to all modes → Effect**, with Save and **Apply Next Now** success/error feedback.
+- Added deterministic selection, source-safety, dry-run/state-safety, and Xvfb-backed Settings coverage.
+- Bumped the package version to `0.1.25`.
 
 ### 0.1.24 - 2026-07-29
 
@@ -230,7 +237,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -375,7 +382,7 @@ Each profile has a mode:
 
 All modes keep the full image visible. The app never uses a fill/crop resize path for wallpaper generation. Letterbox bars are black by default; choose `auto` in the settings editor to match each panel's bars to the average color of its source image. In `span` mode, the single source image determines the color for the full canvas. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
 
-Each profile can optionally apply a `grayscale`, half-color `desaturate`, vivid `saturate`, warm vintage-style `sepia`, complementary-color `invert`, soft-focus `blur`, edge-darkening `vignette`, or three-month `calendar` effect after composing the complete multi-monitor wallpaper. Desaturation blends each RGB pixel halfway toward grayscale so muted color remains; saturation raises color intensity to 1.5× while leaving neutral tones neutral; invert complements every RGB channel after composition. The calendar shows the previous, current, and next months near the bottom of the wallpaper and highlights today. Choose the effect under **Settings → General → Settings applying to all modes → Effect**, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
+Each profile can optionally apply a `grayscale`, half-color `desaturate`, vivid `saturate`, warm vintage-style `sepia`, complementary-color `invert`, soft-focus `blur`, edge-darkening `vignette`, or three-month `calendar` effect after composing the complete multi-monitor wallpaper. The `random` setting independently chooses one of those eight concrete effects for each successful rotation; it never resolves to `none` or another `random` choice. Desaturation blends each RGB pixel halfway toward grayscale so muted color remains; saturation raises color intensity to 1.5× while leaving neutral tones neutral; invert complements every RGB channel after composition. The calendar shows the previous, current, and next months near the bottom of the wallpaper and highlights today. Choose the effect under **Settings → General → Settings applying to all modes → Effect**, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
 
 ## Monitor names
 
