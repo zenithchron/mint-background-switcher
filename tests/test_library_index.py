@@ -72,6 +72,17 @@ def test_nonrecursive_refresh_skips_nested_images(tmp_path):
     assert index.paths(snapshot.signature) == [expected[0]]
 
 
+def test_refresh_indexes_an_individual_picture_source(tmp_path):
+    picture = tmp_path / "individual.png"
+    picture.write_bytes(b"extension is sufficient for indexing")
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(picture)], recursive=True)
+
+    assert snapshot.image_count == 1
+    assert index.paths(snapshot.signature) == [str(picture.resolve())]
+
+
 def test_fresh_index_is_reused_without_rescanning(monkeypatch, tmp_path):
     root = tmp_path / "photos"
     _touch_images(root, ("a.jpg", "b.jpg"))

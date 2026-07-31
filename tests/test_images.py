@@ -69,6 +69,13 @@ def test_scan_images_recursive(tmp_path: Path):
     assert len(scan_images([str(tmp_path)], recursive=True)) == 2
 
 
+def test_scan_images_accepts_an_individual_picture_source(tmp_path: Path):
+    picture = tmp_path / "individual.PNG"
+    picture.write_bytes(b"extension is sufficient for discovery")
+
+    assert scan_images([str(picture)], recursive=False) == [str(picture.resolve())]
+
+
 def test_is_usable_image_rejects_files_pillow_cannot_decode(tmp_path: Path):
     valid = tmp_path / "valid.png"
     broken = tmp_path / "broken.jpg"

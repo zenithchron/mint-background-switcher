@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.26] - 2026-07-31
+
+### Added
+
+- Individual local picture sources, inspired by John’s Background Switcher, alongside existing recursive source folders.
+- **Add picture...** under **Settings → General → Shared picture sources**, with supported-file validation plus visible added, duplicate, and error feedback before Save and **Apply Next Now**.
+- Individual-file discovery/index coverage and Xvfb-backed Settings visibility and persistence coverage.
+
+### Changed
+
+- Bumped the package version to `0.1.26`.
+
 ## [0.1.25] - 2026-07-30
 
 ### Added

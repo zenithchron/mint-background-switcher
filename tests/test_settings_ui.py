@@ -5,6 +5,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from mint_background_switcher import settings_ui
 from mint_background_switcher.monitor import Monitor
@@ -1389,6 +1390,131 @@ def test_shared_hard_drive_browse_adds_unique_folder():
     assert shared_text.value.splitlines() == ["/tmp/example/Pictures", "/media/example/Photos"]
 
 
+def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_path):
+    picture = tmp_path / "selected picture.PNG"
+    Image.new("RGB", (16, 10), (20, 80, 140)).save(picture)
+    dialogs = []
+    messages = []
+    errors = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    shared_text = _Text("/tmp/example/Pictures")
+    setattr(dummy, "shared_text", shared_text)
+    monkeypatch.setattr(
+        settings_ui.filedialog,
+        "askopenfilename",
+        lambda **kwargs: dialogs.append(kwargs) or str(picture),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+
+    assert dialogs[0]["parent"] is dummy
+    assert dialogs[0]["title"] == "Add an individual wallpaper picture"
+    assert ("Supported pictures", settings_ui.SUPPORTED_PICTURE_PATTERNS) in dialogs[0]["filetypes"]
+    assert shared_text.value.splitlines() == ["/tmp/example/Pictures", str(picture.resolve())]
+    assert [title for title, _message, _kwargs in messages] == [
+        "Picture added",
+        "Picture already listed",
+    ]
+    assert "Choose Save" in messages[0][1]
+    assert all(message[2]["parent"] is dummy for message in messages)
+    assert errors == []
+
+
+def test_add_shared_picture_rejects_unsupported_unreadable_or_missing_files(monkeypatch, tmp_path):
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not a picture", encoding="utf-8")
+    unreadable = tmp_path / "unreadable.png"
+    unreadable.write_bytes(b"not a decodable picture")
+    line_break = tmp_path / "line\nbreak.png"
+    Image.new("RGB", (16, 10), (20, 80, 140)).save(line_break)
+    selections = iter(
+        (str(unsupported), str(unreadable), str(line_break), str(tmp_path / "missing.png"))
+    )
+    errors = []
+    dummy = object.__new__(settings_ui.SettingsApp)
+    shared_text = _Text("")
+    setattr(dummy, "shared_text", shared_text)
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: next(selections))
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+
+    assert shared_text.value == ""
+    assert [title for title, _message, _kwargs in errors] == [
+        "Could not add picture",
+        "Could not add picture",
+        "Could not add picture",
+        "Could not add picture",
+    ]
+    assert "supported picture file" in errors[0][1]
+    assert "could not be read" in errors[1][1]
+    assert "line breaks" in errors[2][1]
+    assert "Could not access" in errors[3][1]
+    assert all(error[2]["parent"] is dummy for error in errors)
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_add_picture_is_visible_and_saves_individual_source(monkeypatch, tmp_path):
+    picture = tmp_path / "favorite\u2028picture.png"
+    Image.new("RGB", (16, 10), (20, 80, 140)).save(picture)
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: str(picture))
+    messages = []
+    errors = []
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+
+        assert app.shared_add_picture_button.cget("text") == "Add picture..."
+        assert app.shared_add_picture_button.winfo_ismapped()
+        assert app.shared_add_picture_button.winfo_width() > 1
+        assert (
+            app.shared_add_picture_button.winfo_x() + app.shared_add_picture_button.winfo_width()
+            <= app.shared_add_picture_button.master.winfo_width()
+        )
+
+        app.shared_add_picture_button.invoke()
+        app.profile_save_button.invoke()
+
+        assert str(picture.resolve()) in app.shared_text.get("1.0", settings_ui.tk.END).split("\n")
+        assert str(picture.resolve()) in settings_ui.load_config().get_profile("Default").shared_folders
+        assert [title for title, _message, _kwargs in messages][-2:] == ["Picture added", "Saved"]
+        assert errors == []
+    finally:
+        app.destroy()
+
+
 def test_monitor_folder_flow_browses_then_asks_for_screen():
     events = []
     dummy = object.__new__(settings_ui.SettingsApp)
@@ -1572,6 +1698,7 @@ def test_settings_exposes_working_folder_controls_at_1024x768(monkeypatch, tmp_p
 
         assert app.working_directory_var.get() == str(cache.absolute())
         for widget in (
+            app.shared_add_picture_button,
             app.working_directory_entry,
             app.working_browse_button,
             app.working_create_button,

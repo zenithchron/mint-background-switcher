@@ -55,6 +55,46 @@ def _setup_profile(monkeypatch, tmp_path: Path) -> None:
     )
 
 
+def test_individual_picture_source_rotates_in_dry_run_and_live_modes(monkeypatch, tmp_path: Path):
+    class _FakeDesktopSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def apply(self, *_args, **_kwargs):
+            return ["fake"]
+
+        def apply_black(self, *_args, **_kwargs):
+            raise AssertionError("a valid individual picture must not use black fallback")
+
+    picture = tmp_path / "favorite.png"
+    Image.new("RGB", (100, 80), (25, 100, 175)).save(picture)
+    source_bytes = picture.read_bytes()
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    monkeypatch.setattr(service, "DesktopSetter", _FakeDesktopSetter)
+    save_config(
+        Config(
+            active_profile="P",
+            profiles={"P": Profile(name="P", shared_folders=[str(picture)])},
+        )
+    )
+
+    preview = switch_once("P", dry_run=True, rng=random.Random(2))
+    live = switch_once("P", dry_run=False, rng=random.Random(2))
+
+    assert preview.images == live.images == [str(picture.resolve())]
+    assert preview.action == live.action == "next"
+    assert preview.applied is False
+    assert live.applied is True
+    assert picture.read_bytes() == source_bytes
+    assert load_state().last_images == [str(picture.resolve())]
+    assert (tmp_path / "cache" / "library-index.sqlite3").is_file()
+    with Image.open(live.wallpaper) as wallpaper:
+        assert wallpaper.size == (100, 80)
+        assert wallpaper.getpixel((50, 40)) == (25, 100, 175)
+
+
 def test_current_source_images_is_unique_ordered_and_read_only(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     first = tmp_path / "pictures" / "first.png"

@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from . import APP_NAME, __version__, updater
 from .config import EFFECT_CHOICES, Config, Profile, load_config, save_config
+from .images import SUPPORTED_EXTENSIONS, is_usable_image
 from .monitor import Monitor, detect_monitors
 from .service import SwitchCancelled, black_screen, current_source_images, save_current_wallpaper, switch_once
 from .working_storage import (
@@ -33,6 +34,11 @@ SETTINGS_WINDOW_MIN_HEIGHT = 680
 SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
+SUPPORTED_PICTURE_PATTERNS = " ".join(
+    pattern
+    for extension in SUPPORTED_EXTENSIONS
+    for pattern in (f"*{extension}", f"*{extension.upper()}")
+)
 
 
 def _current_picture_path(path: str | Path) -> Path:
@@ -41,6 +47,25 @@ def _current_picture_path(path: str | Path) -> Path:
     picture = Path(path).expanduser().resolve(strict=False)
     if not picture.is_file():
         raise FileNotFoundError(f"Current source picture is missing: {picture}")
+    return picture
+
+
+def _selected_source_picture(path: str | Path) -> Path:
+    """Resolve and validate one picture selected for a shared source pool."""
+
+    try:
+        picture = Path(path).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"Could not access the selected picture: {path}") from exc
+    if not picture.is_file():
+        raise ValueError(f"The selected picture is not a regular file: {picture}")
+    if picture.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        extensions = ", ".join(SUPPORTED_EXTENSIONS)
+        raise ValueError(f"Choose a supported picture file ({extensions}).")
+    if "\n" in str(picture) or "\r" in str(picture):
+        raise ValueError("Picture paths containing line breaks are not supported.")
+    if not is_usable_image(picture):
+        raise ValueError("The selected file could not be read as a supported picture.")
     return picture
 
 
@@ -301,20 +326,37 @@ class SettingsApp(tk.Tk):
         ttk.Label(form, text="Letterbox bars:").grid(row=3, column=0, sticky="w", pady=(5, 0))
         ttk.OptionMenu(form, self.bar_color_var, "black", "black", "auto").grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
 
-        shared_frame = ttk.LabelFrame(self.general_tab, text="Shared image-source folders", padding=8)
+        shared_frame = ttk.LabelFrame(self.general_tab, text="Shared picture sources", padding=8)
         shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)
         ttk.Label(
             shared_frame,
-            text="Used by Shared, Same, Montage, Collage, Postcard, Polaroid, and Span modes.",
+            text=(
+                "Folders and individual pictures used by Shared, Same, Montage, Collage, "
+                "Postcard, Polaroid, and Span modes."
+            ),
         ).pack(anchor="w", pady=(0, 4))
         self.shared_text = tk.Text(shared_frame, height=5, width=40)
         self.shared_text.pack(fill=tk.BOTH, expand=True)
         shared_buttons = ttk.Frame(shared_frame)
         shared_buttons.pack(fill=tk.X, pady=4)
-        ttk.Button(shared_buttons, text="Add folder...", command=self._add_shared_folder).pack(side=tk.LEFT)
-        ttk.Button(shared_buttons, text="Browse hard drives...", command=self._add_shared_folder_from_root).pack(
-            side=tk.LEFT, padx=4
+        self.shared_add_folder_button = ttk.Button(
+            shared_buttons,
+            text="Add folder...",
+            command=self._add_shared_folder,
         )
+        self.shared_add_folder_button.pack(side=tk.LEFT)
+        self.shared_add_picture_button = ttk.Button(
+            shared_buttons,
+            text="Add picture...",
+            command=self._add_shared_picture,
+        )
+        self.shared_add_picture_button.pack(side=tk.LEFT, padx=4)
+        self.shared_browse_drives_button = ttk.Button(
+            shared_buttons,
+            text="Browse hard drives...",
+            command=self._add_shared_folder_from_root,
+        )
+        self.shared_browse_drives_button.pack(side=tk.LEFT)
 
         working = ttk.LabelFrame(self.general_tab, text="Working files", padding=(8, 5))
         working.pack(fill=tk.X, pady=(0, 4))
@@ -340,12 +382,12 @@ class SettingsApp(tk.Tk):
         working.columnconfigure(1, weight=1)
 
         mode_descriptions = {
-            "shared": "Shows a different image from the General shared source folders on each screen.",
-            "same": "Shows the same image from the General shared source folders on every screen.",
-            "montage": "Arranges four images from the General shared source folders in a grid on each screen.",
-            "collage": "Arranges five images from the General shared source folders in an asymmetric collage.",
-            "postcard": "Randomly places bare photos from the General shared source folders without frames or pins.",
-            "span": "Spans one image from the General shared source folders across the virtual desktop.",
+            "shared": "Shows a different image from the General shared picture sources on each screen.",
+            "same": "Shows the same image from the General shared picture sources on every screen.",
+            "montage": "Arranges four images from the General shared picture sources in a grid on each screen.",
+            "collage": "Arranges five images from the General shared picture sources in an asymmetric collage.",
+            "postcard": "Randomly places bare photos from the General shared picture sources without frames or pins.",
+            "span": "Spans one image from the General shared picture sources across the virtual desktop.",
         }
         for mode, description in mode_descriptions.items():
             ttk.Label(self.mode_tabs[mode], text=description, justify=tk.LEFT, wraplength=760).pack(anchor="w")
@@ -391,7 +433,7 @@ class SettingsApp(tk.Tk):
             polaroid_tab,
             text=(
                 "Places randomly positioned and tilted Polaroid-style prints from the General shared "
-                "source folders. Prints may overlap."
+                "picture sources. Prints may overlap."
             ),
             justify=tk.LEFT,
             wraplength=760,
@@ -576,7 +618,7 @@ class SettingsApp(tk.Tk):
             interval_minutes=float(self.interval_var.get()),
             mode=self.mode_var.get(),
             recursive=self.recursive_var.get(),
-            shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).splitlines() if p.strip()],
+            shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",
             desktop=self.desktop_var.get(),
@@ -696,7 +738,7 @@ class SettingsApp(tk.Tk):
         value = value.strip()
         if not value:
             return
-        existing = [line.strip() for line in text_widget.get("1.0", tk.END).splitlines() if line.strip()]
+        existing = [line.strip() for line in text_widget.get("1.0", tk.END).split("\n") if line.strip()]
         if value in existing:
             return
         current = text_widget.get("1.0", tk.END).strip()
@@ -721,6 +763,47 @@ class SettingsApp(tk.Tk):
 
     def _add_shared_folder_from_root(self) -> None:
         self._add_shared_folder(initialdir="/", title="Add a wallpaper folder from any mounted drive")
+
+    def _ask_picture(self) -> str:
+        pictures = Path.home() / "Pictures"
+        initial_directory = pictures if pictures.is_dir() else Path.home()
+        return filedialog.askopenfilename(
+            parent=self,
+            initialdir=str(initial_directory),
+            title="Add an individual wallpaper picture",
+            filetypes=(
+                ("Supported pictures", SUPPORTED_PICTURE_PATTERNS),
+                ("All files", "*"),
+            ),
+        )
+
+    def _add_shared_picture(self) -> None:
+        selected = self._ask_picture()
+        if not selected:
+            return
+        try:
+            picture = _selected_source_picture(selected)
+            existing = {
+                line.strip()
+                for line in self.shared_text.get("1.0", tk.END).split("\n")
+                if line.strip()
+            }
+            if str(picture) in existing:
+                messagebox.showinfo(
+                    "Picture already listed",
+                    f"This picture is already in the shared source list:\n{picture}",
+                    parent=self,
+                )
+                return
+            self._append_text_line(self.shared_text, str(picture))
+        except Exception as exc:
+            messagebox.showerror("Could not add picture", str(exc), parent=self)
+            return
+        messagebox.showinfo(
+            "Picture added",
+            f"Added to the shared source list:\n{picture}\n\nChoose Save to keep this profile change.",
+            parent=self,
+        )
 
     def _optional_attr(self, name: str, default=None):
         try:
@@ -897,6 +980,9 @@ class SettingsApp(tk.Tk):
             self.profile_rename_button,
             self.profile_delete_button,
             self.profile_save_button,
+            self.shared_add_folder_button,
+            self.shared_add_picture_button,
+            self.shared_browse_drives_button,
             self.working_browse_button,
             self.working_create_button,
             self.working_use_button,

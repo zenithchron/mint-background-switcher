@@ -4,7 +4,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 
 ## Features
 
-- Local image folders with recursive scanning.
+- Local image folders with recursive scanning plus individually selected picture files.
 - Random no-repeat rotation until each pool is exhausted.
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
@@ -25,6 +25,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.26 - 2026-07-31
+
+- Added individual local picture sources alongside recursive source folders.
+- Added **Add picture...** under **Settings → General → Shared picture sources**, with supported-file validation plus visible added, duplicate, and error feedback before Save and **Apply Next Now**.
+- Added individual-file discovery/index tests and Xvfb-backed Settings visibility and persistence coverage.
+- Bumped the package version to `0.1.26`.
 
 ### 0.1.25 - 2026-07-30
 
@@ -237,7 +244,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -361,7 +368,7 @@ export MBS_USER_BIN_DIR=/tmp/mbs-bin
 
 ## Working files and large libraries
 
-MBS treats configured wallpaper folders as read-only source libraries. It does not create thumbnails, resized copies, metadata files, or indexes inside those folders. Discovery metadata and no-repeat pools live in `library-index.sqlite3` in the MBS working folder. A fresh or stale index is refreshed transactionally; warm rotations reuse it for five minutes. A no-repeat pool is refilled near-linearly once per cycle, then ordinary draws fetch only the bounded rows needed for the next wallpaper. Scanning, selection, decoding, composition, and Settings migration run outside GTK/Tk event loops.
+MBS treats configured wallpaper folders and individual picture files as read-only sources. It does not create thumbnails, resized copies, metadata files, or indexes beside those sources. Discovery metadata and no-repeat pools live in `library-index.sqlite3` in the MBS working folder. A fresh or stale index is refreshed transactionally; warm rotations reuse it for five minutes. A no-repeat pool is refilled near-linearly once per cycle, then ordinary draws fetch only the bounded rows needed for the next wallpaper. Scanning, selection, decoding, composition, and Settings migration run outside GTK/Tk event loops.
 
 The default working folder is `~/.cache/mint-background-switcher/`. To use another disk or location, open Settings and use **Working files → Browse...** for an empty or previously MBS-owned folder, or **Create Folder...** to explicitly create one child folder under a chosen parent. A typed nonexistent path is created only after confirmation and only when its parent already exists. **Use Folder...** validates the destination and copies only generated wallpaper PNGs and image-index files. Copy contents are verified before configuration changes, name collisions are rejected, and the old files are retained for recovery.
 
