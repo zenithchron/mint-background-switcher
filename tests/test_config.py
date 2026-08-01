@@ -115,6 +115,7 @@ def test_polaroid_options_roundtrip_with_backward_compatible_defaults_and_bounds
     assert defaults.get_profile().polaroid_count == 4
     assert defaults.get_profile().polaroid_size == 0.5
     assert defaults.get_profile().polaroid_span is False
+    assert defaults.get_profile().polaroid_tilt is True
 
     configured = Config.from_dict(
         {
@@ -125,6 +126,7 @@ def test_polaroid_options_roundtrip_with_backward_compatible_defaults_and_bounds
                     "polaroid_count": "7",
                     "polaroid_size": "0.8",
                     "polaroid_span": True,
+                    "polaroid_tilt": False,
                 }
             },
         }
@@ -132,9 +134,16 @@ def test_polaroid_options_roundtrip_with_backward_compatible_defaults_and_bounds
     assert configured.get_profile().polaroid_count == 7
     assert configured.get_profile().polaroid_size == 0.8
     assert configured.get_profile().polaroid_span is True
+    assert configured.get_profile().polaroid_tilt is False
     assert configured.to_dict()["profiles"]["P"]["polaroid_count"] == 7
     assert configured.to_dict()["profiles"]["P"]["polaroid_size"] == 0.8
     assert configured.to_dict()["profiles"]["P"]["polaroid_span"] is True
+    assert configured.to_dict()["profiles"]["P"]["polaroid_tilt"] is False
+
+    malformed_tilt = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"polaroid_tilt": ["not", "a", "boolean"]}}}
+    )
+    assert malformed_tilt.get_profile().polaroid_tilt is True
 
     high = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"polaroid_count": 999, "polaroid_size": 2}}}

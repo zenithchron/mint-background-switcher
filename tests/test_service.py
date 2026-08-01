@@ -898,12 +898,13 @@ def test_postcard_mode_uses_black_fallback_when_all_images_are_malformed(monkeyp
         ]
 
 
-def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, tmp_path: Path):
+def test_polaroid_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
     cfg.get_profile("P").mode = "polaroid"
     cfg.get_profile("P").polaroid_count = 7
     cfg.get_profile("P").polaroid_size = 0.8
+    cfg.get_profile("P").polaroid_tilt = False
     save_config(cfg)
     captured = {}
 
@@ -915,6 +916,7 @@ def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
         bar_color="black",
         size=0.5,
         span=False,
+        tilt=True,
         rng=None,
     ):
         captured["monitors"] = [monitor.name for monitor in monitors]
@@ -922,6 +924,7 @@ def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
         captured["bar_color"] = bar_color
         captured["size"] = size
         captured["span"] = span
+        captured["tilt"] = tilt
         captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"polaroid")
@@ -950,6 +953,7 @@ def test_polaroid_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
     assert captured["bar_color"] == "black"
     assert captured["size"] == 0.8
     assert captured["span"] is False
+    assert captured["tilt"] is False
     assert isinstance(captured["rng"], random.Random)
     assert "profile:P:polaroid" not in state.remaining
     assert draw_counts == [("profile:P:polaroid", 14)]
@@ -1091,6 +1095,7 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
         bar_color="black",
         size=0.5,
         span=False,
+        tilt=True,
         rng=None,
     ):
         attempts.append({name: list(paths) for name, paths in images_by_monitor.items()})
@@ -1105,6 +1110,7 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
             bar_color=bar_color,
             size=size,
             span=span,
+            tilt=tilt,
             rng=rng,
         )
 

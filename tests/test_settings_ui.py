@@ -1080,7 +1080,9 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         def capture_config(config):
             profile = config.get_profile("Default")
             saved_modes.append(profile.mode)
-            saved_polaroid_options.append((profile.polaroid_count, profile.polaroid_size, profile.polaroid_span))
+            saved_polaroid_options.append(
+                (profile.polaroid_count, profile.polaroid_size, profile.polaroid_span, profile.polaroid_tilt)
+            )
 
         monkeypatch.setattr(settings_ui, "save_config", capture_config)
         monkeypatch.setattr(
@@ -1128,6 +1130,17 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         assert int(float(app.polaroid_count_spinbox.cget("to"))) == 100
         assert app.polaroid_count_label.cget("text") == "Polaroid photos per screen:"
         assert app.polaroid_span_checkbutton.winfo_ismapped()
+        assert app.polaroid_tilt_checkbutton.winfo_ismapped()
+        assert app.polaroid_tilt_checkbutton.cget("text") == "Randomly tilt prints"
+        assert app.polaroid_tilt_var.get() is True
+        assert (
+            app.polaroid_tilt_checkbutton.winfo_rootx() + app.polaroid_tilt_checkbutton.winfo_width()
+            <= app.polaroid_options.winfo_rootx() + app.polaroid_options.winfo_width()
+        )
+        assert (
+            app.polaroid_tilt_checkbutton.winfo_rooty() + app.polaroid_tilt_checkbutton.winfo_height()
+            <= app.polaroid_options.winfo_rooty() + app.polaroid_options.winfo_height()
+        )
         scale_style = app.polaroid_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
         assert app.mode_var.get() == "shared"
@@ -1142,12 +1155,13 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         app.polaroid_count_var.set(7)
         app.polaroid_size_var.set(0.8)
         app.polaroid_span_var.set(True)
+        app.polaroid_tilt_var.set(False)
         app.update_idletasks()
         assert app.polaroid_count_label.cget("text") == "Polaroid photos across all screens:"
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["polaroid"]
-        assert saved_polaroid_options == [(7, 0.8, True)]
+        assert saved_polaroid_options == [(7, 0.8, True, False)]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
 
@@ -1166,7 +1180,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["polaroid", "polaroid"]
-        assert saved_polaroid_options == [(7, 0.8, True), (7, 0.8, True)]
+        assert saved_polaroid_options == [(7, 0.8, True, False), (7, 0.8, True, False)]
         assert messages[-1][0] == "Safe black fallback"
         assert "No usable source images" in messages[-1][1]
 
@@ -1178,7 +1192,11 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["polaroid", "polaroid", "polaroid"]
-        assert saved_polaroid_options == [(7, 0.8, True), (7, 0.8, True), (7, 0.8, True)]
+        assert saved_polaroid_options == [
+            (7, 0.8, True, False),
+            (7, 0.8, True, False),
+            (7, 0.8, True, False),
+        ]
         assert errors == [("Apply failed", "polaroid preview failed")]
     finally:
         app.destroy()

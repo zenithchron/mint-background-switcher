@@ -576,6 +576,7 @@ def _compose_scattered_photos(
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
+    tilt: bool = True,
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random framed or bare photos per monitor or across the virtual desktop."""
@@ -598,7 +599,10 @@ def _compose_scattered_photos(
             for monitor in monitors
             for image_path in images_by_monitor.get(monitor.name, [])
         ]
-        card_specs = [(image_path, rng.uniform(-10.0, 10.0)) for image_path in image_paths]
+        card_specs = [
+            (image_path, rng.uniform(-10.0, 10.0) if tilt else 0.0)
+            for image_path in image_paths
+        ]
         rng.shuffle(card_specs)
         anchors = list(monitors)
         rng.shuffle(anchors)
@@ -625,7 +629,7 @@ def _compose_scattered_photos(
             max(1, round(monitor.height * size_fraction)),
         )
         card_specs = [
-            (image_path, rng.uniform(-10.0, 10.0))
+            (image_path, rng.uniform(-10.0, 10.0) if tilt else 0.0)
             for image_path in images_by_monitor.get(monitor.name, [])
         ]
         rng.shuffle(card_specs)
@@ -650,6 +654,7 @@ def compose_polaroid(
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
+    tilt: bool = True,
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random framed Polaroid prints per monitor or across the virtual desktop."""
@@ -662,6 +667,7 @@ def compose_polaroid(
         bar_color=bar_color,
         size=size,
         span=span,
+        tilt=tilt,
         rng=rng,
     )
 

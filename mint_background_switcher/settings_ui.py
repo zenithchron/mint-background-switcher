@@ -205,6 +205,7 @@ class SettingsApp(tk.Tk):
         self.polaroid_count_var = tk.IntVar(value=4)
         self.polaroid_size_var = tk.DoubleVar(value=0.5)
         self.polaroid_span_var = tk.BooleanVar(value=False)
+        self.polaroid_tilt_var = tk.BooleanVar(value=True)
         self.monitor_folder_var = tk.StringVar()
         self.update_status_var = tk.StringVar()
         working_directory = configured_working_directory(self.config_data)
@@ -432,7 +433,7 @@ class SettingsApp(tk.Tk):
         ttk.Label(
             polaroid_tab,
             text=(
-                "Places randomly positioned and tilted Polaroid-style prints from the General shared "
+                "Places randomly positioned Polaroid-style prints from the General shared "
                 "picture sources. Prints may overlap."
             ),
             justify=tk.LEFT,
@@ -440,20 +441,22 @@ class SettingsApp(tk.Tk):
         ).pack(anchor="w", pady=(0, 12))
         self.polaroid_options = ttk.LabelFrame(polaroid_tab, text="Polaroid options", padding=10)
         self.polaroid_options.pack(fill=tk.X)
-        self.polaroid_count_label = ttk.Label(self.polaroid_options, text="Polaroid photos per screen:")
+        polaroid_layout_options = ttk.Frame(self.polaroid_options)
+        polaroid_layout_options.pack(fill=tk.X)
+        self.polaroid_count_label = ttk.Label(polaroid_layout_options, text="Polaroid photos per screen:")
         self.polaroid_count_label.pack(side=tk.LEFT)
         self.polaroid_count_spinbox = ttk.Spinbox(
-            self.polaroid_options,
+            polaroid_layout_options,
             from_=1,
             to=100,
             textvariable=self.polaroid_count_var,
             width=4,
         )
         self.polaroid_count_spinbox.pack(side=tk.LEFT, padx=(5, 18))
-        ttk.Label(self.polaroid_options, text="Photo size:").pack(side=tk.LEFT)
-        ttk.Label(self.polaroid_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
+        ttk.Label(polaroid_layout_options, text="Photo size:").pack(side=tk.LEFT)
+        ttk.Label(polaroid_layout_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
         self.polaroid_size_scale = ttk.Scale(
-            self.polaroid_options,
+            polaroid_layout_options,
             from_=0.0,
             to=1.0,
             variable=self.polaroid_size_var,
@@ -462,13 +465,19 @@ class SettingsApp(tk.Tk):
             style="ScatteredPhoto.Horizontal.TScale",
         )
         self.polaroid_size_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(self.polaroid_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(polaroid_layout_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
         self.polaroid_span_checkbutton = ttk.Checkbutton(
-            self.polaroid_options,
+            polaroid_layout_options,
             text="Span across all screens",
             variable=self.polaroid_span_var,
         )
         self.polaroid_span_checkbutton.pack(side=tk.LEFT, padx=(18, 0))
+        self.polaroid_tilt_checkbutton = ttk.Checkbutton(
+            self.polaroid_options,
+            text="Randomly tilt prints",
+            variable=self.polaroid_tilt_var,
+        )
+        self.polaroid_tilt_checkbutton.pack(anchor="w", pady=(8, 0))
 
         monitor_frame = ttk.LabelFrame(self.mode_tabs["per-monitor"], text="Per-monitor folders", padding=8)
         monitor_frame.pack(fill=tk.BOTH, expand=True)
@@ -562,6 +571,7 @@ class SettingsApp(tk.Tk):
         self.polaroid_count_var.set(profile.polaroid_count)
         self.polaroid_size_var.set(profile.polaroid_size)
         self.polaroid_span_var.set(profile.polaroid_span)
+        self.polaroid_tilt_var.set(profile.polaroid_tilt)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
@@ -605,6 +615,7 @@ class SettingsApp(tk.Tk):
         count_var = vars(self).get("polaroid_count_var")
         size_var = vars(self).get("polaroid_size_var")
         span_var = vars(self).get("polaroid_span_var")
+        tilt_var = vars(self).get("polaroid_tilt_var")
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -613,6 +624,7 @@ class SettingsApp(tk.Tk):
         polaroid_count = max(1, min(100, int(count_var.get()))) if count_var is not None else 4
         polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
         polaroid_span = bool(span_var.get()) if span_var is not None else False
+        polaroid_tilt = bool(tilt_var.get()) if tilt_var is not None else True
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -630,6 +642,7 @@ class SettingsApp(tk.Tk):
             polaroid_count=polaroid_count,
             polaroid_size=polaroid_size,
             polaroid_span=polaroid_span,
+            polaroid_tilt=polaroid_tilt,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:

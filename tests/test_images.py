@@ -504,6 +504,48 @@ def test_compose_polaroid_frames_four_uncropped_images_on_each_monitor(tmp_path:
     assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
 
 
+@pytest.mark.parametrize("span", [False, True])
+def test_polaroid_tilt_can_be_disabled_for_straight_prints(monkeypatch, tmp_path: Path, span: bool):
+    angles = []
+
+    class NoTiltRng(random.Random):
+        def __init__(self, x=None):
+            super().__init__(x)
+            self.position_draws = 0
+
+        def uniform(self, a, b):
+            del a, b
+            raise AssertionError("straight prints must not generate random angles")
+
+        def randint(self, a, b):
+            self.position_draws += 1
+            return super().randint(a, b)
+
+    def fake_polaroid_tile(image_path, _cell_size, angle, *, bar_color):
+        assert image_path in {"a", "b", "c", "d"}
+        assert bar_color == "black"
+        angles.append(angle)
+        return Image.new("RGBA", (20, 20), (248, 246, 238, 255))
+
+    monkeypatch.setattr(images_module, "_polaroid_tile", fake_polaroid_tile)
+    monitors = [Monitor("A", 100, 80, 0, 0), Monitor("B", 120, 80, 100, 0)]
+    rng = NoTiltRng(17)
+
+    output = compose_polaroid(
+        monitors,
+        {"A": ["a", "b"], "B": ["c", "d"]},
+        tmp_path / f"straight-{span}.png",
+        span=span,
+        tilt=False,
+        rng=rng,
+    )
+
+    assert angles == [0.0, 0.0, 0.0, 0.0]
+    assert rng.position_draws == 8
+    with Image.open(output) as wallpaper:
+        assert wallpaper.size == (220, 80)
+
+
 def test_polaroid_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):
     source = Image.new("RGB", (120, 80), (90, 90, 90))
     marker_colors = ((250, 20, 20), (20, 250, 20), (20, 20, 250), (250, 220, 20))

@@ -110,6 +110,7 @@ class Profile:
     polaroid_count: int = 4
     polaroid_size: float = 0.5
     polaroid_span: bool = False
+    polaroid_tilt: bool = True
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -139,6 +140,7 @@ class Profile:
             polaroid_count=_coerce_photo_count(data.get("polaroid_count", 4)),
             polaroid_size=_coerce_photo_size(data.get("polaroid_size", 0.5)),
             polaroid_span=_coerce_bool(data.get("polaroid_span", False)),
+            polaroid_tilt=_coerce_bool(data.get("polaroid_tilt", True), default=True),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -158,6 +160,7 @@ class Profile:
             "polaroid_count": self.polaroid_count,
             "polaroid_size": self.polaroid_size,
             "polaroid_span": self.polaroid_span,
+            "polaroid_tilt": self.polaroid_tilt,
         }
 
     def folders_for_monitor(self, monitor_name: str) -> list[str]:

@@ -616,6 +616,7 @@ def _switch_once_with_state(
                         bar_color=profile.bar_color,
                         size=profile.polaroid_size,
                         span=profile.polaroid_span,
+                        tilt=profile.polaroid_tilt,
                         rng=rng,
                     )
                 except ImageDecodeError as exc:
