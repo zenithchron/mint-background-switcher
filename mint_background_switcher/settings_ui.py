@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Callable
 
 from . import APP_NAME, __version__, updater
-from .config import EFFECT_CHOICES, Config, Profile, load_config, save_config
+from .config import BAR_COLOR_CHOICES, EFFECT_CHOICES, Config, Profile, load_config, save_config
 from .images import SUPPORTED_EXTENSIONS, is_usable_image
 from .monitor import Monitor, detect_monitors
 from .service import SwitchCancelled, black_screen, current_source_images, save_current_wallpaper, switch_once
@@ -325,7 +325,20 @@ class SettingsApp(tk.Tk):
         self.effect_menu = ttk.OptionMenu(form, self.effect_var, EFFECT_CHOICES[0], *EFFECT_CHOICES)
         self.effect_menu.grid(row=2, column=3, sticky="w", padx=5)
         ttk.Label(form, text="Letterbox bars:").grid(row=3, column=0, sticky="w", pady=(5, 0))
-        ttk.OptionMenu(form, self.bar_color_var, "black", "black", "auto").grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.bar_color_menu = ttk.OptionMenu(
+            form,
+            self.bar_color_var,
+            BAR_COLOR_CHOICES[0],
+            *BAR_COLOR_CHOICES,
+        )
+        self.bar_color_menu.grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.bar_color_help = ttk.Label(
+            form,
+            text="Blurred fills the bars with a scaled, softened copy while keeping the whole picture visible.",
+            wraplength=360,
+            justify=tk.LEFT,
+        )
+        self.bar_color_help.grid(row=3, column=2, columnspan=2, sticky="w", padx=(20, 0), pady=(5, 0))
 
         shared_frame = ttk.LabelFrame(self.general_tab, text="Shared picture sources", padding=8)
         shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)

@@ -34,7 +34,8 @@ RANDOM_EFFECT_CHOICES = (
 )
 EFFECT_CHOICES = ("none", "random", *RANDOM_EFFECT_CHOICES)
 VALID_EFFECTS = set(EFFECT_CHOICES)
-VALID_BAR_COLORS = {"black", "auto"}
+BAR_COLOR_CHOICES = ("black", "auto", "blurred")
+VALID_BAR_COLORS = set(BAR_COLOR_CHOICES)
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:

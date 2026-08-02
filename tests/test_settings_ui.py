@@ -741,6 +741,80 @@ def test_settings_effect_menu_exposes_random_and_applies_selection(
         app.destroy()
 
 
+@pytest.mark.skipif(
+    not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb"
+)
+def test_settings_letterbox_menu_exposes_blurred_edges_and_applies_selection(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.bar_color_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_styles = []
+        applied_profiles = []
+        messages = []
+        errors = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_styles.append(config.get_profile("Default").bar_color),
+        )
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="/tmp/blurred-edges-preview.png"),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        assert labels == ["black", "auto", "blurred"]
+        assert str(app.bar_color_menu).startswith(str(app.general_tab))
+        assert app.bar_color_menu.winfo_ismapped()
+        assert app.bar_color_menu.winfo_width() > 1
+        assert app.bar_color_help.winfo_ismapped()
+        assert "whole picture visible" in app.bar_color_help.cget("text")
+        assert (
+            app.bar_color_help.winfo_rootx() + app.bar_color_help.winfo_width()
+            <= app.bar_color_help.master.winfo_rootx() + app.bar_color_help.master.winfo_width()
+        )
+        menu.invoke(labels.index("blurred"))
+        assert app.bar_color_var.get() == "blurred"
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_styles == ["blurred"]
+        assert applied_profiles == ["Default"]
+        assert messages and messages[-1][0] == "Applied"
+
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda _profile, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("blurred edges preview failed")
+            ),
+        )
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_styles == ["blurred", "blurred"]
+        assert errors == [("Apply failed", "blurred edges preview failed")]
+    finally:
+        app.destroy()
+
+
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
 def test_settings_mode_menu_exposes_montage_and_applies_selection(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))

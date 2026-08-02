@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.28] - 2026-08-02
+
+### Added
+
+- A local blurred-edge letterbox fill, inspired by John’s Background Switcher, that places a scaled, softened copy behind the complete uncropped picture instead of using solid bars.
+- **blurred** under **Settings → General → Settings applying to all modes → Letterbox bars**, with an explanatory label plus Save and **Apply Next Now** success/error feedback.
+- Deterministic composition, source/state safety, black-screen non-regression, config, service, and 1024×768 Xvfb-backed Settings coverage for the new fill.
+
+### Changed
+
+- Bumped the package version to `0.1.28`.
+
 ## [0.1.27] - 2026-08-01
 
 ### Added

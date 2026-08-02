@@ -60,6 +60,27 @@ def test_fit_with_automatic_bars_uses_image_average_color():
     assert fitted.getpixel((10, 190)) == (120, 60, 30)
 
 
+def test_fit_with_blurred_edges_keeps_the_whole_foreground_and_does_not_mutate_source():
+    source = Image.new("RGB", (100, 50), (240, 20, 20))
+    for x in range(50, source.width):
+        for y in range(source.height):
+            source.putpixel((x, y), (20, 20, 240))
+    before = source.tobytes()
+
+    fitted = fit_with_black_bars(source, (100, 100), bar_color="blurred")
+
+    assert source.tobytes() == before
+    assert fitted.mode == "RGB"
+    assert fitted.size == (100, 100)
+    assert fitted.getpixel((0, 50)) == (240, 20, 20)
+    assert fitted.getpixel((99, 50)) == (20, 20, 240)
+    blurred_seam = fitted.getpixel((50, 5))
+    assert isinstance(blurred_seam, tuple)
+    assert blurred_seam[0] > 20
+    assert blurred_seam[2] > 20
+    assert blurred_seam != fitted.getpixel((50, 50))
+
+
 def test_scan_images_recursive(tmp_path: Path):
     nested = tmp_path / "nested"
     nested.mkdir()

@@ -1,6 +1,6 @@
 # Mint Background Switcher
 
-Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-monitor desktops. It rotates local image folders, supports one shared image pool or per-monitor folders, and fits each whole image inside its monitor with black or automatically color-matched bars instead of cropping.
+Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-monitor desktops. It rotates local image folders, supports one shared image pool or per-monitor folders, and fits each whole image inside its monitor with black, automatically color-matched, or blurred scaled-image fills instead of cropping the displayed picture.
 
 ## Features
 
@@ -19,12 +19,19 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
 - View every unique original picture used in the current wallpaper and open a selected source or its containing folder from Settings.
 - Optional per-profile random selection, grayscale, half-color desaturation, 1.5× saturation, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
-- Optional automatic letterbox-bar colors matched to each source image.
+- Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.28 - 2026-08-02
+
+- Added a local blurred-edge letterbox fill that places a scaled, softened copy behind the complete uncropped picture.
+- Added **blurred** under **Settings → General → Settings applying to all modes → Letterbox bars**, with an explanatory label plus Save and **Apply Next Now** success/error feedback.
+- Added deterministic composition, source/state safety, black-screen non-regression, config, service, and 1024×768 Xvfb-backed Settings coverage.
+- Bumped the package version to `0.1.28`.
 
 ### 0.1.27 - 2026-08-01
 
@@ -251,7 +258,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. Under **Polaroid**, clear **Randomly tilt prints** to keep randomly placed prints straight, then Save or use **Apply Next Now**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. Under **General → Settings applying to all modes → Letterbox bars**, choose **blurred** to fill unused space with a scaled, softened copy while keeping the whole picture visible. Under **Polaroid**, clear **Randomly tilt prints** to keep randomly placed prints straight, then Save or use **Apply Next Now**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 After manual commands work, enable safe login autostart:
 
@@ -394,7 +401,7 @@ Each profile has a mode:
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
 - `span`: one image is fit with configured letterbox bars across the full virtual desktop canvas.
 
-All modes keep the full image visible. The app never uses a fill/crop resize path for wallpaper generation. Letterbox bars are black by default; choose `auto` in the settings editor to match each panel's bars to the average color of its source image. In `span` mode, the single source image determines the color for the full canvas. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
+In fitted layouts, each foreground picture remains fully visible and is never fill-cropped. Letterbox bars are black by default; choose `auto` in Settings to match each panel's bars to the average source color, or `blurred` to place a scaled, center-cropped, softened duplicate behind the complete foreground picture. Only that decorative blurred backdrop is cropped. In `span` mode, the single source image determines the fill for the full canvas. If Cinnamon monitor scale is set to 75%, 125%, 150%, 175%, or 200%, monitor detection composes wallpapers at the physical panel resolution instead of the scaled logical desktop size.
 
 Each profile can optionally apply a `grayscale`, half-color `desaturate`, vivid `saturate`, warm vintage-style `sepia`, complementary-color `invert`, soft-focus `blur`, edge-darkening `vignette`, or three-month `calendar` effect after composing the complete multi-monitor wallpaper. The `random` setting independently chooses one of those eight concrete effects for each successful rotation; it never resolves to `none` or another `random` choice. Desaturation blends each RGB pixel halfway toward grayscale so muted color remains; saturation raises color intensity to 1.5× while leaving neutral tones neutral; invert complements every RGB channel after composition. The calendar shows the previous, current, and next months near the bottom of the wallpaper and highlights today. Choose the effect under **Settings → General → Settings applying to all modes → Effect**, save the profile, then use **Apply Next Now** (or run `next`) to preview the result on the desktop. The default `none` setting leaves image colors unchanged.
 

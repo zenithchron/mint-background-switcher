@@ -148,13 +148,21 @@ def fit_with_black_bars(image: Image.Image, size: tuple[int, int], bar_color: st
     target_w, target_h = size
     if target_w <= 0 or target_h <= 0:
         raise ValueError(f"Invalid target size: {size}")
-    if bar_color == "auto":
+    if bar_color == "blurred":
+        blur_radius = max(4.0, min(target_w, target_h) * 0.025)
+        canvas = ImageOps.fit(
+            image.convert("RGB"),
+            (target_w, target_h),
+            method=Image.Resampling.LANCZOS,
+        ).filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    elif bar_color == "auto":
         fill = automatic_bar_color(image)
+        canvas = Image.new("RGB", (target_w, target_h), fill)
     elif bar_color == "black":
         fill = (0, 0, 0)
+        canvas = Image.new("RGB", (target_w, target_h), fill)
     else:
-        raise ValueError(f"Unsupported letterbox bar color: {bar_color}")
-    canvas = Image.new("RGB", (target_w, target_h), fill)
+        raise ValueError(f"Unsupported letterbox bar style: {bar_color}")
     working = image.copy()
     working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
     x = (target_w - working.width) // 2

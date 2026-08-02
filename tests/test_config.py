@@ -202,10 +202,14 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert invalid.get_profile().effect == "none"
 
 
-def test_automatic_bar_color_roundtrips_and_invalid_value_falls_back():
+def test_letterbox_bar_styles_roundtrip_and_invalid_value_falls_back():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"bar_color": "AUTO"}}})
     assert cfg.get_profile().bar_color == "auto"
     assert cfg.to_dict()["profiles"]["P"]["bar_color"] == "auto"
+
+    blurred = Config.from_dict({"active_profile": "P", "profiles": {"P": {"bar_color": "BLURRED"}}})
+    assert blurred.get_profile().bar_color == "blurred"
+    assert blurred.to_dict()["profiles"]["P"]["bar_color"] == "blurred"
 
     invalid = Config.from_dict({"active_profile": "P", "profiles": {"P": {"bar_color": "rainbow"}}})
     assert invalid.get_profile().bar_color == "black"
