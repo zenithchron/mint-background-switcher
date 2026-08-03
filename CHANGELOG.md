@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.29] - 2026-08-03
+
+### Added
+
+- A **Collections** Settings tab with user-triggered downloads for NASA Space, NASA Earth from Space, Wikimedia Commons sunsets and insects, and the official NPS Alaska Region import.
+- Exact CC0/public-domain Wikimedia filtering, conservative NASA copyright-metadata filtering, trusted HTTPS host allowlists, bounded streaming, image verification, atomic no-overwrite installation, cancellation rollback, duplicate avoidance, and per-file provenance manifests.
+- An option to add the downloaded collection folder to the current profile and save, plus links to USDA ARS, Smithsonian Open Access, and National Park Service sources requiring manual access or personal API keys.
+- Fixture-backed downloader safety tests, live-provider verification, cancellable non-daemon Settings worker coverage, and 1024×768 Xvfb layout checks.
+
+### Changed
+
+- Bumped the package version to `0.1.29`.
+
 ## [0.1.28] - 2026-08-02
 
 ### Added

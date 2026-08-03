@@ -1,5 +1,6 @@
 import gc
 import os
+from pathlib import Path
 import threading
 import time
 from types import SimpleNamespace
@@ -1188,6 +1189,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
             "Polaroid",
             "Per-monitor",
             "Span",
+            "Collections",
             "About & Updates",
         ]
         assert str(app.shared_text).startswith(str(app.general_tab))
@@ -1996,6 +1998,125 @@ def test_apply_next_runs_off_tk_thread(monkeypatch, tmp_path):
         assert "disabled" not in app.black_button.state()
     finally:
         gate.set()
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_public_collection_download_runs_off_tk_thread_and_adds_saved_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    gate = threading.Event()
+    started = threading.Event()
+    messages = []
+
+    def delayed_download(slug, destination, count, *, cancelled, progress):
+        assert slug == "nasa-space"
+        assert count == 10
+        destination = Path(destination)
+        started.set()
+        progress(1, count, "Nebula")
+        assert gate.wait(timeout=2)
+        assert not cancelled()
+        destination.mkdir(parents=True)
+        image = destination / "nebula.jpg"
+        image.write_bytes(b"image")
+        manifest = destination / settings_ui.public_collections.MANIFEST_FILENAME
+        manifest.write_text("{}\n", encoding="utf-8")
+        return settings_ui.public_collections.CollectionDownloadResult(
+            settings_ui.public_collections.collection_by_slug(slug),
+            destination,
+            manifest,
+            (image,),
+            1,
+            0,
+            9,
+        )
+
+    monkeypatch.setattr(settings_ui.public_collections, "download_public_collection", delayed_download)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.notebook.select(app.collections_tab)
+        app.update_idletasks()
+        assert app.collections_download_button.winfo_ismapped()
+        assert app.collections_cancel_button.winfo_ismapped()
+        assert app.collections_combo.winfo_ismapped()
+        assert app.collections_count_spinbox.winfo_ismapped()
+        assert app.collections_add_source_checkbutton.winfo_ismapped()
+        app.collections_count_var.set(10)
+        app.collections_root_var.set(str(tmp_path / "Public Collections"))
+        app.collections_add_source_var.set(True)
+
+        app._download_public_collection()
+        assert started.wait(2)
+        app.update()
+        assert app._collection_busy is True
+        assert app._collection_worker is not None
+        assert app._collection_worker.daemon is False
+        assert app._collection_worker.is_alive()
+        assert "disabled" in app.collections_download_button.state()
+        assert "disabled" not in app.collections_cancel_button.state()
+        _pump_until(app, lambda: app.collections_status_var.get() == "Downloading 1/10: Nebula")
+
+        gate.set()
+        _pump_until(app, lambda: not app._collection_busy)
+
+        destination = (tmp_path / "Public Collections" / "nasa-space").absolute()
+        assert str(destination) in settings_ui.load_config().get_profile().shared_folders
+        assert messages and messages[-1][0] == "Collection downloaded"
+        assert "1 new" in messages[-1][1]
+        assert "9 could not" in messages[-1][1]
+    finally:
+        gate.set()
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_public_collection_close_requests_cancellation_and_waits_for_worker(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_INSTALL_ROOT", str(tmp_path / "managed"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    started = threading.Event()
+    messages = []
+
+    def cancellable_download(_slug, _destination, _count, *, cancelled, progress):
+        started.set()
+        progress(0, 10, "Searching collection...")
+        deadline = time.monotonic() + 2
+        while not cancelled() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if cancelled():
+            raise settings_ui.public_collections.CollectionDownloadCancelled("cancelled")
+        raise AssertionError("cancellation was not requested")
+
+    monkeypatch.setattr(settings_ui.public_collections, "download_public_collection", cancellable_download)
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.collections_count_var.set(10)
+        app.collections_root_var.set(str(tmp_path / "Public Collections"))
+        app._download_public_collection()
+        assert started.wait(2)
+
+        app._request_close()
+
+        assert app._collection_cancel.is_set()
+        assert app.winfo_exists()
+        assert messages and messages[-1][0] == "Operation in progress"
+        _pump_until(app, lambda: not app._collection_busy)
+        assert "cancelled" in app.collections_status_var.get().lower()
+    finally:
         app.destroy()
 
 

@@ -17,7 +17,11 @@ For desktop-session safety issues, include:
 
 ## Scope
 
-Mint Background Switcher is a local desktop utility. It does not intentionally transmit images, file paths, or configuration data to network services.
+Mint Background Switcher is a local desktop utility. It does not intentionally transmit local images, file paths, or configuration data to network services. Network access is limited to explicit user actions such as managed updates and Public Collections downloads.
+
+The Public Collections downloader contacts only exact allowlisted NASA and Wikimedia Commons API/asset hosts over HTTPS. It sends collection search terms and normal HTTP request metadata, not local picture or configuration data. Wikimedia files are accepted only when current item metadata says CC0 or public domain; NASA records with a nonempty copyright field are rejected. These checks reduce copyright risk but do not establish trademark, privacy, publicity, endorsement, or visual suitability. Every installed file has provenance and a SHA-256 digest in a local manifest.
+
+Collection metadata responses and image downloads are size-bounded. Images stream to operation-specific temporary files, are decoded and verified by Pillow, and are installed without replacing existing files. A failed or cancelled operation removes only files that operation newly installed and does not modify existing source images. Redirects must remain on the relevant exact allowlisted host. Provider compromise, inaccurate provider rights metadata, HTTPS/CA compromise, and the same local user or root changing files during an operation are outside this boundary.
 
 The updater's release-check and source-download layer contacts only the public GitHub API and GitHub/codeload download hosts for this repository. It resolves a stable semantic-version tag to a commit, downloads that commit's source archive over HTTPS, validates archive paths and package versions, rechecks the tag before activation, and records the downloaded archive's SHA-256 digest. The digest detects local corruption but is not an independent signature because the archive and tag come from the same trusted GitHub repository.
 

@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Callable
 
-from . import APP_NAME, __version__, updater
+from . import APP_NAME, __version__, public_collections, updater
 from .config import BAR_COLOR_CHOICES, EFFECT_CHOICES, Config, Profile, load_config, save_config
 from .images import SUPPORTED_EXTENSIONS, is_usable_image
 from .monitor import Monitor, detect_monitors
@@ -208,6 +208,15 @@ class SettingsApp(tk.Tk):
         self.polaroid_tilt_var = tk.BooleanVar(value=True)
         self.monitor_folder_var = tk.StringVar()
         self.update_status_var = tk.StringVar()
+        first_collection = public_collections.PUBLIC_COLLECTIONS[0]
+        self.collections_name_var = tk.StringVar(value=first_collection.name)
+        self.collections_count_var = tk.IntVar(value=25)
+        self.collections_root_var = tk.StringVar(
+            value=str(Path.home() / "Pictures" / "Mint Background Switcher Collections")
+        )
+        self.collections_add_source_var = tk.BooleanVar(value=True)
+        self.collections_description_var = tk.StringVar(value=first_collection.description)
+        self.collections_status_var = tk.StringVar(value="Choose a collection and download folder.")
         working_directory = configured_working_directory(self.config_data)
         self.working_directory_var = tk.StringVar(value=str(working_directory))
         self.working_status_var = tk.StringVar(
@@ -225,6 +234,9 @@ class SettingsApp(tk.Tk):
         self._migration_busy = False
         self._migration_worker: threading.Thread | None = None
         self._migration_cancel = threading.Event()
+        self._collection_busy = False
+        self._collection_worker: threading.Thread | None = None
+        self._collection_cancel = threading.Event()
         self._current_pictures_window: tk.Toplevel | None = None
         self._refresh_current_pictures: Callable[[], bool] | None = None
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
@@ -280,6 +292,8 @@ class SettingsApp(tk.Tk):
             self.mode_tabs[mode] = tab
             self.notebook.add(tab, text=title)
         self.about_tab = ttk.Frame(self.notebook, padding=12)
+        self.collections_tab = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(self.collections_tab, text="Collections")
         self.notebook.add(self.about_tab, text="About & Updates")
 
         top = ttk.Frame(self.general_tab)
@@ -519,6 +533,117 @@ class SettingsApp(tk.Tk):
         ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(6, 0))
         self.monitor_text = tk.Text(monitor_frame, height=6, width=48)
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            self.collections_tab,
+            text=(
+                "Download optional wallpaper collections directly into a local folder. MBS accepts only "
+                "NASA records without third-party copyright metadata and Wikimedia files explicitly marked "
+                "CC0 or public domain. Downloaded originals are not modified."
+            ),
+            justify=tk.LEFT,
+            wraplength=860,
+        ).pack(anchor="w", pady=(0, 10))
+        automatic = ttk.LabelFrame(self.collections_tab, text="Automatic collections — no account required", padding=10)
+        automatic.pack(fill=tk.X)
+        ttk.Label(automatic, text="Collection:").grid(row=0, column=0, sticky="w")
+        self.collections_combo = ttk.Combobox(
+            automatic,
+            textvariable=self.collections_name_var,
+            values=[collection.name for collection in public_collections.PUBLIC_COLLECTIONS],
+            state="readonly",
+            width=38,
+        )
+        self.collections_combo.grid(row=0, column=1, sticky="ew", padx=6)
+        self.collections_combo.bind("<<ComboboxSelected>>", lambda _event: self._refresh_collection_description())
+        ttk.Label(automatic, text="Images:").grid(row=0, column=2, sticky="e", padx=(12, 0))
+        self.collections_count_spinbox = ttk.Spinbox(
+            automatic,
+            from_=10,
+            to=100,
+            increment=5,
+            textvariable=self.collections_count_var,
+            width=5,
+        )
+        self.collections_count_spinbox.grid(row=0, column=3, sticky="w", padx=(6, 0))
+        ttk.Label(
+            automatic,
+            textvariable=self.collections_description_var,
+            justify=tk.LEFT,
+            wraplength=800,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 10))
+        ttk.Label(automatic, text="Collection library folder:").grid(row=2, column=0, sticky="w")
+        self.collections_root_entry = ttk.Entry(automatic, textvariable=self.collections_root_var)
+        self.collections_root_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6)
+        self.collections_browse_button = ttk.Button(
+            automatic,
+            text="Browse...",
+            command=self._browse_collections_root,
+        )
+        self.collections_browse_button.grid(row=2, column=3, sticky="w")
+        self.collections_add_source_checkbutton = ttk.Checkbutton(
+            automatic,
+            text="Add the downloaded collection folder to the current profile and save",
+            variable=self.collections_add_source_var,
+        )
+        self.collections_add_source_checkbutton.grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 4))
+        collection_actions = ttk.Frame(automatic)
+        collection_actions.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.collections_download_button = ttk.Button(
+            collection_actions,
+            text="Download Collection",
+            command=self._download_public_collection,
+        )
+        self.collections_download_button.pack(side=tk.LEFT)
+        self.collections_cancel_button = ttk.Button(
+            collection_actions,
+            text="Cancel Download",
+            command=self._cancel_public_collection_download,
+        )
+        self.collections_cancel_button.pack(side=tk.LEFT, padx=6)
+        self.collections_cancel_button.state(["disabled"])
+        ttk.Label(
+            collection_actions,
+            textvariable=self.collections_status_var,
+            justify=tk.LEFT,
+            wraplength=600,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        automatic.columnconfigure(1, weight=1)
+
+        recommended = ttk.LabelFrame(
+            self.collections_tab,
+            text="Additional recommended sources — manual access or personal API key required",
+            padding=10,
+        )
+        recommended.pack(fill=tk.X, pady=(12, 0))
+        self.collection_source_buttons = []
+        for row, source in enumerate(public_collections.RECOMMENDED_SOURCES):
+            ttk.Label(recommended, text=source.name, width=24).grid(row=row, column=0, sticky="nw", pady=3)
+            ttk.Label(recommended, text=source.description, wraplength=570, justify=tk.LEFT).grid(
+                row=row,
+                column=1,
+                sticky="w",
+                padx=6,
+                pady=3,
+            )
+            button = ttk.Button(
+                recommended,
+                text="Open Source",
+                command=lambda selected=source: self._open_collection_source(selected),
+            )
+            button.grid(row=row, column=2, sticky="e", pady=3)
+            self.collection_source_buttons.append(button)
+        recommended.columnconfigure(1, weight=1)
+        ttk.Label(
+            self.collections_tab,
+            text=(
+                "A provenance manifest is stored with each collection. Public-domain and CC0 status concerns "
+                "copyright only; trademarks, privacy/publicity rights, embedded labels, and visual suitability "
+                "may still require review before redistribution."
+            ),
+            justify=tk.LEFT,
+            wraplength=860,
+        ).pack(anchor="w", pady=(10, 0))
 
         ttk.Label(
             self.about_tab,
@@ -773,6 +898,105 @@ class SettingsApp(tk.Tk):
         else:
             text_widget.insert(tk.END, value)
 
+    def _selected_public_collection(self) -> public_collections.PublicCollection:
+        selected_name = self.collections_name_var.get()
+        for collection in public_collections.PUBLIC_COLLECTIONS:
+            if collection.name == selected_name:
+                return collection
+        raise public_collections.CollectionDownloadError(f"Unknown public collection: {selected_name}")
+
+    def _refresh_collection_description(self) -> None:
+        try:
+            self.collections_description_var.set(self._selected_public_collection().description)
+        except public_collections.CollectionDownloadError as exc:
+            self.collections_description_var.set(str(exc))
+
+    def _browse_collections_root(self) -> None:
+        current = Path(self.collections_root_var.get().strip() or Path.home()).expanduser()
+        initial = current if current.is_dir() else current.parent
+        selected = self._ask_folder(initialdir=str(initial), title="Choose a folder for public collections")
+        if selected:
+            self.collections_root_var.set(str(Path(selected).expanduser().absolute()))
+
+    def _open_collection_source(self, source: public_collections.RecommendedSource) -> None:
+        if source not in public_collections.RECOMMENDED_SOURCES:
+            messagebox.showerror("Could not open source", "The selected collection source is not trusted.", parent=self)
+            return
+        opener = shutil.which("xdg-open")
+        if opener is None:
+            messagebox.showerror(
+                "Could not open source",
+                f"xdg-open is unavailable. Open this address manually:\n{source.url}",
+                parent=self,
+            )
+            return
+        try:
+            subprocess.Popen(
+                [opener, source.url],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+                shell=False,
+            )
+        except OSError as exc:
+            messagebox.showerror("Could not open source", str(exc), parent=self)
+
+    def _download_public_collection(self) -> None:
+        if self._any_worker_busy():
+            return
+        try:
+            collection = self._selected_public_collection()
+            count = int(self.collections_count_var.get())
+            if count < 10 or count > 100:
+                raise ValueError("Choose between 10 and 100 images.")
+            root_text = self.collections_root_var.get().strip()
+            if not root_text:
+                raise ValueError("Choose a collection library folder.")
+            root = Path(root_text).expanduser().absolute()
+            destination = root / collection.slug
+        except (ValueError, public_collections.CollectionDownloadError) as exc:
+            messagebox.showerror("Could not start collection download", str(exc), parent=self)
+            return
+
+        self._collection_cancel.clear()
+        self._collection_busy = True
+        self.collections_status_var.set("Starting collection download...")
+        self._refresh_worker_controls()
+
+        def progress(completed: int, total: int, name: str) -> None:
+            self._operation_results.put(("collection-progress", (completed, total, name), None))
+
+        def run() -> None:
+            try:
+                result = public_collections.download_public_collection(
+                    collection.slug,
+                    destination,
+                    count,
+                    cancelled=self._collection_cancel.is_set,
+                    progress=progress,
+                )
+            except Exception as exc:
+                self._operation_results.put(("collection-done", None, exc))
+            else:
+                self._operation_results.put(("collection-done", result, None))
+
+        worker = threading.Thread(target=run, name="mbs-public-collection-download", daemon=False)
+        self._collection_worker = worker
+        try:
+            worker.start()
+        except Exception:
+            self._collection_worker = None
+            self._collection_busy = False
+            self._refresh_worker_controls()
+            raise
+
+    def _cancel_public_collection_download(self) -> None:
+        if self._optional_attr("_collection_busy", False):
+            self._collection_cancel.set()
+            self.collections_status_var.set("Cancellation requested; finishing the current safe download step...")
+
     def _ask_folder(self, *, initialdir: str | None = None, title: str | None = None) -> str:
         if initialdir and title:
             return filedialog.askdirectory(initialdir=initialdir, title=title)
@@ -994,6 +1218,7 @@ class SettingsApp(tk.Tk):
             self._optional_attr("_update_busy", False)
             or self._optional_attr("_apply_busy", False)
             or self._optional_attr("_migration_busy", False)
+            or self._optional_attr("_collection_busy", False)
         )
 
     def _refresh_worker_controls(self) -> None:
@@ -1012,12 +1237,24 @@ class SettingsApp(tk.Tk):
             self.working_browse_button,
             self.working_create_button,
             self.working_use_button,
+            self.collections_browse_button,
+            self.collections_download_button,
             self.black_button,
             self.export_button,
             self.current_pictures_button,
         ):
             button.state(["disabled"] if busy else ["!disabled"])
+        for control in (
+            self.collections_combo,
+            self.collections_count_spinbox,
+            self.collections_root_entry,
+            self.collections_add_source_checkbutton,
+        ):
+            control.state(["disabled"] if busy else ["!disabled"])
+        for button in self.collection_source_buttons:
+            button.state(["disabled"] if busy else ["!disabled"])
         self.working_cancel_button.state(["!disabled"] if self._migration_busy else ["disabled"])
+        self.collections_cancel_button.state(["!disabled"] if self._collection_busy else ["disabled"])
         if busy:
             self.update_button.state(["disabled"])
             self.rollback_button.state(["disabled"])
@@ -1171,6 +1408,53 @@ class SettingsApp(tk.Tk):
                             ),
                             parent=self,
                         )
+                    continue
+                if kind == "collection-progress":
+                    completed, total, name = result
+                    if completed:
+                        self.collections_status_var.set(f"Downloading {completed}/{total}: {name}")
+                    else:
+                        self.collections_status_var.set(str(name))
+                    continue
+                if kind == "collection-done":
+                    if self._collection_worker is not None:
+                        self._collection_worker.join()
+                    self._collection_worker = None
+                    self._collection_busy = False
+                    self._refresh_worker_controls()
+                    if error is not None:
+                        if isinstance(error, public_collections.CollectionDownloadCancelled):
+                            self.collections_status_var.set("Collection download cancelled; no new partial files were kept.")
+                        else:
+                            self.collections_status_var.set("Collection download failed.")
+                            messagebox.showerror("Collection download failed", str(error), parent=self)
+                        continue
+
+                    source_note = "The profile source list was not changed."
+                    if self.collections_add_source_var.get():
+                        self._append_text_line(self.shared_text, str(result.destination))
+                        if self._save_current(show_success=False):
+                            source_note = "The collection folder was added to the current profile and saved."
+                        else:
+                            source_note = "The images were downloaded, but the profile source change could not be saved."
+                    self.collections_status_var.set(
+                        f"Ready: {result.downloaded} new, {result.existing} already present, {result.failed} unavailable."
+                    )
+                    unavailable = (
+                        f"\n{result.failed} could not be downloaded from eligible provider results."
+                        if result.failed
+                        else ""
+                    )
+                    messagebox.showinfo(
+                        "Collection downloaded",
+                        (
+                            f"{result.collection.name}: {result.downloaded} new, "
+                            f"{result.existing} already present.{unavailable}\n\n"
+                            f"Folder:\n{result.destination}\n\n"
+                            f"Provenance manifest:\n{result.manifest_path}\n\n{source_note}"
+                        ),
+                        parent=self,
+                    )
                     continue
                 if kind == "apply-progress":
                     count, _path = result
@@ -1497,11 +1781,17 @@ class SettingsApp(tk.Tk):
                 parent=self,
             )
             return
-        if self._optional_attr("_migration_busy", False) or self._optional_attr("_apply_busy", False):
+        if (
+            self._optional_attr("_migration_busy", False)
+            or self._optional_attr("_apply_busy", False)
+            or self._optional_attr("_collection_busy", False)
+        ):
             if self._optional_attr("_migration_busy", False):
                 self._migration_cancel.set()
             if self._optional_attr("_apply_busy", False):
                 self._apply_cancel.set()
+            if self._optional_attr("_collection_busy", False):
+                self._collection_cancel.set()
             messagebox.showinfo(
                 "Operation in progress",
                 "Cancellation was requested. Keep Settings open until the current safe step finishes.",

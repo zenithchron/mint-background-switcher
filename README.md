@@ -9,7 +9,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
-- Tabbed Settings editor with General, one tab per wallpaper mode, and About & Updates while retaining an explicit active-mode selector.
+- Tabbed Settings editor with General, one tab per wallpaper mode, Public Collections, and About & Updates while retaining an explicit active-mode selector.
 - Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/tilt/stacking, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
@@ -18,6 +18,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
 - View every unique original picture used in the current wallpaper and open a selected source or its containing folder from Settings.
+- User-triggered Public Collections downloads from NASA and rights-filtered Wikimedia Commons CC0/public-domain sets, with provenance manifests and optional profile-source setup.
 - Optional per-profile random selection, grayscale, half-color desaturation, 1.5× saturation, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.
 - Safe login autostart that waits for Cinnamon before rotating.
@@ -25,6 +26,14 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.29 - 2026-08-03
+
+- Added a **Collections** Settings tab with optional NASA Space, NASA Earth from Space, public-domain/CC0 sunsets, insects, and NPS Alaska national-park downloads.
+- Added explicit rights filtering, trusted HTTPS host allowlists, bounded streaming, image verification, atomic installation, cancellation rollback, duplicate avoidance, and per-file provenance manifests.
+- Added an option to save the downloaded collection folder to the current profile, plus links to USDA ARS, Smithsonian Open Access, and National Park Service sources that require manual access or personal API keys.
+- Added fixture-backed safety/lifecycle tests, live-provider checks, and 1024×768 Xvfb-backed Settings coverage.
+- Bumped the package version to `0.1.29`.
 
 ### 0.1.28 - 2026-08-02
 
@@ -258,7 +267,15 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. Under **General → Settings applying to all modes → Letterbox bars**, choose **blurred** to fill unused space with a scaled, softened copy while keeping the whole picture visible. Under **Polaroid**, clear **Randomly tilt prints** to keep randomly placed prints straight, then Save or use **Apply Next Now**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. Under **Collections**, choose a rights-filtered public collection, a count from 10 to 100, and a local library folder; downloads happen only after **Download Collection** is selected. Under **General → Settings applying to all modes → Letterbox bars**, choose **blurred** to fill unused space with a scaled, softened copy while keeping the whole picture visible. Under **Polaroid**, clear **Randomly tilt prints** to keep randomly placed prints straight, then Save or use **Apply Next Now**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+
+## Public Collections
+
+Public Collections are opt-in and never run in the background. MBS currently offers NASA Space, NASA Earth from Space, Wikimedia Commons sunsets, Wikimedia Commons insects, and an official NPS Alaska Region import. Wikimedia results are accepted only when their current item metadata says **CC0** or **Public domain**. NASA search records with a nonempty copyright field are rejected. NASA material remains subject to NASA's media-use, branding, endorsement, and identifiable-person guidance.
+
+Images stream directly from exact allowlisted NASA or Wikimedia HTTPS hosts into a collection-specific subfolder. Each response is size-bounded and verified as an image before an atomic no-overwrite install. Cancellation removes files newly installed by that operation while retaining earlier collection files and their manifest. Repeating a download verifies and reuses existing manifest-owned images rather than replacing them. The hidden `.mbs-public-collection.json` manifest records the source page, provider identifier, creator, license or usage guidance, download URL, filename, and SHA-256 digest for each image.
+
+The downloader does not guarantee that every legally reusable file is aesthetically suitable or free of embedded text. Public-domain or CC0 status addresses copyright only; review trademarks, privacy/publicity rights, people, artwork, and provider guidance before redistributing a pack. Additional USDA ARS, Smithsonian Open Access, and National Park Service links are shown for manual use; they are not scraped, and shared API credentials are not embedded in the desktop application.
 
 After manual commands work, enable safe login autostart:
 
