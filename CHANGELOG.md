@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.30] - 2026-08-04
+
+### Added
+
+- An optional per-profile straight-photo setting for Postcard layouts, inspired by John’s Background Switcher, that keeps random placement and stacking while rendering every bare photo without rotation.
+- **Randomly tilt photos** under **Settings → Postcard**, enabled by default for backward compatibility; clear it, then choose Save or **Apply Next Now** for visible success/error feedback.
+- Backward-compatible config, per-screen and spanning composition, service wiring, and 1024×768 Xvfb-backed Settings coverage for the new option.
+
+### Changed
+
+- Bumped the package version to `0.1.30`.
+
 ## [0.1.29] - 2026-08-03
 
 ### Added

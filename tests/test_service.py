@@ -750,13 +750,14 @@ def test_collage_decode_retry_is_bounded_before_safe_black_fallback(monkeypatch,
         ]
 
 
-def test_postcard_mode_uses_configured_images_per_monitor_and_size(monkeypatch, tmp_path: Path):
+def test_postcard_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
     profile = cfg.get_profile("P")
     profile.mode = "postcard"
     profile.postcard_count = 7
     profile.postcard_size = 0.8
+    profile.postcard_tilt = False
     save_config(cfg)
     captured = {}
 
@@ -768,6 +769,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
         bar_color="black",
         size=0.5,
         span=False,
+        tilt=True,
         rng=None,
     ):
         captured["monitors"] = [monitor.name for monitor in monitors]
@@ -775,6 +777,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
         captured["bar_color"] = bar_color
         captured["size"] = size
         captured["span"] = span
+        captured["tilt"] = tilt
         captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"postcard")
@@ -801,6 +804,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_and_size(monkeypatch, 
     assert captured["bar_color"] == "black"
     assert captured["size"] == 0.8
     assert captured["span"] is False
+    assert captured["tilt"] is False
     assert isinstance(captured["rng"], random.Random)
     assert "profile:P:postcard" not in state.remaining
     assert draw_counts == [("profile:P:postcard", 14)]
@@ -847,7 +851,9 @@ def test_postcard_span_uses_configured_count_across_combined_desktop(monkeypatch
 def test_postcard_dry_run_skips_malformed_images_without_changing_state(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
-    cfg.get_profile("P").mode = "postcard"
+    profile = cfg.get_profile("P")
+    profile.mode = "postcard"
+    profile.postcard_tilt = False
     save_config(cfg)
     image_dir = tmp_path / "images"
     (image_dir / "img3.png").unlink()

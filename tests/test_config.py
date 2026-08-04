@@ -76,6 +76,7 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
     assert defaults.get_profile().postcard_count == 4
     assert defaults.get_profile().postcard_size == 0.5
     assert defaults.get_profile().postcard_span is False
+    assert defaults.get_profile().postcard_tilt is True
 
     configured = Config.from_dict(
         {
@@ -86,14 +87,30 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
                     "postcard_count": "7",
                     "postcard_size": "0.8",
                     "postcard_span": True,
+                    "postcard_tilt": False,
                 }
             },
         }
     )
     profile = configured.get_profile()
-    assert (profile.postcard_count, profile.postcard_size, profile.postcard_span) == (7, 0.8, True)
+    assert (profile.postcard_count, profile.postcard_size, profile.postcard_span, profile.postcard_tilt) == (
+        7,
+        0.8,
+        True,
+        False,
+    )
     saved = configured.to_dict()["profiles"]["P"]
-    assert (saved["postcard_count"], saved["postcard_size"], saved["postcard_span"]) == (7, 0.8, True)
+    assert (saved["postcard_count"], saved["postcard_size"], saved["postcard_span"], saved["postcard_tilt"]) == (
+        7,
+        0.8,
+        True,
+        False,
+    )
+
+    malformed_tilt = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"postcard_tilt": ["not", "a", "boolean"]}}}
+    )
+    assert malformed_tilt.get_profile().postcard_tilt is True
 
     high = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"postcard_count": 999, "postcard_size": 2}}}

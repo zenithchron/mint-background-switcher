@@ -495,6 +495,7 @@ def compose_postcard(
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
+    tilt: bool = True,
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random bare photos using the same layout behavior as Polaroid."""
@@ -507,6 +508,7 @@ def compose_postcard(
         bar_color=bar_color,
         size=size,
         span=span,
+        tilt=tilt,
         rng=rng,
     )
 

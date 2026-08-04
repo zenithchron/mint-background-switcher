@@ -1075,7 +1075,9 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         def capture_config(config):
             profile = config.get_profile("Default")
             saved_modes.append(profile.mode)
-            saved_postcard_options.append((profile.postcard_count, profile.postcard_size, profile.postcard_span))
+            saved_postcard_options.append(
+                (profile.postcard_count, profile.postcard_size, profile.postcard_span, profile.postcard_tilt)
+            )
 
         monkeypatch.setattr(settings_ui, "save_config", capture_config)
         monkeypatch.setattr(
@@ -1104,6 +1106,17 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         assert int(float(app.postcard_count_spinbox.cget("to"))) == 100
         assert app.postcard_count_label.cget("text") == "Postcard photos per screen:"
         assert app.postcard_span_checkbutton.winfo_ismapped()
+        assert app.postcard_tilt_checkbutton.winfo_ismapped()
+        assert app.postcard_tilt_checkbutton.cget("text") == "Randomly tilt photos"
+        assert app.postcard_tilt_var.get() is True
+        assert (
+            app.postcard_tilt_checkbutton.winfo_rootx() + app.postcard_tilt_checkbutton.winfo_width()
+            <= app.postcard_options.winfo_rootx() + app.postcard_options.winfo_width()
+        )
+        assert (
+            app.postcard_tilt_checkbutton.winfo_rooty() + app.postcard_tilt_checkbutton.winfo_height()
+            <= app.postcard_options.winfo_rooty() + app.postcard_options.winfo_height()
+        )
         scale_style = app.postcard_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
         app.notebook.select(app.general_tab)
@@ -1112,12 +1125,13 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         app.postcard_count_var.set(7)
         app.postcard_size_var.set(0.8)
         app.postcard_span_var.set(True)
+        app.postcard_tilt_var.set(False)
         app.update_idletasks()
         assert app.postcard_count_label.cget("text") == "Postcard photos across all screens:"
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard"]
-        assert saved_postcard_options == [(7, 0.8, True)]
+        assert saved_postcard_options == [(7, 0.8, True, False)]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
 
@@ -1129,7 +1143,7 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard", "postcard"]
-        assert saved_postcard_options == [(7, 0.8, True), (7, 0.8, True)]
+        assert saved_postcard_options == [(7, 0.8, True, False), (7, 0.8, True, False)]
         assert errors == [("Apply failed", "postcard preview failed")]
     finally:
         app.destroy()

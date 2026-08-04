@@ -112,6 +112,7 @@ class Profile:
     polaroid_size: float = 0.5
     polaroid_span: bool = False
     polaroid_tilt: bool = True
+    postcard_tilt: bool = True
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -138,6 +139,7 @@ class Profile:
             postcard_count=_coerce_photo_count(data.get("postcard_count", 4)),
             postcard_size=_coerce_photo_size(data.get("postcard_size", 0.5)),
             postcard_span=_coerce_bool(data.get("postcard_span", False)),
+            postcard_tilt=_coerce_bool(data.get("postcard_tilt", True), default=True),
             polaroid_count=_coerce_photo_count(data.get("polaroid_count", 4)),
             polaroid_size=_coerce_photo_size(data.get("polaroid_size", 0.5)),
             polaroid_span=_coerce_bool(data.get("polaroid_span", False)),
@@ -158,6 +160,7 @@ class Profile:
             "postcard_count": self.postcard_count,
             "postcard_size": self.postcard_size,
             "postcard_span": self.postcard_span,
+            "postcard_tilt": self.postcard_tilt,
             "polaroid_count": self.polaroid_count,
             "polaroid_size": self.polaroid_size,
             "polaroid_span": self.polaroid_span,

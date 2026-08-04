@@ -10,7 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Tabbed Settings editor with General, one tab per wallpaper mode, Public Collections, and About & Updates while retaining an explicit active-mode selector.
-- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/tilt/stacking, and optional virtual-desktop spanning.
+- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
 - Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
@@ -26,6 +26,12 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.30 - 2026-08-04
+
+- Added **Randomly tilt photos** under **Settings → Postcard**; clear it to keep the randomly placed bare photos straight.
+- Added backward-compatible config, per-screen and spanning composition, service, and 1024×768 Xvfb-backed Settings coverage.
+- Bumped the package version to `0.1.30`.
 
 ### 0.1.29 - 2026-08-03
 
@@ -267,7 +273,7 @@ From the repository checkout:
 ./scripts/mint-background-switcher next
 ```
 
-The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. Under **Collections**, choose a rights-filtered public collection, a count from 10 to 100, and a local library folder; downloads happen only after **Download Collection** is selected. Under **General → Settings applying to all modes → Letterbox bars**, choose **blurred** to fill unused space with a scaled, softened copy while keeping the whole picture visible. Under **Polaroid**, clear **Randomly tilt prints** to keep randomly placed prints straight, then Save or use **Apply Next Now**. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
+The Settings window exposes user-facing wallpaper controls, including the **collage**, **polaroid**, **postcard**, and **montage** modes, profile effects such as **random**, **saturate**, **desaturate**, **invert**, and the three-month **calendar**, **Apply Next Now**, **Black Screen**, **Save Current Wallpaper...**, and **View Current Pictures...**. Under **General → Shared picture sources**, choose **Add folder...** for a local library or **Add picture...** for one individual local file, then Save or use **Apply Next Now**. Under **Collections**, choose a rights-filtered public collection, a count from 10 to 100, and a local library folder; downloads happen only after **Download Collection** is selected. Under **General → Settings applying to all modes → Letterbox bars**, choose **blurred** to fill unused space with a scaled, softened copy while keeping the whole picture visible. Under **Postcard**, clear **Randomly tilt photos** to keep randomly placed bare photos straight; under **Polaroid**, clear **Randomly tilt prints** to keep those prints straight. Save or use **Apply Next Now** after either change. In the Current Pictures window, select a source and choose **Open Picture** or **Open Containing Folder**. The **Working files** row selects where generated wallpapers and the image-library index live. Its footer shows the installed version; choose **About & Updates** for the version, project details, and update controls. The **Application updates** row shows whether managed updates are active or ready after restart and provides **Check for Updates...** and **Roll Back...**.
 
 ## Public Collections
 
@@ -413,7 +419,7 @@ Each profile has a mode:
 - `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `montage`: four images from the shared pool are arranged in a 2x2 grid on each monitor, with every complete image fitted inside its tile instead of cropped.
 - `collage`: five images from the shared pool are fitted without cropping into a deterministic asymmetric mosaic independently on each monitor.
-- `postcard`: 1–100 bare images from the shared pool are placed at native aspect ratios with randomized positions, tilt, overlap, and stacking on a dark background. By default the count applies per screen and each photo stays fully visible on its screen; optional Postcard Span makes the count desktop-wide and allows photos to cross screen boundaries or be clipped at the virtual desktop edge.
+- `postcard`: 1–100 bare images from the shared pool are placed at native aspect ratios with randomized positions, overlap, stacking, and optional tilt on a dark background. By default the count applies per screen and each photo stays fully visible on its screen; optional Postcard Span makes the count desktop-wide and allows photos to cross screen boundaries or be clipped at the virtual desktop edge.
 - `polaroid`: 1–100 images from the shared pool are placed at native aspect ratios inside bottom-heavy white print frames with random placement, stacking, and optional tilt. By default the count applies per screen and each print stays fully visible on its screen; optional Polaroid Span makes the count desktop-wide and allows prints to cross screen boundaries or be clipped at the virtual desktop edge.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.
 - `span`: one image is fit with configured letterbox bars across the full virtual desktop canvas.

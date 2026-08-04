@@ -551,6 +551,7 @@ def _switch_once_with_state(
                         bar_color=profile.bar_color,
                         size=profile.postcard_size,
                         span=profile.postcard_span,
+                        tilt=profile.postcard_tilt,
                         rng=rng,
                     )
                 except ImageDecodeError as exc:

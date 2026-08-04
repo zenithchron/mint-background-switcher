@@ -202,6 +202,7 @@ class SettingsApp(tk.Tk):
         self.postcard_count_var = tk.IntVar(value=4)
         self.postcard_size_var = tk.DoubleVar(value=0.5)
         self.postcard_span_var = tk.BooleanVar(value=False)
+        self.postcard_tilt_var = tk.BooleanVar(value=True)
         self.polaroid_count_var = tk.IntVar(value=4)
         self.polaroid_size_var = tk.DoubleVar(value=0.5)
         self.polaroid_span_var = tk.BooleanVar(value=False)
@@ -426,20 +427,22 @@ class SettingsApp(tk.Tk):
         postcard_tab = self.mode_tabs["postcard"]
         self.postcard_options = ttk.LabelFrame(postcard_tab, text="Postcard options", padding=10)
         self.postcard_options.pack(fill=tk.X, pady=(12, 0))
-        self.postcard_count_label = ttk.Label(self.postcard_options, text="Postcard photos per screen:")
+        postcard_layout_options = ttk.Frame(self.postcard_options)
+        postcard_layout_options.pack(fill=tk.X)
+        self.postcard_count_label = ttk.Label(postcard_layout_options, text="Postcard photos per screen:")
         self.postcard_count_label.pack(side=tk.LEFT)
         self.postcard_count_spinbox = ttk.Spinbox(
-            self.postcard_options,
+            postcard_layout_options,
             from_=1,
             to=100,
             textvariable=self.postcard_count_var,
             width=4,
         )
         self.postcard_count_spinbox.pack(side=tk.LEFT, padx=(5, 18))
-        ttk.Label(self.postcard_options, text="Photo size:").pack(side=tk.LEFT)
-        ttk.Label(self.postcard_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
+        ttk.Label(postcard_layout_options, text="Photo size:").pack(side=tk.LEFT)
+        ttk.Label(postcard_layout_options, text="Small").pack(side=tk.LEFT, padx=(5, 2))
         self.postcard_size_scale = ttk.Scale(
-            self.postcard_options,
+            postcard_layout_options,
             from_=0.0,
             to=1.0,
             variable=self.postcard_size_var,
@@ -448,13 +451,19 @@ class SettingsApp(tk.Tk):
             style="ScatteredPhoto.Horizontal.TScale",
         )
         self.postcard_size_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(self.postcard_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(postcard_layout_options, text="Large").pack(side=tk.LEFT, padx=(2, 0))
         self.postcard_span_checkbutton = ttk.Checkbutton(
-            self.postcard_options,
+            postcard_layout_options,
             text="Span across all screens",
             variable=self.postcard_span_var,
         )
         self.postcard_span_checkbutton.pack(side=tk.LEFT, padx=(18, 0))
+        self.postcard_tilt_checkbutton = ttk.Checkbutton(
+            self.postcard_options,
+            text="Randomly tilt photos",
+            variable=self.postcard_tilt_var,
+        )
+        self.postcard_tilt_checkbutton.pack(anchor="w", pady=(8, 0))
 
         polaroid_tab = self.mode_tabs["polaroid"]
         ttk.Label(
@@ -706,6 +715,7 @@ class SettingsApp(tk.Tk):
         self.postcard_count_var.set(profile.postcard_count)
         self.postcard_size_var.set(profile.postcard_size)
         self.postcard_span_var.set(profile.postcard_span)
+        self.postcard_tilt_var.set(profile.postcard_tilt)
         self.polaroid_count_var.set(profile.polaroid_count)
         self.polaroid_size_var.set(profile.polaroid_size)
         self.polaroid_span_var.set(profile.polaroid_span)
@@ -750,6 +760,7 @@ class SettingsApp(tk.Tk):
         postcard_count_var = vars(self).get("postcard_count_var")
         postcard_size_var = vars(self).get("postcard_size_var")
         postcard_span_var = vars(self).get("postcard_span_var")
+        postcard_tilt_var = vars(self).get("postcard_tilt_var")
         count_var = vars(self).get("polaroid_count_var")
         size_var = vars(self).get("polaroid_size_var")
         span_var = vars(self).get("polaroid_span_var")
@@ -759,6 +770,7 @@ class SettingsApp(tk.Tk):
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
         )
         postcard_span = bool(postcard_span_var.get()) if postcard_span_var is not None else False
+        postcard_tilt = bool(postcard_tilt_var.get()) if postcard_tilt_var is not None else True
         polaroid_count = max(1, min(100, int(count_var.get()))) if count_var is not None else 4
         polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
         polaroid_span = bool(span_var.get()) if span_var is not None else False
@@ -777,6 +789,7 @@ class SettingsApp(tk.Tk):
             postcard_count=postcard_count,
             postcard_size=postcard_size,
             postcard_span=postcard_span,
+            postcard_tilt=postcard_tilt,
             polaroid_count=polaroid_count,
             polaroid_size=polaroid_size,
             polaroid_span=polaroid_span,
