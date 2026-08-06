@@ -750,7 +750,7 @@ def test_collage_decode_retry_is_bounded_before_safe_black_fallback(monkeypatch,
         ]
 
 
-def test_postcard_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypatch, tmp_path: Path):
+def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_background(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
     profile = cfg.get_profile("P")
@@ -758,6 +758,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
     profile.postcard_count = 7
     profile.postcard_size = 0.8
     profile.postcard_tilt = False
+    profile.postcard_background = "corkboard"
     save_config(cfg)
     captured = {}
 
@@ -770,6 +771,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
         size=0.5,
         span=False,
         tilt=True,
+        background="dark",
         rng=None,
     ):
         captured["monitors"] = [monitor.name for monitor in monitors]
@@ -778,6 +780,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
         captured["size"] = size
         captured["span"] = span
         captured["tilt"] = tilt
+        captured["background"] = background
         captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"postcard")
@@ -805,6 +808,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
     assert captured["size"] == 0.8
     assert captured["span"] is False
     assert captured["tilt"] is False
+    assert captured["background"] == "corkboard"
     assert isinstance(captured["rng"], random.Random)
     assert "profile:P:postcard" not in state.remaining
     assert draw_counts == [("profile:P:postcard", 14)]

@@ -10,7 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Tabbed Settings editor with General, one tab per wallpaper mode, Public Collections, and About & Updates while retaining an explicit active-mode selector.
-- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, and optional virtual-desktop spanning.
+- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, selectable dark or warm corkboard backgrounds, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
 - Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
@@ -26,6 +26,13 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.31 - 2026-08-06
+
+- Added a per-profile **Background** selector under **Settings → Postcard**, with the existing dark background and a new warm corkboard option.
+- Kept dark as the backward-compatible default and applied either background consistently to per-screen and virtual-desktop-spanning Postcard layouts.
+- Added config, pixel-level composition, service, Apply/Save, validation, and 1024×768 Xvfb-backed Settings coverage.
+- Bumped the package version to `0.1.31`.
 
 ### 0.1.30 - 2026-08-04
 

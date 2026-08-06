@@ -77,6 +77,7 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
     assert defaults.get_profile().postcard_size == 0.5
     assert defaults.get_profile().postcard_span is False
     assert defaults.get_profile().postcard_tilt is True
+    assert defaults.get_profile().postcard_background == "dark"
 
     configured = Config.from_dict(
         {
@@ -88,29 +89,49 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
                     "postcard_size": "0.8",
                     "postcard_span": True,
                     "postcard_tilt": False,
+                    "postcard_background": "CORKBOARD",
                 }
             },
         }
     )
     profile = configured.get_profile()
-    assert (profile.postcard_count, profile.postcard_size, profile.postcard_span, profile.postcard_tilt) == (
+    assert (
+        profile.postcard_count,
+        profile.postcard_size,
+        profile.postcard_span,
+        profile.postcard_tilt,
+        profile.postcard_background,
+    ) == (
         7,
         0.8,
         True,
         False,
+        "corkboard",
     )
     saved = configured.to_dict()["profiles"]["P"]
-    assert (saved["postcard_count"], saved["postcard_size"], saved["postcard_span"], saved["postcard_tilt"]) == (
+    assert (
+        saved["postcard_count"],
+        saved["postcard_size"],
+        saved["postcard_span"],
+        saved["postcard_tilt"],
+        saved["postcard_background"],
+    ) == (
         7,
         0.8,
         True,
         False,
+        "corkboard",
     )
 
     malformed_tilt = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"postcard_tilt": ["not", "a", "boolean"]}}}
     )
     assert malformed_tilt.get_profile().postcard_tilt is True
+
+    invalid_background = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"postcard_background": "linen"}}}
+    )
+    assert invalid_background.get_profile().postcard_background == "dark"
 
     high = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"postcard_count": 999, "postcard_size": 2}}}
@@ -120,6 +141,39 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
     )
     assert (high.get_profile().postcard_count, high.get_profile().postcard_size) == (100, 1.0)
     assert (low.get_profile().postcard_count, low.get_profile().postcard_size) == (1, 0.0)
+
+
+def test_postcard_background_preserves_legacy_profile_positional_arguments():
+    profile = Profile(
+        "P",
+        5.0,
+        "postcard",
+        False,
+        ["/pictures"],
+        {},
+        "<Alt>b",
+        "x11",
+        "sepia",
+        "auto",
+        7,
+        0.8,
+        True,
+        6,
+        0.7,
+        True,
+        False,
+        False,
+    )
+
+    assert profile.postcard_count == 7
+    assert profile.postcard_size == 0.8
+    assert profile.postcard_span is True
+    assert profile.polaroid_count == 6
+    assert profile.polaroid_size == 0.7
+    assert profile.polaroid_span is True
+    assert profile.polaroid_tilt is False
+    assert profile.postcard_tilt is False
+    assert profile.postcard_background == "dark"
 
 
 def test_polaroid_mode_is_valid():

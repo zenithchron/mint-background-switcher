@@ -22,6 +22,11 @@ CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
 POLAROID_BACKGROUND_COLOR = (39, 44, 52)
 POLAROID_FRAME_COLOR = (248, 246, 238, 255)
 POSTCARD_BACKGROUND_COLOR = POLAROID_BACKGROUND_COLOR
+POSTCARD_CORKBOARD_COLOR = (174, 126, 78)
+POSTCARD_BACKGROUND_COLORS = {
+    "dark": POSTCARD_BACKGROUND_COLOR,
+    "corkboard": POSTCARD_CORKBOARD_COLOR,
+}
 SATURATION_FACTOR = 1.5
 _MONTH_NAMES = (
     "",
@@ -496,15 +501,22 @@ def compose_postcard(
     size: float = 0.5,
     span: bool = False,
     tilt: bool = True,
+    background: str = "dark",
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random bare photos using the same layout behavior as Polaroid."""
+
+    try:
+        background_color = POSTCARD_BACKGROUND_COLORS[background]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported Postcard background: {background}") from exc
 
     return _compose_scattered_photos(
         monitors,
         images_by_monitor,
         output_path,
         framed=False,
+        background_color=background_color,
         bar_color=bar_color,
         size=size,
         span=span,
@@ -583,6 +595,7 @@ def _compose_scattered_photos(
     output_path: str | Path,
     *,
     framed: bool,
+    background_color: tuple[int, int, int],
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
@@ -599,7 +612,7 @@ def _compose_scattered_photos(
     tile_factory = _polaroid_tile if framed else _postcard_tile
     width, height, min_x, min_y = virtual_canvas(monitors)
     if span:
-        combined = Image.new("RGB", (width, height), POLAROID_BACKGROUND_COLOR)
+        combined = Image.new("RGB", (width, height), background_color)
         max_card_size = (
             max(1, round(max(monitor.width for monitor in monitors) * size_fraction)),
             max(1, round(max(monitor.height for monitor in monitors) * size_fraction)),
@@ -633,7 +646,7 @@ def _compose_scattered_photos(
 
     combined = Image.new("RGB", (width, height), (0, 0, 0))
     for monitor in monitors:
-        panel = Image.new("RGB", (monitor.width, monitor.height), POLAROID_BACKGROUND_COLOR)
+        panel = Image.new("RGB", (monitor.width, monitor.height), background_color)
         max_card_size = (
             max(1, round(monitor.width * size_fraction)),
             max(1, round(monitor.height * size_fraction)),
@@ -674,6 +687,7 @@ def compose_polaroid(
         images_by_monitor,
         output_path,
         framed=True,
+        background_color=POLAROID_BACKGROUND_COLOR,
         bar_color=bar_color,
         size=size,
         span=span,

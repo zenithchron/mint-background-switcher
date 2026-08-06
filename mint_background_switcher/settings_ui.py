@@ -12,7 +12,15 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Callable
 
 from . import APP_NAME, __version__, public_collections, updater
-from .config import BAR_COLOR_CHOICES, EFFECT_CHOICES, Config, Profile, load_config, save_config
+from .config import (
+    BAR_COLOR_CHOICES,
+    EFFECT_CHOICES,
+    POSTCARD_BACKGROUND_CHOICES,
+    Config,
+    Profile,
+    load_config,
+    save_config,
+)
 from .images import SUPPORTED_EXTENSIONS, is_usable_image
 from .monitor import Monitor, detect_monitors
 from .service import SwitchCancelled, black_screen, current_source_images, save_current_wallpaper, switch_once
@@ -199,6 +207,7 @@ class SettingsApp(tk.Tk):
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
+        self.postcard_background_var = tk.StringVar(value=POSTCARD_BACKGROUND_CHOICES[0])
         self.postcard_count_var = tk.IntVar(value=4)
         self.postcard_size_var = tk.DoubleVar(value=0.5)
         self.postcard_span_var = tk.BooleanVar(value=False)
@@ -458,12 +467,27 @@ class SettingsApp(tk.Tk):
             variable=self.postcard_span_var,
         )
         self.postcard_span_checkbutton.pack(side=tk.LEFT, padx=(18, 0))
+        postcard_style_options = ttk.Frame(self.postcard_options)
+        postcard_style_options.pack(fill=tk.X, pady=(8, 0))
         self.postcard_tilt_checkbutton = ttk.Checkbutton(
-            self.postcard_options,
+            postcard_style_options,
             text="Randomly tilt photos",
             variable=self.postcard_tilt_var,
         )
-        self.postcard_tilt_checkbutton.pack(anchor="w", pady=(8, 0))
+        self.postcard_tilt_checkbutton.pack(side=tk.LEFT)
+        ttk.Label(postcard_style_options, text="Background:").pack(side=tk.LEFT, padx=(24, 5))
+        self.postcard_background_menu = ttk.OptionMenu(
+            postcard_style_options,
+            self.postcard_background_var,
+            POSTCARD_BACKGROUND_CHOICES[0],
+            *POSTCARD_BACKGROUND_CHOICES,
+        )
+        self.postcard_background_menu.pack(side=tk.LEFT)
+        self.postcard_background_help = ttk.Label(
+            postcard_style_options,
+            text="Corkboard adds a warm noticeboard-style backdrop behind the photos.",
+        )
+        self.postcard_background_help.pack(side=tk.LEFT, padx=(12, 0))
 
         polaroid_tab = self.mode_tabs["polaroid"]
         ttk.Label(
@@ -712,6 +736,7 @@ class SettingsApp(tk.Tk):
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
+        self.postcard_background_var.set(profile.postcard_background)
         self.postcard_count_var.set(profile.postcard_count)
         self.postcard_size_var.set(profile.postcard_size)
         self.postcard_span_var.set(profile.postcard_span)
@@ -761,6 +786,7 @@ class SettingsApp(tk.Tk):
         postcard_size_var = vars(self).get("postcard_size_var")
         postcard_span_var = vars(self).get("postcard_span_var")
         postcard_tilt_var = vars(self).get("postcard_tilt_var")
+        postcard_background_var = vars(self).get("postcard_background_var")
         count_var = vars(self).get("polaroid_count_var")
         size_var = vars(self).get("polaroid_size_var")
         span_var = vars(self).get("polaroid_span_var")
@@ -771,6 +797,13 @@ class SettingsApp(tk.Tk):
         )
         postcard_span = bool(postcard_span_var.get()) if postcard_span_var is not None else False
         postcard_tilt = bool(postcard_tilt_var.get()) if postcard_tilt_var is not None else True
+        postcard_background = (
+            str(postcard_background_var.get()).strip().lower()
+            if postcard_background_var is not None
+            else POSTCARD_BACKGROUND_CHOICES[0]
+        )
+        if postcard_background not in POSTCARD_BACKGROUND_CHOICES:
+            postcard_background = POSTCARD_BACKGROUND_CHOICES[0]
         polaroid_count = max(1, min(100, int(count_var.get()))) if count_var is not None else 4
         polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
         polaroid_span = bool(span_var.get()) if span_var is not None else False
@@ -786,6 +819,7 @@ class SettingsApp(tk.Tk):
             desktop=self.desktop_var.get(),
             effect=self.effect_var.get(),
             bar_color=self.bar_color_var.get(),
+            postcard_background=postcard_background,
             postcard_count=postcard_count,
             postcard_size=postcard_size,
             postcard_span=postcard_span,

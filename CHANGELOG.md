@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.31] - 2026-08-06
+
+### Added
+
+- A per-profile **Background** selector under **Settings → Postcard**, with the existing dark background and a new warm corkboard option behind bare photos.
+- Backward-compatible config, exact background-color composition coverage for per-screen and spanning layouts, service wiring, Apply/Save validation, and 1024×768 Xvfb-backed Settings coverage.
+
+### Changed
+
+- Kept `dark` as the default for existing profiles while allowing `corkboard` to be saved and applied independently for each profile.
+- Bumped the package version to `0.1.31`.
+
 ## [0.1.30] - 2026-08-04
 
 ### Added

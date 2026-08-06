@@ -12,6 +12,7 @@ from mint_background_switcher.images import (
     POLAROID_BACKGROUND_COLOR,
     POLAROID_FRAME_COLOR,
     POSTCARD_BACKGROUND_COLOR,
+    POSTCARD_CORKBOARD_COLOR,
     _collage_tile,
     _polaroid_tile,
     _postcard_tile,
@@ -463,6 +464,35 @@ def test_compose_postcard_randomizes_bare_uncropped_images_without_frames_or_pin
         assert set(colors).issubset(rendered_colors)
         assert legacy_pin_color not in rendered_colors
         assert POLAROID_FRAME_COLOR[:3] not in rendered_colors
+
+
+@pytest.mark.parametrize("span", [False, True])
+def test_postcard_corkboard_background_fills_each_layout(span: bool, tmp_path: Path):
+    monitors = [Monitor("A", 120, 80, 0, 0)]
+
+    output = compose_postcard(
+        monitors,
+        {"A": []},
+        tmp_path / f"corkboard-{span}.png",
+        span=span,
+        background="corkboard",
+        rng=random.Random(13),
+    )
+
+    with Image.open(output) as postcard:
+        assert postcard.getcolors(maxcolors=postcard.width * postcard.height) == [
+            (postcard.width * postcard.height, POSTCARD_CORKBOARD_COLOR)
+        ]
+
+
+def test_postcard_rejects_unknown_background(tmp_path: Path):
+    with pytest.raises(ValueError, match="Unsupported Postcard background"):
+        compose_postcard(
+            [Monitor("A", 120, 80, 0, 0)],
+            {"A": []},
+            tmp_path / "unknown-background.png",
+            background="linen",
+        )
 
 
 def test_postcard_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):

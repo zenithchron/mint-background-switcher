@@ -36,6 +36,8 @@ EFFECT_CHOICES = ("none", "random", *RANDOM_EFFECT_CHOICES)
 VALID_EFFECTS = set(EFFECT_CHOICES)
 BAR_COLOR_CHOICES = ("black", "auto", "blurred")
 VALID_BAR_COLORS = set(BAR_COLOR_CHOICES)
+POSTCARD_BACKGROUND_CHOICES = ("dark", "corkboard")
+VALID_POSTCARD_BACKGROUNDS = set(POSTCARD_BACKGROUND_CHOICES)
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:
@@ -113,6 +115,7 @@ class Profile:
     polaroid_span: bool = False
     polaroid_tilt: bool = True
     postcard_tilt: bool = True
+    postcard_background: str = "dark"
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -125,6 +128,9 @@ class Profile:
         bar_color = str(data.get("bar_color", "black")).strip().lower()
         if bar_color not in VALID_BAR_COLORS:
             bar_color = "black"
+        postcard_background = str(data.get("postcard_background", "dark")).strip().lower()
+        if postcard_background not in VALID_POSTCARD_BACKGROUNDS:
+            postcard_background = "dark"
         return cls(
             name=name,
             interval_minutes=_coerce_interval(data.get("interval_minutes", 10.0)),
@@ -136,6 +142,7 @@ class Profile:
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
+            postcard_background=postcard_background,
             postcard_count=_coerce_photo_count(data.get("postcard_count", 4)),
             postcard_size=_coerce_photo_size(data.get("postcard_size", 0.5)),
             postcard_span=_coerce_bool(data.get("postcard_span", False)),
@@ -157,6 +164,7 @@ class Profile:
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,
+            "postcard_background": self.postcard_background,
             "postcard_count": self.postcard_count,
             "postcard_size": self.postcard_size,
             "postcard_span": self.postcard_span,
