@@ -1,22 +1,28 @@
 from datetime import date
+import os
 from pathlib import Path
 import random
+import subprocess
+import sys
 
-from PIL import Image, ImageStat
+from PIL import Image, ImageChops, ImageStat
 import pytest
 
 from mint_background_switcher import images as images_module
-from mint_background_switcher.config import RANDOM_EFFECT_CHOICES
+from mint_background_switcher.config import POSTCARD_BACKGROUND_CHOICES, RANDOM_EFFECT_CHOICES
 from mint_background_switcher.images import (
     CALENDAR_HIGHLIGHT_COLOR,
     POLAROID_BACKGROUND_COLOR,
     POLAROID_FRAME_COLOR,
+    POSTCARD_BACKGROUND_COLORS,
     POSTCARD_BACKGROUND_COLOR,
     POSTCARD_CORKBOARD_COLOR,
     _collage_tile,
     _corkboard_texture,
     _polaroid_tile,
     _postcard_tile,
+    _procedural_surface_texture,
+    _procedural_surface_work_size,
     _random_card_position,
     _random_spanning_card_position,
     add_three_month_calendar,
@@ -33,6 +39,32 @@ from mint_background_switcher.images import (
     scan_images,
 )
 from mint_background_switcher.monitor import Monitor
+
+
+PROCEDURAL_SURFACES = tuple(POSTCARD_BACKGROUND_COLORS)[2:]
+TEXTURED_BACKGROUNDS = tuple(POSTCARD_BACKGROUND_COLORS)[1:]
+
+
+def test_postcard_config_and_renderer_background_choices_match():
+    assert tuple(POSTCARD_BACKGROUND_COLORS) == POSTCARD_BACKGROUND_CHOICES
+    expected_procedural = frozenset(POSTCARD_BACKGROUND_CHOICES[2:])
+    assert images_module._PROCEDURAL_SURFACE_STYLES == expected_procedural
+    assert set(images_module._SURFACE_STYLE_SEEDS) == expected_procedural
+    assert set(images_module._SURFACE_NOISE_RECIPES) == expected_procedural
+    assert set(images_module._SURFACE_DETAIL_RENDERERS) == expected_procedural
+    assert all(
+        len(color) == 3 and all(isinstance(channel, int) and 0 <= channel <= 255 for channel in color)
+        for color in POSTCARD_BACKGROUND_COLORS.values()
+    )
+
+
+def test_procedural_surface_work_size_is_bounded():
+    assert _procedural_surface_work_size(11520, 2160) == (5760, 1080)
+    for width, height in ((20000, 10000), (100000, 100), (3840, 6480)):
+        work_width, work_height = _procedural_surface_work_size(width, height)
+        assert work_width * work_height <= images_module._PROCEDURAL_SURFACE_MAX_WORK_PIXELS
+        assert 1 <= work_width <= width
+        assert 1 <= work_height <= height
 
 
 def test_fit_with_black_bars_preserves_whole_wide_image():
@@ -488,6 +520,132 @@ def test_corkboard_texture_is_deterministic_non_flat_and_subtle():
         assert base < high <= base + 24
 
 
+@pytest.mark.parametrize("style", PROCEDURAL_SURFACES)
+def test_procedural_surface_is_deterministic_non_flat_and_subtle(style: str):
+    first = _procedural_surface_texture((240, 160), style, seed=7)
+    repeated = _procedural_surface_texture((240, 160), style, seed=7)
+    changed_seed = _procedural_surface_texture((240, 160), style, seed=8)
+
+    assert first.mode == "RGB"
+    assert first.size == (240, 160)
+    assert first.tobytes() == repeated.tobytes()
+    assert first.tobytes() != changed_seed.tobytes()
+    colors = first.getcolors(maxcolors=first.width * first.height)
+    assert colors is not None
+    assert len(colors) >= 10
+    statistics = ImageStat.Stat(first)
+    means = statistics.mean
+    standard_deviations = statistics.stddev
+    assert isinstance(means, list)
+    assert isinstance(standard_deviations, list)
+    assert min(standard_deviations) > 1.25
+    for mean, base in zip(means, POSTCARD_BACKGROUND_COLORS[style]):
+        assert abs(mean - base) < 6
+
+
+@pytest.mark.parametrize("style", PROCEDURAL_SURFACES)
+@pytest.mark.parametrize("size", [(1, 1), (17, 9), (241, 161)])
+def test_procedural_surface_supports_edge_and_odd_sizes(style: str, size: tuple[int, int]):
+    first = _procedural_surface_texture(size, style, seed=23)
+    repeated = _procedural_surface_texture(size, style, seed=23)
+
+    assert first.mode == "RGB"
+    assert first.size == size
+    assert first.tobytes() == repeated.tobytes()
+
+
+def test_procedural_surfaces_are_cross_process_deterministic_across_hash_seeds():
+    code = f"""
+import hashlib
+from mint_background_switcher.images import _procedural_surface_texture
+styles = {PROCEDURAL_SURFACES!r}
+print('|'.join(hashlib.sha256(_procedural_surface_texture((137, 83), style, seed=29).tobytes()).hexdigest() for style in styles))
+"""
+    outputs = []
+    for hash_seed in ("1", "8675309"):
+        environment = dict(os.environ)
+        environment["PYTHONHASHSEED"] = hash_seed
+        outputs.append(
+            subprocess.check_output(
+                [sys.executable, "-c", code],
+                env=environment,
+                text=True,
+            ).strip()
+        )
+
+    assert outputs[0] == outputs[1]
+
+
+def test_procedural_surfaces_do_not_consume_global_random_state():
+    original_state = random.getstate()
+    for style in PROCEDURAL_SURFACES:
+        surface = _procedural_surface_texture((137, 83), style, seed=31)
+        surface.close()
+    assert random.getstate() == original_state
+
+
+def test_all_procedural_surfaces_have_distinct_pixels():
+    rendered = {
+        style: _procedural_surface_texture((160, 100), style, seed=7).tobytes()
+        for style in PROCEDURAL_SURFACES
+    }
+
+    assert len(set(rendered.values())) == len(PROCEDURAL_SURFACES)
+
+
+def test_procedural_surfaces_retain_material_specific_structure():
+    rendered = {
+        style: _procedural_surface_texture((600, 320), style, seed=17)
+        for style in PROCEDURAL_SURFACES
+    }
+
+    def directional_difference(image: Image.Image) -> tuple[float, float]:
+        luminance = image.convert("L")
+        horizontal = ImageChops.difference(
+            luminance.crop((1, 0, image.width, image.height)),
+            luminance.crop((0, 0, image.width - 1, image.height)),
+        )
+        vertical = ImageChops.difference(
+            luminance.crop((0, 1, image.width, image.height)),
+            luminance.crop((0, 0, image.width, image.height - 1)),
+        )
+        return ImageStat.Stat(horizontal).mean[0], ImageStat.Stat(vertical).mean[0]
+
+    def count_outliers(style: str, threshold: int) -> int:
+        image = rendered[style]
+        base = POSTCARD_BACKGROUND_COLORS[style]
+        pixels = image.tobytes()
+        return sum(
+            max(
+                abs(pixels[index] - base[0]),
+                abs(pixels[index + 1] - base[1]),
+                abs(pixels[index + 2] - base[2]),
+            )
+            >= threshold
+            for index in range(0, len(pixels), 3)
+        )
+
+    linen_dx, linen_dy = directional_difference(rendered["linen"])
+    metal_dx, metal_dy = directional_difference(rendered["brushed metal"])
+    slate_dx, slate_dy = directional_difference(rendered["slate"])
+    sandstone_dx, sandstone_dy = directional_difference(rendered["sandstone"])
+
+    assert linen_dx > 2.0 and linen_dy > 2.0
+    assert 0.8 < linen_dx / linen_dy < 1.25
+    assert metal_dy > metal_dx * 10
+    assert slate_dy > slate_dx * 1.2
+    assert sandstone_dy > sandstone_dx * 1.05
+    assert 800 < count_outliers("felt", 6) < 5000
+    assert 200 < count_outliers("kraft paper", 16) < 2000
+    assert 50 < count_outliers("watercolor paper", 10) < 1000
+    assert 20 < count_outliers("plaster", 16) < 500
+    assert 50 < count_outliers("concrete", 24) < 1000
+    assert 600 < count_outliers("terrazzo", 24) < 10000
+
+    for image in rendered.values():
+        image.close()
+
+
 @pytest.mark.parametrize("span", [False, True])
 def test_postcard_corkboard_background_textures_each_layout(span: bool, tmp_path: Path):
     monitors = [Monitor("A", 120, 80, 0, 0)]
@@ -516,6 +674,39 @@ def test_postcard_corkboard_background_textures_each_layout(span: bool, tmp_path
         assert len(colors) > 16
 
 
+@pytest.mark.parametrize("background", PROCEDURAL_SURFACES)
+@pytest.mark.parametrize("span", [False, True])
+def test_postcard_procedural_background_textures_each_layout(
+    background: str,
+    span: bool,
+    tmp_path: Path,
+):
+    monitors = [Monitor("A", 120, 80, 0, 0)]
+
+    output = compose_postcard(
+        monitors,
+        {"A": []},
+        tmp_path / f"surface-{background}-{span}.png",
+        span=span,
+        background=background,
+        rng=random.Random(13),
+    )
+    repeated = compose_postcard(
+        monitors,
+        {"A": []},
+        tmp_path / f"surface-repeated-{background}-{span}.png",
+        span=span,
+        background=background,
+        rng=random.Random(99),
+    )
+
+    assert output.read_bytes() == repeated.read_bytes()
+    with Image.open(output) as postcard:
+        colors = postcard.getcolors(maxcolors=postcard.width * postcard.height)
+        assert colors is not None
+        assert len(colors) >= 10
+
+
 @pytest.mark.parametrize("span", [False, True])
 def test_postcard_dark_background_remains_a_solid_fill(span: bool, tmp_path: Path):
     output = compose_postcard(
@@ -532,12 +723,13 @@ def test_postcard_dark_background_remains_a_solid_fill(span: bool, tmp_path: Pat
         ]
 
 
-def test_per_screen_corkboard_panels_do_not_repeat_the_same_texture(tmp_path: Path):
+@pytest.mark.parametrize("background", TEXTURED_BACKGROUNDS)
+def test_per_screen_textured_panels_do_not_repeat_the_same_texture(background: str, tmp_path: Path):
     output = compose_postcard(
         [Monitor("A", 120, 80, 0, 0), Monitor("B", 120, 80, 120, 0)],
         {"A": [], "B": []},
-        tmp_path / "two-corkboard-panels.png",
-        background="corkboard",
+        tmp_path / f"two-{background}-panels.png",
+        background=background,
     )
 
     with Image.open(output) as postcard:
@@ -546,14 +738,101 @@ def test_per_screen_corkboard_panels_do_not_repeat_the_same_texture(tmp_path: Pa
         assert first_panel.tobytes() != second_panel.tobytes()
 
 
+@pytest.mark.parametrize("background", TEXTURED_BACKGROUNDS)
+@pytest.mark.parametrize("span", [False, True])
+@pytest.mark.parametrize("tilt", [False, True])
+def test_postcard_textures_do_not_consume_photo_rng_or_change_geometry(
+    monkeypatch,
+    tmp_path: Path,
+    background: str,
+    span: bool,
+    tilt: bool,
+):
+    colors = {"a": (244, 21, 37, 255), "b": (18, 67, 241, 255)}
+
+    def fake_postcard_tile(image_path, _cell_size, _angle, *, bar_color):
+        assert bar_color == "black"
+        return Image.new("RGBA", (23, 17), colors[image_path])
+
+    monkeypatch.setattr(images_module, "_postcard_tile", fake_postcard_tile)
+    monitors = [Monitor("A", 120, 80, 0, 0), Monitor("B", 100, 80, 120, 0)]
+    image_map = {"A": ["a", "b"], "B": ["a", "b"]}
+
+    dark_rng = random.Random(47)
+    dark_path = compose_postcard(
+        monitors,
+        image_map,
+        tmp_path / f"dark-geometry-{span}.png",
+        background="dark",
+        span=span,
+        tilt=tilt,
+        rng=dark_rng,
+    )
+    textured_rng = random.Random(47)
+    textured_path = compose_postcard(
+        monitors,
+        image_map,
+        tmp_path / f"{background}-geometry-{span}.png",
+        background=background,
+        span=span,
+        tilt=tilt,
+        rng=textured_rng,
+    )
+
+    assert textured_rng.getstate() == dark_rng.getstate()
+    with Image.open(dark_path) as dark, Image.open(textured_path) as textured:
+        for color in colors.values():
+            rgb = color[:3]
+            dark_mask = {
+                (x, y)
+                for y in range(dark.height)
+                for x in range(dark.width)
+                if dark.getpixel((x, y)) == rgb
+            }
+            textured_mask = {
+                (x, y)
+                for y in range(textured.height)
+                for x in range(textured.width)
+                if textured.getpixel((x, y)) == rgb
+            }
+            assert textured_mask == dark_mask
+
+
 def test_postcard_rejects_unknown_background(tmp_path: Path):
+    output = tmp_path / "unknown-background.png"
+    output.write_bytes(b"existing output")
     with pytest.raises(ValueError, match="Unsupported Postcard background"):
         compose_postcard(
             [Monitor("A", 120, 80, 0, 0)],
             {"A": []},
-            tmp_path / "unknown-background.png",
-            background="linen",
+            output,
+            background="not-a-style",
         )
+    assert output.read_bytes() == b"existing output"
+
+
+@pytest.mark.parametrize("background", ["linen", "terrazzo"])
+@pytest.mark.parametrize("span", [False, True])
+def test_postcard_textures_preserve_negative_origin_mixed_monitor_bounds(
+    background: str,
+    span: bool,
+    tmp_path: Path,
+):
+    monitors = [
+        Monitor("A", 120, 80, -120, -40),
+        Monitor("B", 80, 100, 0, -20),
+    ]
+    output = compose_postcard(
+        monitors,
+        {"A": [], "B": []},
+        tmp_path / f"mixed-geometry-{background}-{span}.png",
+        background=background,
+        span=span,
+    )
+
+    with Image.open(output) as wallpaper:
+        assert wallpaper.mode == "RGB"
+        assert wallpaper.size == (200, 120)
 
 
 def test_postcard_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):

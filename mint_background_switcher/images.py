@@ -26,7 +26,44 @@ POSTCARD_CORKBOARD_COLOR = (174, 126, 78)
 POSTCARD_BACKGROUND_COLORS = {
     "dark": POSTCARD_BACKGROUND_COLOR,
     "corkboard": POSTCARD_CORKBOARD_COLOR,
+    "felt": (61, 85, 70),
+    "linen": (194, 181, 155),
+    "kraft paper": (177, 139, 88),
+    "watercolor paper": (225, 218, 201),
+    "slate": (51, 58, 57),
+    "plaster": (205, 199, 187),
+    "concrete": (132, 137, 136),
+    "brushed metal": (151, 157, 160),
+    "sandstone": (187, 154, 107),
+    "terrazzo": (203, 197, 185),
 }
+_PROCEDURAL_SURFACE_STYLES = frozenset(POSTCARD_BACKGROUND_COLORS) - {"dark", "corkboard"}
+_SURFACE_STYLE_SEEDS = {
+    "felt": 0xA0761D6478BD642F,
+    "linen": 0xE7037ED1A0B428DB,
+    "kraft paper": 0x8EBC6AF09C88C6E3,
+    "watercolor paper": 0x589965CC75374CC3,
+    "slate": 0x1D8E4E27C47D124F,
+    "plaster": 0xEB44ACCAB455D165,
+    "concrete": 0x9E3779B97F4A7C15,
+    "brushed metal": 0xD1B54A32D192ED03,
+    "sandstone": 0xABC98388FB8FAC03,
+    "terrazzo": 0x8CB92BA72F3D8DD7,
+}
+_SURFACE_NOISE_RECIPES = {
+    # fine contrast/blend, coarse contrast/blend, coarse-cell divisor
+    "felt": (12, 0.38, 16, 0.16, 34),
+    "linen": (9, 0.30, 13, 0.13, 30),
+    "kraft paper": (15, 0.38, 22, 0.18, 27),
+    "watercolor paper": (12, 0.32, 18, 0.15, 25),
+    "slate": (11, 0.32, 22, 0.22, 22),
+    "plaster": (10, 0.26, 21, 0.20, 21),
+    "concrete": (14, 0.34, 25, 0.22, 23),
+    "brushed metal": (8, 0.24, 12, 0.12, 32),
+    "sandstone": (13, 0.32, 22, 0.20, 25),
+    "terrazzo": (8, 0.22, 14, 0.13, 28),
+}
+_PROCEDURAL_SURFACE_MAX_WORK_PIXELS = 6_500_000
 _CORKBOARD_SEED_MASK = (1 << 64) - 1
 SATURATION_FACTOR = 1.5
 _MONTH_NAMES = (
@@ -590,6 +627,379 @@ def _corkboard_texture(size: tuple[int, int], *, seed: int = 0) -> Image.Image:
     return textured
 
 
+def _shift_rgb(color: tuple[int, int, int], amount: int) -> tuple[int, int, int]:
+    """Shift an RGB color without wrapping channel values."""
+
+    red, green, blue = color
+    return (
+        max(0, min(255, red + amount)),
+        max(0, min(255, green + amount)),
+        max(0, min(255, blue + amount)),
+    )
+
+
+def _blend_seeded_noise(
+    surface: Image.Image,
+    *,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+    source_size: tuple[int, int],
+    contrast: int,
+    opacity: float,
+    resample: Image.Resampling,
+) -> Image.Image:
+    """Blend one private-RNG noise layer, taking ownership of ``surface``."""
+
+    noise_source = Image.frombytes(
+        "L",
+        source_size,
+        texture_rng.randbytes(source_size[0] * source_size[1]),
+    )
+    noise = noise_source.resize(surface.size, resample)
+    noise_source.close()
+    layer = ImageOps.colorize(
+        noise,
+        black=_shift_rgb(base_color, -contrast),
+        white=_shift_rgb(base_color, contrast),
+    )
+    blended = Image.blend(surface, layer, opacity)
+    surface.close()
+    noise.close()
+    layer.close()
+    return blended
+
+
+def _draw_felt_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    for _index in range(max(24, width * height // 1800)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        length = texture_rng.randint(1, 4)
+        rise = texture_rng.randint(-1, 1)
+        shade = texture_rng.choice((-9, -6, 6, 9))
+        draw.line((x, y, x + length, y + rise), fill=_shift_rgb(base_color, shade))
+
+
+def _draw_linen_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    x = texture_rng.randint(1, 4)
+    while x < width:
+        shade = texture_rng.choice((-7, -5, 5, 7))
+        draw.line((x, 0, x + texture_rng.randint(-1, 1), height), fill=_shift_rgb(base_color, shade))
+        x += texture_rng.randint(3, 6)
+    y = texture_rng.randint(1, 4)
+    while y < height:
+        shade = texture_rng.choice((-6, -4, 4, 6))
+        draw.line((0, y, width, y + texture_rng.randint(-1, 1)), fill=_shift_rgb(base_color, shade))
+        y += texture_rng.randint(3, 6)
+
+
+def _draw_kraft_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    for _index in range(max(24, width * height // 2400)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        if texture_rng.random() < 0.76:
+            length = texture_rng.randint(5, 18)
+            rise = texture_rng.randint(-3, 3)
+            shade = texture_rng.choice((-18, -12, 13, 19))
+            draw.line((x, y, x + length, y + rise), fill=_shift_rgb(base_color, shade))
+        else:
+            radius = texture_rng.randint(1, 2)
+            draw.ellipse(
+                (x, y, x + radius, y + radius),
+                fill=_shift_rgb(base_color, -texture_rng.randint(20, 34)),
+            )
+
+
+def _draw_watercolor_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    for _index in range(max(20, width * height // 3200)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        length = texture_rng.randint(2, 8)
+        rise = texture_rng.randint(-2, 2)
+        shade = texture_rng.randint(5, 10)
+        draw.line((x, y, x + length, y + rise), fill=_shift_rgb(base_color, -shade))
+        draw.line((x, y + 1, x + length, y + rise + 1), fill=_shift_rgb(base_color, shade))
+
+
+def _draw_slate_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    for _index in range(max(8, height // 36)):
+        y = texture_rng.randrange(height)
+        start = texture_rng.randrange(max(1, width // 3))
+        end = texture_rng.randint(max(start + 1, width * 2 // 3), width)
+        rise = texture_rng.randint(-3, 3)
+        draw.line((start, y, end, y + rise), fill=_shift_rgb(base_color, texture_rng.randint(4, 8)))
+    for _index in range(max(20, width * height // 5000)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        draw.point((x, y), fill=_shift_rgb(base_color, texture_rng.randint(9, 18)))
+
+
+def _draw_plaster_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    minimum = min(width, height)
+    for _index in range(max(4, width * height // 160000)):
+        radius = texture_rng.randint(max(8, minimum // 12), max(9, minimum // 4))
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        start = texture_rng.randint(0, 330)
+        draw.arc(
+            (x - radius, y - radius, x + radius, y + radius),
+            start=start,
+            end=start + texture_rng.randint(18, 52),
+            fill=_shift_rgb(base_color, texture_rng.choice((-3, 3))),
+        )
+    for _index in range(max(20, width * height // 4300)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        radius = texture_rng.randint(1, 2)
+        draw.ellipse((x, y, x + radius, y + radius), fill=_shift_rgb(base_color, -texture_rng.randint(9, 18)))
+
+
+def _draw_concrete_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    for _index in range(max(30, width * height // 2600)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        radius = texture_rng.randint(1, 3)
+        shade = texture_rng.choice((-24, -17, 13, 20))
+        draw.ellipse((x, y, x + radius, y + radius), fill=_shift_rgb(base_color, shade))
+    for _index in range(max(2, width * height // 220000)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        points = [(x, y)]
+        for _segment in range(texture_rng.randint(2, 4)):
+            x += texture_rng.randint(5, 18)
+            y += texture_rng.randint(-5, 5)
+            points.append((x, y))
+        draw.line(points, fill=_shift_rgb(base_color, -14))
+
+
+def _draw_brushed_metal_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    y = texture_rng.randint(0, 2)
+    while y < height:
+        shade = texture_rng.choice((-8, -5, 4, 7))
+        draw.line((0, y, width, y + texture_rng.randint(-1, 1)), fill=_shift_rgb(base_color, shade))
+        y += texture_rng.randint(2, 4)
+    for _index in range(max(12, width * height // 9000)):
+        y = texture_rng.randrange(height)
+        x = texture_rng.randrange(width)
+        length = texture_rng.randint(max(2, width // 30), max(3, width // 7))
+        draw.line((x, y, x + length, y), fill=_shift_rgb(base_color, texture_rng.choice((-12, 11))))
+
+
+def _draw_sandstone_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    y = texture_rng.randint(10, 24)
+    while y < height:
+        shade = texture_rng.choice((-4, -3, 3, 4))
+        x = texture_rng.randint(0, max(1, width // 8))
+        while x < width:
+            length = texture_rng.randint(max(10, width // 9), max(12, width // 3))
+            end = min(width, x + length)
+            step = max(8, length // 4)
+            points = [(x, y)]
+            current_y = y
+            for point_x in range(x + step, end, step):
+                current_y += texture_rng.randint(-2, 2)
+                points.append((point_x, current_y))
+            points.append((end, current_y + texture_rng.randint(-2, 2)))
+            draw.line(points, fill=_shift_rgb(base_color, shade))
+            x = end + texture_rng.randint(max(4, width // 30), max(6, width // 12))
+        y += texture_rng.randint(32, 68)
+    for _index in range(max(24, width * height // 3600)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        shade = texture_rng.choice((-20, -13, 13, 19))
+        draw.point((x, y), fill=_shift_rgb(base_color, shade))
+
+
+def _draw_terrazzo_details(
+    surface: Image.Image,
+    texture_rng: random.Random,
+    _base_color: tuple[int, int, int],
+) -> None:
+    width, height = surface.size
+    draw = ImageDraw.Draw(surface)
+    chip_colors = (
+        (112, 119, 115),
+        (164, 112, 96),
+        (184, 159, 111),
+        (103, 101, 96),
+        (217, 207, 183),
+    )
+    for _index in range(max(20, width * height // 6200)):
+        x = texture_rng.randrange(width)
+        y = texture_rng.randrange(height)
+        radius = texture_rng.randint(2, 7)
+        points = (
+            (x - radius, y + texture_rng.randint(-radius, 0)),
+            (x + texture_rng.randint(0, radius), y - radius),
+            (x + radius, y + texture_rng.randint(0, radius)),
+            (x + texture_rng.randint(-radius, 0), y + radius),
+        )
+        draw.polygon(points, fill=texture_rng.choice(chip_colors))
+
+
+_SURFACE_DETAIL_RENDERERS = {
+    "felt": _draw_felt_details,
+    "linen": _draw_linen_details,
+    "kraft paper": _draw_kraft_details,
+    "watercolor paper": _draw_watercolor_details,
+    "slate": _draw_slate_details,
+    "plaster": _draw_plaster_details,
+    "concrete": _draw_concrete_details,
+    "brushed metal": _draw_brushed_metal_details,
+    "sandstone": _draw_sandstone_details,
+    "terrazzo": _draw_terrazzo_details,
+}
+
+
+def _procedural_surface_work_size(width: int, height: int) -> tuple[int, int]:
+    """Return a high-DPI work size capped independently of output dimensions."""
+
+    output_scale = max(1, min(3, round(min(width, height) / 1080)))
+    while (
+        ((width + output_scale - 1) // output_scale)
+        * ((height + output_scale - 1) // output_scale)
+        > _PROCEDURAL_SURFACE_MAX_WORK_PIXELS
+    ):
+        output_scale += 1
+    return (
+        max(1, (width + output_scale - 1) // output_scale),
+        max(1, (height + output_scale - 1) // output_scale),
+    )
+
+
+def _procedural_surface_texture(
+    size: tuple[int, int],
+    style: str,
+    *,
+    seed: int = 0,
+) -> Image.Image:
+    """Generate one deterministic matte surface using Pillow-only primitives."""
+
+    width, height = size
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid procedural surface size: {size}")
+    if style not in _PROCEDURAL_SURFACE_STYLES:
+        raise ValueError(f"Unsupported procedural surface: {style}")
+
+    mixed_seed = (
+        seed
+        ^ _SURFACE_STYLE_SEEDS[style]
+        ^ (width * 0x9E3779B185EBCA87)
+        ^ (height * 0xC2B2AE3D27D4EB4F)
+    ) & _CORKBOARD_SEED_MASK
+    texture_rng = random.Random(mixed_seed)
+    work_size = _procedural_surface_work_size(width, height)
+    work_width, work_height = work_size
+    base_color = POSTCARD_BACKGROUND_COLORS[style]
+    surface = Image.new("RGB", work_size, base_color)
+    fine_contrast, fine_opacity, coarse_contrast, coarse_opacity, coarse_divisor = (
+        _SURFACE_NOISE_RECIPES[style]
+    )
+    fine_size = (
+        max(1, (work_width + 1) // 2),
+        max(1, (work_height + 1) // 2),
+    )
+    surface = _blend_seeded_noise(
+        surface,
+        texture_rng=texture_rng,
+        base_color=base_color,
+        source_size=fine_size,
+        contrast=fine_contrast,
+        opacity=fine_opacity,
+        resample=Image.Resampling.BILINEAR,
+    )
+    coarse_step = max(18, min(work_width, work_height) // coarse_divisor)
+    coarse_size = (
+        max(2, (work_width + coarse_step - 1) // coarse_step),
+        max(2, (work_height + coarse_step - 1) // coarse_step),
+    )
+    surface = _blend_seeded_noise(
+        surface,
+        texture_rng=texture_rng,
+        base_color=base_color,
+        source_size=coarse_size,
+        contrast=coarse_contrast,
+        opacity=coarse_opacity,
+        resample=Image.Resampling.BICUBIC,
+    )
+    _SURFACE_DETAIL_RENDERERS[style](surface, texture_rng, base_color)
+
+    if work_size == size:
+        return surface
+    textured = surface.resize(size, Image.Resampling.BILINEAR)
+    surface.close()
+    return textured
+
+
+def _postcard_background_image(
+    size: tuple[int, int],
+    color: tuple[int, int, int],
+    *,
+    surface_style: str | None,
+    seed: int = 0,
+) -> Image.Image:
+    """Allocate a solid or procedurally textured Postcard background."""
+
+    if surface_style is None:
+        return Image.new("RGB", size, color)
+    if surface_style == "corkboard":
+        return _corkboard_texture(size, seed=seed)
+    return _procedural_surface_texture(size, surface_style, seed=seed)
+
+
 def compose_postcard(
     monitors: list[Monitor],
     images_by_monitor: dict[str, list[str]],
@@ -615,7 +1025,7 @@ def compose_postcard(
         output_path,
         framed=False,
         background_color=background_color,
-        procedural_cork=background == "corkboard",
+        surface_style=None if background == "dark" else background,
         bar_color=bar_color,
         size=size,
         span=span,
@@ -695,7 +1105,7 @@ def _compose_scattered_photos(
     *,
     framed: bool,
     background_color: tuple[int, int, int],
-    procedural_cork: bool = False,
+    surface_style: str | None = None,
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
@@ -712,10 +1122,10 @@ def _compose_scattered_photos(
     tile_factory = _polaroid_tile if framed else _postcard_tile
     width, height, min_x, min_y = virtual_canvas(monitors)
     if span:
-        combined = (
-            _corkboard_texture((width, height))
-            if procedural_cork
-            else Image.new("RGB", (width, height), background_color)
+        combined = _postcard_background_image(
+            (width, height),
+            background_color,
+            surface_style=surface_style,
         )
         max_card_size = (
             max(1, round(max(monitor.width for monitor in monitors) * size_fraction)),
@@ -754,10 +1164,11 @@ def _compose_scattered_photos(
         texture_seed = (
             panel_position[0] * 0x9E3779B1 ^ panel_position[1] * 0x85EBCA77
         ) & _CORKBOARD_SEED_MASK
-        panel = (
-            _corkboard_texture((monitor.width, monitor.height), seed=texture_seed)
-            if procedural_cork
-            else Image.new("RGB", (monitor.width, monitor.height), background_color)
+        panel = _postcard_background_image(
+            (monitor.width, monitor.height),
+            background_color,
+            surface_style=surface_style,
+            seed=texture_seed,
         )
         max_card_size = (
             max(1, round(monitor.width * size_fraction)),

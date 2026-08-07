@@ -758,7 +758,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
     profile.postcard_count = 7
     profile.postcard_size = 0.8
     profile.postcard_tilt = False
-    profile.postcard_background = "corkboard"
+    profile.postcard_background = "brushed metal"
     save_config(cfg)
     captured = {}
 
@@ -808,7 +808,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
     assert captured["size"] == 0.8
     assert captured["span"] is False
     assert captured["tilt"] is False
-    assert captured["background"] == "corkboard"
+    assert captured["background"] == "brushed metal"
     assert isinstance(captured["rng"], random.Random)
     assert "profile:P:postcard" not in state.remaining
     assert draw_counts == [("profile:P:postcard", 14)]

@@ -4,6 +4,20 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.33] - 2026-08-07
+
+### Added
+
+- Ten deterministic, asset-free procedural Postcard surfaces: felt, linen, kraft paper, watercolor paper, slate, plaster, concrete, brushed metal, sandstone, and terrazzo.
+- Shared bounded high-DPI noise and material-detail primitives, stable per-style seeds, per-monitor variation, and continuous spanning textures.
+- Config round-trip, Settings/Apply, service forwarding, material determinism, distinctness, photo-geometry/RNG isolation, visual, and performance coverage for the complete surface set.
+
+### Changed
+
+- Expanded **Settings → Postcard → Background** from dark and corkboard to twelve choices without changing the accepted corkboard generator, solid dark default, source photos, or bare-photo composition behavior.
+- Documented that v0.1.32 and older display the ten new profile values as Dark and replace the new selection with Dark if that profile is saved from an older release.
+- Bumped the package version to `0.1.33`.
+
 ## [0.1.32] - 2026-08-07
 
 ### Added

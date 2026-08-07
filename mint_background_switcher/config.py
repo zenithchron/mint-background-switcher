@@ -36,7 +36,20 @@ EFFECT_CHOICES = ("none", "random", *RANDOM_EFFECT_CHOICES)
 VALID_EFFECTS = set(EFFECT_CHOICES)
 BAR_COLOR_CHOICES = ("black", "auto", "blurred")
 VALID_BAR_COLORS = set(BAR_COLOR_CHOICES)
-POSTCARD_BACKGROUND_CHOICES = ("dark", "corkboard")
+POSTCARD_BACKGROUND_CHOICES = (
+    "dark",
+    "corkboard",
+    "felt",
+    "linen",
+    "kraft paper",
+    "watercolor paper",
+    "slate",
+    "plaster",
+    "concrete",
+    "brushed metal",
+    "sandstone",
+    "terrazzo",
+)
 VALID_POSTCARD_BACKGROUNDS = set(POSTCARD_BACKGROUND_CHOICES)
 
 

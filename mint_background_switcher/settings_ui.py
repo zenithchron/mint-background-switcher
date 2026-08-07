@@ -484,10 +484,12 @@ class SettingsApp(tk.Tk):
         )
         self.postcard_background_menu.pack(side=tk.LEFT)
         self.postcard_background_help = ttk.Label(
-            postcard_style_options,
-            text="Corkboard adds subtle generated grain and flecks—no photo texture.",
+            self.postcard_options,
+            text="Textured backgrounds are generated locally—no photographic texture or download.",
+            justify=tk.LEFT,
+            wraplength=820,
         )
-        self.postcard_background_help.pack(side=tk.LEFT, padx=(12, 0))
+        self.postcard_background_help.pack(anchor="w", pady=(6, 0))
 
         polaroid_tab = self.mode_tabs["polaroid"]
         ttk.Label(

@@ -1,6 +1,13 @@
 import json
 
-from mint_background_switcher.config import Config, Profile, load_config, replace_working_directory, save_config
+from mint_background_switcher.config import (
+    POSTCARD_BACKGROUND_CHOICES,
+    Config,
+    Profile,
+    load_config,
+    replace_working_directory,
+    save_config,
+)
 
 
 def test_config_roundtrip():
@@ -129,7 +136,7 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
     assert malformed_tilt.get_profile().postcard_tilt is True
 
     invalid_background = Config.from_dict(
-        {"active_profile": "P", "profiles": {"P": {"postcard_background": "linen"}}}
+        {"active_profile": "P", "profiles": {"P": {"postcard_background": "not-a-style"}}}
     )
     assert invalid_background.get_profile().postcard_background == "dark"
 
@@ -141,6 +148,34 @@ def test_postcard_options_roundtrip_with_backward_compatible_defaults_and_bounds
     )
     assert (high.get_profile().postcard_count, high.get_profile().postcard_size) == (100, 1.0)
     assert (low.get_profile().postcard_count, low.get_profile().postcard_size) == (1, 0.0)
+
+
+def test_all_postcard_background_choices_roundtrip():
+    for background in POSTCARD_BACKGROUND_CHOICES:
+        configured = Config.from_dict(
+            {"active_profile": "P", "profiles": {"P": {"postcard_background": background.upper()}}}
+        )
+        assert configured.get_profile().postcard_background == background
+        assert configured.to_dict()["profiles"]["P"]["postcard_background"] == background
+
+
+def test_all_postcard_background_choices_roundtrip_through_file(tmp_path):
+    profiles = {
+        f"Profile {index}": Profile(name=f"Profile {index}", postcard_background=background)
+        for index, background in enumerate(POSTCARD_BACKGROUND_CHOICES)
+    }
+    path = tmp_path / "config.json"
+    save_config(Config(active_profile="Profile 0", profiles=profiles), path)
+
+    loaded = load_config(path, create=False)
+
+    assert {
+        name: profile.postcard_background
+        for name, profile in loaded.profiles.items()
+    } == {
+        f"Profile {index}": background
+        for index, background in enumerate(POSTCARD_BACKGROUND_CHOICES)
+    }
 
 
 def test_postcard_background_preserves_legacy_profile_positional_arguments():

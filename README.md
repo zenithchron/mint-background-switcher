@@ -10,7 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - Tabbed Settings editor with General, one tab per wallpaper mode, Public Collections, and About & Updates while retaining an explicit active-mode selector.
-- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, selectable dark or procedurally textured warm corkboard backgrounds, and optional virtual-desktop spanning.
+- Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, twelve selectable solid or procedurally textured backgrounds, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
 - Cached SQLite discovery and database-backed no-repeat rotation for very large local libraries.
@@ -26,6 +26,14 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 ## Change log
+
+### 0.1.33 - 2026-08-07
+
+- Added ten asset-free procedural Postcard surfaces: felt, linen, kraft paper, watercolor paper, slate, plaster, concrete, brushed metal, sandstone, and terrazzo.
+- Kept the accepted corkboard rendering and solid dark default unchanged while preserving identical photo geometry and caller random-state behavior across every surface.
+- Added shared bounded high-DPI rendering, deterministic per-surface and per-monitor seeds, full Settings/config/service coverage, and visual/performance verification.
+- Compatibility note: v0.1.32 and older display these new profile values as Dark; saving that profile from an older release replaces the new selection with Dark.
+- Bumped the package version to `0.1.33`.
 
 ### 0.1.32 - 2026-08-07
 

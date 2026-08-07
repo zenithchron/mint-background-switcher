@@ -1120,13 +1120,28 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
             background_menu.entrycget(index, "label")
             for index in range(background_menu.index("end") + 1)
         ]
-        assert background_labels == ["dark", "corkboard"]
+        assert background_labels == [
+            "dark",
+            "corkboard",
+            "felt",
+            "linen",
+            "kraft paper",
+            "watercolor paper",
+            "slate",
+            "plaster",
+            "concrete",
+            "brushed metal",
+            "sandstone",
+            "terrazzo",
+        ]
         assert app.postcard_background_menu.winfo_ismapped()
         assert app.postcard_background_help.winfo_ismapped()
         assert app.postcard_background_help.cget("text") == (
-            "Corkboard adds subtle generated grain and flecks—no photo texture."
+            "Textured backgrounds are generated locally—no photographic texture or download."
         )
         assert app.postcard_background_var.get() == "dark"
+        app.postcard_background_var.set("watercolor paper")
+        app.update_idletasks()
         options_right = app.postcard_options.winfo_rootx() + app.postcard_options.winfo_width()
         options_bottom = app.postcard_options.winfo_rooty() + app.postcard_options.winfo_height()
         for widget in (
@@ -1136,6 +1151,7 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         ):
             assert widget.winfo_rootx() + widget.winfo_width() <= options_right
             assert widget.winfo_rooty() + widget.winfo_height() <= options_bottom
+        app.postcard_background_var.set("dark")
         scale_style = app.postcard_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
         app.notebook.select(app.general_tab)
@@ -1145,13 +1161,13 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         app.postcard_size_var.set(0.8)
         app.postcard_span_var.set(True)
         app.postcard_tilt_var.set(False)
-        app.postcard_background_var.set("corkboard")
+        app.postcard_background_var.set("brushed metal")
         app.update_idletasks()
         assert app.postcard_count_label.cget("text") == "Postcard photos across all screens:"
         app._apply_next()
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard"]
-        assert saved_postcard_options == [(7, 0.8, True, False, "corkboard")]
+        assert saved_postcard_options == [(7, 0.8, True, False, "brushed metal")]
         assert applied_profiles == ["Default"]
         assert messages and messages[-1][0] == "Applied"
 
@@ -1164,8 +1180,8 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["postcard", "postcard"]
         assert saved_postcard_options == [
-            (7, 0.8, True, False, "corkboard"),
-            (7, 0.8, True, False, "corkboard"),
+            (7, 0.8, True, False, "brushed metal"),
+            (7, 0.8, True, False, "brushed metal"),
         ]
         assert errors == [("Apply failed", "postcard preview failed")]
     finally:
