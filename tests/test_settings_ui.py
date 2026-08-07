@@ -1123,6 +1123,9 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         assert background_labels == ["dark", "corkboard"]
         assert app.postcard_background_menu.winfo_ismapped()
         assert app.postcard_background_help.winfo_ismapped()
+        assert app.postcard_background_help.cget("text") == (
+            "Corkboard adds subtle generated grain and flecks—no photo texture."
+        )
         assert app.postcard_background_var.get() == "dark"
         options_right = app.postcard_options.winfo_rootx() + app.postcard_options.winfo_width()
         options_bottom = app.postcard_options.winfo_rooty() + app.postcard_options.winfo_height()

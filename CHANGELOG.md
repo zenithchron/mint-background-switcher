@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.1.32] - 2026-08-07
+
+### Added
+
+- A deterministic, procedurally generated cork surface with multi-scale grain plus sparse pores and fibers for the Postcard `corkboard` background.
+- Texture and monitor-variation tests, solid-dark non-regression coverage, visual comparison, and high-resolution performance verification.
+
+### Changed
+
+- Replaced the flat corkboard-colored fill without adding a downloaded or bundled photographic texture, while keeping dark backgrounds and bare-photo layout behavior unchanged.
+- Bumped the package version to `0.1.32`.
+
 ## [0.1.31] - 2026-08-06
 
 ### Added

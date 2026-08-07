@@ -27,6 +27,7 @@ POSTCARD_BACKGROUND_COLORS = {
     "dark": POSTCARD_BACKGROUND_COLOR,
     "corkboard": POSTCARD_CORKBOARD_COLOR,
 }
+_CORKBOARD_SEED_MASK = (1 << 64) - 1
 SATURATION_FACTOR = 1.5
 _MONTH_NAMES = (
     "",
@@ -492,6 +493,103 @@ def _postcard_tile(
     return rotated
 
 
+def _corkboard_texture(size: tuple[int, int], *, seed: int = 0) -> Image.Image:
+    """Generate a deterministic, subtle cork surface without an image asset."""
+
+    width, height = size
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid corkboard size: {size}")
+
+    mixed_seed = (
+        seed
+        ^ (width * 0x9E3779B185EBCA87)
+        ^ (height * 0xC2B2AE3D27D4EB4F)
+    ) & _CORKBOARD_SEED_MASK
+    texture_rng = random.Random(mixed_seed)
+
+    # Work below full resolution on high-DPI canvases. This keeps temporary
+    # layers bounded while the final upscale gives the grain an appropriate
+    # physical size on 4K displays.
+    output_scale = max(1, min(3, round(min(width, height) / 1080)))
+    work_size = (
+        max(1, (width + output_scale - 1) // output_scale),
+        max(1, (height + output_scale - 1) // output_scale),
+    )
+    work_width, work_height = work_size
+    surface = Image.new("RGB", work_size, POSTCARD_CORKBOARD_COLOR)
+
+    fine_size = (
+        max(1, (work_width + 1) // 2),
+        max(1, (work_height + 1) // 2),
+    )
+    fine_source = Image.frombytes(
+        "L",
+        fine_size,
+        texture_rng.randbytes(fine_size[0] * fine_size[1]),
+    )
+    fine_noise = fine_source.resize(work_size, Image.Resampling.BILINEAR)
+    fine_source.close()
+    fine_layer = ImageOps.colorize(
+        fine_noise,
+        black=tuple(max(0, channel - 18) for channel in POSTCARD_CORKBOARD_COLOR),
+        white=tuple(min(255, channel + 18) for channel in POSTCARD_CORKBOARD_COLOR),
+    )
+    blended = Image.blend(surface, fine_layer, 0.45)
+    surface.close()
+    fine_noise.close()
+    fine_layer.close()
+    surface = blended
+
+    coarse_step = max(18, min(work_width, work_height) // 28)
+    coarse_size = (
+        max(2, (work_width + coarse_step - 1) // coarse_step),
+        max(2, (work_height + coarse_step - 1) // coarse_step),
+    )
+    coarse_source = Image.frombytes(
+        "L",
+        coarse_size,
+        texture_rng.randbytes(coarse_size[0] * coarse_size[1]),
+    )
+    coarse_noise = coarse_source.resize(work_size, Image.Resampling.BICUBIC)
+    coarse_source.close()
+    coarse_layer = ImageOps.colorize(
+        coarse_noise,
+        black=tuple(max(0, channel - 24) for channel in POSTCARD_CORKBOARD_COLOR),
+        white=tuple(min(255, channel + 24) for channel in POSTCARD_CORKBOARD_COLOR),
+    )
+    blended = Image.blend(surface, coarse_layer, 0.18)
+    surface.close()
+    coarse_noise.close()
+    coarse_layer.close()
+    surface = blended
+
+    draw = ImageDraw.Draw(surface)
+    mark_count = max(16, (work_width * work_height) // 3000)
+    for _index in range(mark_count):
+        x = texture_rng.randrange(work_width)
+        y = texture_rng.randrange(work_height)
+        if texture_rng.random() < 0.72:
+            shade = texture_rng.randint(28, 48)
+            color = tuple(max(0, channel - shade) for channel in POSTCARD_CORKBOARD_COLOR)
+            pore_width = texture_rng.randint(1, 4)
+            pore_height = texture_rng.randint(1, 2)
+            draw.ellipse((x, y, x + pore_width, y + pore_height), fill=color)
+        else:
+            shade = texture_rng.choice((-26, 20))
+            color = tuple(
+                max(0, min(255, channel + shade)) for channel in POSTCARD_CORKBOARD_COLOR
+            )
+            fiber_length = texture_rng.randint(3, 9)
+            fiber_rise = texture_rng.randint(-2, 2)
+            draw.line((x, y, x + fiber_length, y + fiber_rise), fill=color)
+
+    if work_size == size:
+        return surface
+    textured = surface.resize(size, Image.Resampling.BILINEAR)
+    surface.close()
+    return textured
+
+
 def compose_postcard(
     monitors: list[Monitor],
     images_by_monitor: dict[str, list[str]],
@@ -517,6 +615,7 @@ def compose_postcard(
         output_path,
         framed=False,
         background_color=background_color,
+        procedural_cork=background == "corkboard",
         bar_color=bar_color,
         size=size,
         span=span,
@@ -596,6 +695,7 @@ def _compose_scattered_photos(
     *,
     framed: bool,
     background_color: tuple[int, int, int],
+    procedural_cork: bool = False,
     bar_color: str = "black",
     size: float = 0.5,
     span: bool = False,
@@ -612,7 +712,11 @@ def _compose_scattered_photos(
     tile_factory = _polaroid_tile if framed else _postcard_tile
     width, height, min_x, min_y = virtual_canvas(monitors)
     if span:
-        combined = Image.new("RGB", (width, height), background_color)
+        combined = (
+            _corkboard_texture((width, height))
+            if procedural_cork
+            else Image.new("RGB", (width, height), background_color)
+        )
         max_card_size = (
             max(1, round(max(monitor.width for monitor in monitors) * size_fraction)),
             max(1, round(max(monitor.height for monitor in monitors) * size_fraction)),
@@ -646,7 +750,15 @@ def _compose_scattered_photos(
 
     combined = Image.new("RGB", (width, height), (0, 0, 0))
     for monitor in monitors:
-        panel = Image.new("RGB", (monitor.width, monitor.height), background_color)
+        panel_position = normalized_position(monitor, min_x, min_y)
+        texture_seed = (
+            panel_position[0] * 0x9E3779B1 ^ panel_position[1] * 0x85EBCA77
+        ) & _CORKBOARD_SEED_MASK
+        panel = (
+            _corkboard_texture((monitor.width, monitor.height), seed=texture_seed)
+            if procedural_cork
+            else Image.new("RGB", (monitor.width, monitor.height), background_color)
+        )
         max_card_size = (
             max(1, round(monitor.width * size_fraction)),
             max(1, round(monitor.height * size_fraction)),
@@ -665,7 +777,7 @@ def _compose_scattered_photos(
             )
             x, y = _random_card_position((monitor.width, monitor.height), card.size, rng)
             panel.paste(card, (x, y), card)
-        combined.paste(panel, normalized_position(monitor, min_x, min_y))
+        combined.paste(panel, panel_position)
     return _save_png_atomic(combined, output_path)
 
 

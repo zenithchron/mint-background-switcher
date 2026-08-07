@@ -2,7 +2,7 @@ from datetime import date
 from pathlib import Path
 import random
 
-from PIL import Image
+from PIL import Image, ImageStat
 import pytest
 
 from mint_background_switcher import images as images_module
@@ -14,6 +14,7 @@ from mint_background_switcher.images import (
     POSTCARD_BACKGROUND_COLOR,
     POSTCARD_CORKBOARD_COLOR,
     _collage_tile,
+    _corkboard_texture,
     _polaroid_tile,
     _postcard_tile,
     _random_card_position,
@@ -466,8 +467,29 @@ def test_compose_postcard_randomizes_bare_uncropped_images_without_frames_or_pin
         assert POLAROID_FRAME_COLOR[:3] not in rendered_colors
 
 
+def test_corkboard_texture_is_deterministic_non_flat_and_subtle():
+    first = _corkboard_texture((240, 160), seed=7)
+    repeated = _corkboard_texture((240, 160), seed=7)
+    changed_seed = _corkboard_texture((240, 160), seed=8)
+
+    assert first.mode == "RGB"
+    assert first.size == (240, 160)
+    assert first.tobytes() == repeated.tobytes()
+    assert first.tobytes() != changed_seed.tobytes()
+    colors = first.getcolors(maxcolors=first.width * first.height)
+    assert colors is not None
+    assert len(colors) > 20
+    means = ImageStat.Stat(first).mean
+    assert isinstance(means, list)
+    for mean, base in zip(means, POSTCARD_CORKBOARD_COLOR):
+        assert abs(mean - base) < 4
+    for (low, high), base in zip(first.getextrema(), POSTCARD_CORKBOARD_COLOR):
+        assert base - 50 <= low < base
+        assert base < high <= base + 24
+
+
 @pytest.mark.parametrize("span", [False, True])
-def test_postcard_corkboard_background_fills_each_layout(span: bool, tmp_path: Path):
+def test_postcard_corkboard_background_textures_each_layout(span: bool, tmp_path: Path):
     monitors = [Monitor("A", 120, 80, 0, 0)]
 
     output = compose_postcard(
@@ -478,11 +500,50 @@ def test_postcard_corkboard_background_fills_each_layout(span: bool, tmp_path: P
         background="corkboard",
         rng=random.Random(13),
     )
+    repeated = compose_postcard(
+        monitors,
+        {"A": []},
+        tmp_path / f"corkboard-repeated-{span}.png",
+        span=span,
+        background="corkboard",
+        rng=random.Random(99),
+    )
+
+    assert output.read_bytes() == repeated.read_bytes()
+    with Image.open(output) as postcard:
+        colors = postcard.getcolors(maxcolors=postcard.width * postcard.height)
+        assert colors is not None
+        assert len(colors) > 16
+
+
+@pytest.mark.parametrize("span", [False, True])
+def test_postcard_dark_background_remains_a_solid_fill(span: bool, tmp_path: Path):
+    output = compose_postcard(
+        [Monitor("A", 120, 80, 0, 0)],
+        {"A": []},
+        tmp_path / f"dark-{span}.png",
+        span=span,
+        background="dark",
+    )
 
     with Image.open(output) as postcard:
         assert postcard.getcolors(maxcolors=postcard.width * postcard.height) == [
-            (postcard.width * postcard.height, POSTCARD_CORKBOARD_COLOR)
+            (postcard.width * postcard.height, POSTCARD_BACKGROUND_COLOR)
         ]
+
+
+def test_per_screen_corkboard_panels_do_not_repeat_the_same_texture(tmp_path: Path):
+    output = compose_postcard(
+        [Monitor("A", 120, 80, 0, 0), Monitor("B", 120, 80, 120, 0)],
+        {"A": [], "B": []},
+        tmp_path / "two-corkboard-panels.png",
+        background="corkboard",
+    )
+
+    with Image.open(output) as postcard:
+        first_panel = postcard.crop((0, 0, 120, 80))
+        second_panel = postcard.crop((120, 0, 240, 80))
+        assert first_panel.tobytes() != second_panel.tobytes()
 
 
 def test_postcard_rejects_unknown_background(tmp_path: Path):

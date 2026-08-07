@@ -485,7 +485,7 @@ class SettingsApp(tk.Tk):
         self.postcard_background_menu.pack(side=tk.LEFT)
         self.postcard_background_help = ttk.Label(
             postcard_style_options,
-            text="Corkboard adds a warm noticeboard-style backdrop behind the photos.",
+            text="Corkboard adds subtle generated grain and flecks—no photo texture.",
         )
         self.postcard_background_help.pack(side=tk.LEFT, padx=(12, 0))
 
