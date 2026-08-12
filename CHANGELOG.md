@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- An optional per-profile Contrast effect, inspired by John’s Background Switcher’s post-processing effects, that applies a fixed 1.25× contrast enhancement to the completed wallpaper.
+- **contrast** under **Settings → General → Settings applying to all modes → Effect**, with Save and **Apply Next Now** success/error feedback.
+- Exact-pixel, config, source/state safety, black-screen non-regression, and 1024×768 Xvfb-backed Settings coverage for the new effect.
+
+### Changed
+
+- Expanded the per-rotation **random** effect pool from eight to nine concrete effects by including Contrast.
+- Bumped the package version to `0.2.0`.
+
 ## [0.1.33] - 2026-08-07
 
 ### Added

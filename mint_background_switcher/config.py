@@ -26,6 +26,7 @@ RANDOM_EFFECT_CHOICES = (
     "grayscale",
     "desaturate",
     "saturate",
+    "contrast",
     "sepia",
     "invert",
     "blur",

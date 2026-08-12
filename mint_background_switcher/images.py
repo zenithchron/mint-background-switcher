@@ -66,6 +66,7 @@ _SURFACE_NOISE_RECIPES = {
 _PROCEDURAL_SURFACE_MAX_WORK_PIXELS = 6_500_000
 _CORKBOARD_SEED_MASK = (1 << 64) - 1
 SATURATION_FACTOR = 1.5
+CONTRAST_FACTOR = 1.25
 _MONTH_NAMES = (
     "",
     "January",
@@ -375,6 +376,8 @@ def apply_effect(
             processed = Image.blend(rgb_source, grayscale, 0.5)
         elif effect == "saturate":
             processed = ImageEnhance.Color(source.convert("RGB")).enhance(SATURATION_FACTOR)
+        elif effect == "contrast":
+            processed = ImageEnhance.Contrast(source.convert("RGB")).enhance(CONTRAST_FACTOR)
         elif effect == "grayscale":
             grayscale = ImageOps.grayscale(source)
             processed = grayscale.convert("RGB")
