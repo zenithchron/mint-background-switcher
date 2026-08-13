@@ -67,6 +67,7 @@ _PROCEDURAL_SURFACE_MAX_WORK_PIXELS = 6_500_000
 _CORKBOARD_SEED_MASK = (1 << 64) - 1
 SATURATION_FACTOR = 1.5
 CONTRAST_FACTOR = 1.25
+BRIGHTNESS_FACTOR = 1.15
 _MONTH_NAMES = (
     "",
     "January",
@@ -378,6 +379,8 @@ def apply_effect(
             processed = ImageEnhance.Color(source.convert("RGB")).enhance(SATURATION_FACTOR)
         elif effect == "contrast":
             processed = ImageEnhance.Contrast(source.convert("RGB")).enhance(CONTRAST_FACTOR)
+        elif effect == "brighten":
+            processed = ImageEnhance.Brightness(source.convert("RGB")).enhance(BRIGHTNESS_FACTOR)
         elif effect == "grayscale":
             grayscale = ImageOps.grayscale(source)
             processed = grayscale.convert("RGB")

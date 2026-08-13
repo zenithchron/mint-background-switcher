@@ -288,6 +288,12 @@ def test_effects_roundtrip_and_invalid_effect_falls_back():
     assert contrast.get_profile().effect == "contrast"
     assert contrast.to_dict()["profiles"]["P"]["effect"] == "contrast"
 
+    brighten = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"effect": "BRIGHTEN"}}}
+    )
+    assert brighten.get_profile().effect == "brighten"
+    assert brighten.to_dict()["profiles"]["P"]["effect"] == "brighten"
+
     random_effect = Config.from_dict(
         {"active_profile": "P", "profiles": {"P": {"effect": "RANDOM"}}}
     )

@@ -27,6 +27,7 @@ RANDOM_EFFECT_CHOICES = (
     "desaturate",
     "saturate",
     "contrast",
+    "brighten",
     "sepia",
     "invert",
     "blur",

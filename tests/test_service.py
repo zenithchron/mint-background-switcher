@@ -8,7 +8,7 @@ from PIL import Image, ImageEnhance, ImageOps
 
 from mint_background_switcher import service
 from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, save_config
-from mint_background_switcher.images import CONTRAST_FACTOR
+from mint_background_switcher.images import BRIGHTNESS_FACTOR, CONTRAST_FACTOR
 from mint_background_switcher.service import (
     black_screen,
     current_source_images,
@@ -1409,6 +1409,56 @@ def test_contrast_effect_dry_run_preserves_sources_state_and_black_screen(
 
     cfg = service.load_config()
     cfg.get_profile("P").effect = "contrast"
+    save_config(cfg)
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.applied is False
+    assert result.images == plain_result.images
+    with Image.open(result.wallpaper) as wallpaper:
+        assert wallpaper.mode == "RGB"
+        assert wallpaper.size == (220, 80)
+        assert wallpaper.tobytes() == expected_bytes
+    assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+    assert load_state().to_dict() == before_state
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+    black_result = black_screen("P", dry_run=True)
+    with Image.open(black_result.wallpaper) as wallpaper:
+        assert wallpaper.getcolors(maxcolors=wallpaper.width * wallpaper.height) == [
+            (wallpaper.width * wallpaper.height, (0, 0, 0))
+        ]
+    assert load_state().to_dict() == before_state
+
+
+def test_brighten_effect_dry_run_preserves_sources_state_and_black_screen(
+    monkeypatch, tmp_path: Path
+):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "same"
+    profile.effect = "none"
+    save_config(cfg)
+    original = RuntimeState(
+        paused=True,
+        black_screen=True,
+        active_profile="P",
+        remaining={"profile:P:same": ["/tmp/sentinel.png"]},
+        last_wallpaper="old.png",
+        last_images=["old-image.png"],
+    )
+    save_state(original)
+    before_state = load_state().to_dict()
+    image_dir = tmp_path / "images"
+    source_bytes = {path: path.read_bytes() for path in image_dir.glob("*.png")}
+
+    plain_result = switch_once("P", dry_run=True, rng=random.Random(7))
+    with Image.open(plain_result.wallpaper) as plain:
+        expected = ImageEnhance.Brightness(plain.convert("RGB")).enhance(BRIGHTNESS_FACTOR)
+        expected_bytes = expected.tobytes()
+
+    cfg = service.load_config()
+    cfg.get_profile("P").effect = "brighten"
     save_config(cfg)
     result = switch_once("P", dry_run=True, rng=random.Random(7))
 
