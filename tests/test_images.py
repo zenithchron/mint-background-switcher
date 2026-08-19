@@ -14,6 +14,7 @@ from mint_background_switcher.images import (
     BRIGHTNESS_FACTOR,
     CALENDAR_HIGHLIGHT_COLOR,
     CONTRAST_FACTOR,
+    DARKEN_FACTOR,
     POLAROID_BACKGROUND_COLOR,
     POLAROID_FRAME_COLOR,
     POSTCARD_BACKGROUND_COLORS,
@@ -261,8 +262,30 @@ def test_apply_brighten_effect_lifts_pixels_and_preserves_rgb(tmp_path: Path):
     assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
 
 
-def test_apply_random_effect_selects_brighten_from_concrete_pool(tmp_path: Path):
-    class BrightenRandom(random.Random):
+def test_apply_darken_effect_reduces_pixels_and_preserves_rgb(tmp_path: Path):
+    path = tmp_path / "color.png"
+    source = Image.new("RGB", (3, 1))
+    source.putpixel((0, 0), (200, 40, 10))
+    source.putpixel((1, 0), (10, 100, 250))
+    source.putpixel((2, 0), (128, 128, 128))
+    before = source.tobytes()
+    source.save(path)
+
+    assert DARKEN_FACTOR == 0.85
+    assert apply_effect(path, "darken") == path
+
+    assert source.tobytes() == before
+    with Image.open(path) as processed:
+        assert processed.mode == "RGB"
+        assert processed.size == source.size
+        assert processed.getpixel((0, 0)) == (170, 34, 8)
+        assert processed.getpixel((1, 0)) == (8, 85, 212)
+        assert processed.getpixel((2, 0)) == (108, 108, 108)
+    assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
+
+
+def test_apply_random_effect_selects_darken_from_concrete_pool(tmp_path: Path):
+    class DarkenRandom(random.Random):
         def choice(self, seq):
             expected = (
                 "grayscale",
@@ -270,6 +293,7 @@ def test_apply_random_effect_selects_brighten_from_concrete_pool(tmp_path: Path)
                 "saturate",
                 "contrast",
                 "brighten",
+                "darken",
                 "sepia",
                 "invert",
                 "blur",
@@ -281,7 +305,7 @@ def test_apply_random_effect_selects_brighten_from_concrete_pool(tmp_path: Path)
             assert concrete == RANDOM_EFFECT_CHOICES
             assert len(concrete) == len(set(concrete))
             assert {"none", "random"}.isdisjoint(concrete)
-            return "brighten"
+            return "darken"
 
     path = tmp_path / "random.png"
     expected_path = tmp_path / "expected.png"
@@ -293,17 +317,17 @@ def test_apply_random_effect_selects_brighten_from_concrete_pool(tmp_path: Path)
     source.save(path)
     source.save(expected_path)
 
-    assert apply_effect(path, "random", rng=BrightenRandom()) == path
-    assert apply_effect(expected_path, "brighten") == expected_path
+    assert apply_effect(path, "random", rng=DarkenRandom()) == path
+    assert apply_effect(expected_path, "darken") == expected_path
 
     assert source.tobytes() == before
     assert path.read_bytes() == expected_path.read_bytes()
     with Image.open(path) as processed:
         assert processed.mode == "RGB"
         assert processed.size == source.size
-        assert processed.getpixel((0, 0)) == (230, 46, 11)
-        assert processed.getpixel((1, 0)) == (11, 115, 255)
-        assert processed.getpixel((2, 0)) == (147, 147, 147)
+        assert processed.getpixel((0, 0)) == (170, 34, 8)
+        assert processed.getpixel((1, 0)) == (8, 85, 212)
+        assert processed.getpixel((2, 0)) == (108, 108, 108)
     assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
 
 

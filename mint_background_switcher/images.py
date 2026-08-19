@@ -68,6 +68,7 @@ _CORKBOARD_SEED_MASK = (1 << 64) - 1
 SATURATION_FACTOR = 1.5
 CONTRAST_FACTOR = 1.25
 BRIGHTNESS_FACTOR = 1.15
+DARKEN_FACTOR = 0.85
 _MONTH_NAMES = (
     "",
     "January",
@@ -381,6 +382,8 @@ def apply_effect(
             processed = ImageEnhance.Contrast(source.convert("RGB")).enhance(CONTRAST_FACTOR)
         elif effect == "brighten":
             processed = ImageEnhance.Brightness(source.convert("RGB")).enhance(BRIGHTNESS_FACTOR)
+        elif effect == "darken":
+            processed = ImageEnhance.Brightness(source.convert("RGB")).enhance(DARKEN_FACTOR)
         elif effect == "grayscale":
             grayscale = ImageOps.grayscale(source)
             processed = grayscale.convert("RGB")
