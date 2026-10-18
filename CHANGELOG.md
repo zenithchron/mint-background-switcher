@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.3] - 2026-10-18
+
+### Added
+
+- A persistent Settings context strip above the top-level notebook, keeping Profile, New, Rename, Delete, Layout, and Save Profile visible on all 11 existing pages.
+- Xvfb-backed 1024×768 coverage that visits every page, checks the context and footer controls stay mapped and inside the window, verifies all eight Layout values, and proves page navigation does not change the pending layout.
+
+### Changed
+
+- Renamed **Save** to **Save Profile** and **Apply Next Now** to **Save & Apply Now** without changing either callback or action semantics.
+- Reflowed the remaining General common settings after moving Layout and bounded the active working-folder path shown in status so long paths cannot hide the footer or make a typed candidate look active.
+- Bumped the package version to `0.2.3`.
+
 ## [0.2.2] - 2026-08-19
 
 ### Added

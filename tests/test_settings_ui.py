@@ -111,6 +111,109 @@ def test_settings_window_geometry_keeps_1024x768_screens_usable():
     assert y == 33
 
 
+def test_active_working_directory_status_bounds_long_paths_and_preserves_identity():
+    active = Path("/active") / ("long-path-segment-" * 20) / "working-files"
+    active_text = str(active)
+    left = (settings_ui.WORKING_DIRECTORY_STATUS_PATH_LIMIT - 3) // 2
+    right = settings_ui.WORKING_DIRECTORY_STATUS_PATH_LIMIT - left - 3
+
+    status = settings_ui._active_working_directory_status(active)
+
+    assert active_text not in status
+    assert status.startswith(f"Active: {active_text[:left]}...")
+    assert f"{active_text[-right:]} - source images remain" in status
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv(
+        "MBS_CACHE_DIR",
+        str(tmp_path / ("working-files-" + ("long-path-segment-" * 20))),
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    def assert_visible_inside_window(widget):
+        assert widget.winfo_ismapped()
+        assert widget.winfo_width() >= widget.winfo_reqwidth()
+        assert widget.winfo_height() >= widget.winfo_reqheight()
+        assert widget.winfo_rootx() >= app.winfo_rootx()
+        assert widget.winfo_rooty() >= app.winfo_rooty()
+        assert widget.winfo_rootx() + widget.winfo_width() <= app.winfo_rootx() + app.winfo_width()
+        assert widget.winfo_rooty() + widget.winfo_height() <= app.winfo_rooty() + app.winfo_height()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        assert (app.winfo_width(), app.winfo_height()) == (944, 668)
+        context_controls = (
+            app.profile_combo,
+            app.profile_new_button,
+            app.profile_rename_button,
+            app.profile_delete_button,
+            app.mode_menu,
+            app.profile_save_button,
+        )
+        footer_controls = (
+            app.apply_button,
+            app.black_button,
+            app.export_button,
+            app.current_pictures_button,
+            app.about_button,
+            app.close_button,
+        )
+        assert not is_descendant(app.profile_context_frame, app.general_tab)
+        assert all(is_descendant(control, app.profile_context_frame) for control in context_controls)
+        assert any(
+            child.winfo_class() == "TLabel" and child.cget("text") == "Layout:"
+            for child in app.profile_context_frame.winfo_children()
+        )
+        assert app.profile_save_button.cget("text") == "Save Profile"
+        assert app.apply_button.cget("text") == "Save & Apply Now"
+        assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
+
+        menu = app.nametowidget(app.mode_menu["menu"])
+        layout_values = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        assert layout_values == [
+            "shared",
+            "same",
+            "montage",
+            "collage",
+            "postcard",
+            "polaroid",
+            "per-monitor",
+            "span",
+        ]
+        menu.invoke(layout_values.index("span"))
+        assert app.mode_var.get() == "span"
+
+        pages = app.notebook.tabs()
+        assert len(pages) == 11
+        for page in pages:
+            app.notebook.select(page)
+            app.update_idletasks()
+            app.update()
+            assert app.mode_var.get() == "span"
+            assert_visible_inside_window(app.profile_context_frame)
+            for control in (*context_controls, *footer_controls):
+                assert_visible_inside_window(control)
+    finally:
+        app.destroy()
+
+
 def test_open_picture_uses_default_desktop_opener_without_a_shell(monkeypatch, tmp_path):
     picture = tmp_path / "picture with spaces.png"
     picture.write_bytes(b"picture")
@@ -254,7 +357,7 @@ def test_view_current_pictures_reports_when_no_sources_are_recorded(monkeypatch)
     settings_ui.SettingsApp._view_current_pictures(dummy)
 
     assert messages and messages[0][0] == "No current pictures"
-    assert "Apply Next Now" in messages[0][1]
+    assert "Save & Apply Now" in messages[0][1]
     assert messages[0][2]["parent"] is dummy
 
 
@@ -1783,7 +1886,7 @@ def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_pat
         "Picture added",
         "Picture already listed",
     ]
-    assert "Choose Save" in messages[0][1]
+    assert "Choose Save Profile" in messages[0][1]
     assert all(message[2]["parent"] is dummy for message in messages)
     assert errors == []
 
@@ -2069,7 +2172,11 @@ def test_settings_exposes_working_folder_controls_at_1024x768(monkeypatch, tmp_p
         ):
             assert widget.winfo_ismapped()
             assert widget.winfo_width() > 1
-        assert "source images remain" in app.working_status_var.get().lower()
+        active_status = app.working_status_var.get()
+        assert "source images remain" in active_status.lower()
+        assert active_status == settings_ui._active_working_directory_status(cache.absolute())
+        app.working_directory_var.set(str(tmp_path / "different-working-folder"))
+        assert app.working_status_var.get() == active_status
         assert app.winfo_x() >= 0
         assert app.winfo_y() >= 0
         assert app.winfo_x() + app.winfo_width() <= app.winfo_screenwidth()
@@ -2257,7 +2364,7 @@ def test_apply_next_runs_off_tk_thread(monkeypatch, tmp_path):
 
         gate.set()
         _pump_until(app, lambda: not app._apply_busy)
-        assert app.apply_button.cget("text") == "Apply Next Now"
+        assert app.apply_button.cget("text") == "Save & Apply Now"
         assert "disabled" not in app.black_button.state()
     finally:
         gate.set()

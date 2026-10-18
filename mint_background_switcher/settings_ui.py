@@ -42,11 +42,23 @@ SETTINGS_WINDOW_MIN_HEIGHT = 680
 SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
+WORKING_DIRECTORY_STATUS_PATH_LIMIT = 64
 SUPPORTED_PICTURE_PATTERNS = " ".join(
     pattern
     for extension in SUPPORTED_EXTENSIONS
     for pattern in (f"*{extension}", f"*{extension.upper()}")
 )
+
+
+def _active_working_directory_status(path: str | Path) -> str:
+    """Describe the active folder without allowing a long path to resize Settings."""
+
+    display = str(path)
+    if len(display) > WORKING_DIRECTORY_STATUS_PATH_LIMIT:
+        left = (WORKING_DIRECTORY_STATUS_PATH_LIMIT - 3) // 2
+        right = WORKING_DIRECTORY_STATUS_PATH_LIMIT - left - 3
+        display = f"{display[:left]}...{display[-right:]}"
+    return f"Active: {display} - source images remain in their original folders."
 
 
 def _current_picture_path(path: str | Path) -> Path:
@@ -229,9 +241,7 @@ class SettingsApp(tk.Tk):
         self.collections_status_var = tk.StringVar(value="Choose a collection and download folder.")
         working_directory = configured_working_directory(self.config_data)
         self.working_directory_var = tk.StringVar(value=str(working_directory))
-        self.working_status_var = tk.StringVar(
-            value=f"Active: {working_directory} — source images remain in their original folders."
-        )
+        self.working_status_var = tk.StringVar(value=_active_working_directory_status(working_directory))
         self.monitor_folders_data: dict[str, list[str]] = {}
         self._update_busy = False
         self._update_worker: threading.Thread | None = None
@@ -283,6 +293,71 @@ class SettingsApp(tk.Tk):
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
 
+        self.profile_context_frame = ttk.LabelFrame(
+            root,
+            text="Profile and layout",
+            padding=(8, 6),
+        )
+        self.profile_context_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(self.profile_context_frame, text="Profile:").grid(row=0, column=0, sticky="w")
+        self.profile_combo = ttk.Combobox(
+            self.profile_context_frame,
+            textvariable=self.profile_var,
+            values=sorted(self.config_data.profiles),
+            state="readonly",
+            width=18,
+        )
+        self.profile_combo.grid(row=0, column=1, sticky="w", padx=(5, 8))
+        self.profile_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._load_profile(self.profile_var.get()),
+        )
+        self.profile_new_button = ttk.Button(
+            self.profile_context_frame,
+            text="New",
+            command=self._new_profile,
+        )
+        self.profile_new_button.grid(row=0, column=2, padx=2)
+        self.profile_rename_button = ttk.Button(
+            self.profile_context_frame,
+            text="Rename",
+            command=self._rename_profile,
+        )
+        self.profile_rename_button.grid(row=0, column=3, padx=2)
+        self.profile_delete_button = ttk.Button(
+            self.profile_context_frame,
+            text="Delete",
+            command=self._delete_profile,
+        )
+        self.profile_delete_button.grid(row=0, column=4, padx=2)
+        ttk.Label(self.profile_context_frame, text="Layout:").grid(
+            row=0,
+            column=6,
+            sticky="e",
+            padx=(12, 0),
+        )
+        self.mode_menu = ttk.OptionMenu(
+            self.profile_context_frame,
+            self.mode_var,
+            "shared",
+            "shared",
+            "same",
+            "montage",
+            "collage",
+            "postcard",
+            "polaroid",
+            "per-monitor",
+            "span",
+        )
+        self.mode_menu.grid(row=0, column=7, sticky="w", padx=5)
+        self.profile_save_button = ttk.Button(
+            self.profile_context_frame,
+            text="Save Profile",
+            command=self._save_current,
+        )
+        self.profile_save_button.grid(row=0, column=8, sticky="e", padx=(8, 0))
+        self.profile_context_frame.columnconfigure(5, weight=1)
+
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
         self.general_tab = ttk.Frame(self.notebook, padding=10)
@@ -306,56 +381,43 @@ class SettingsApp(tk.Tk):
         self.notebook.add(self.collections_tab, text="Collections")
         self.notebook.add(self.about_tab, text="About & Updates")
 
-        top = ttk.Frame(self.general_tab)
-        top.pack(fill=tk.X)
-        ttk.Label(top, text="Profile:").pack(side=tk.LEFT)
-        self.profile_combo = ttk.Combobox(top, textvariable=self.profile_var, values=sorted(self.config_data.profiles), state="readonly")
-        self.profile_combo.pack(side=tk.LEFT, padx=5)
-        self.profile_combo.bind("<<ComboboxSelected>>", lambda _e: self._load_profile(self.profile_var.get()))
-        self.profile_new_button = ttk.Button(top, text="New", command=self._new_profile)
-        self.profile_new_button.pack(side=tk.LEFT, padx=2)
-        self.profile_rename_button = ttk.Button(top, text="Rename", command=self._rename_profile)
-        self.profile_rename_button.pack(side=tk.LEFT, padx=2)
-        self.profile_delete_button = ttk.Button(top, text="Delete", command=self._delete_profile)
-        self.profile_delete_button.pack(side=tk.LEFT, padx=2)
-        self.profile_save_button = ttk.Button(top, text="Save", command=self._save_current)
-        self.profile_save_button.pack(side=tk.RIGHT, padx=2)
-
         form = ttk.LabelFrame(self.general_tab, text="Settings applying to all modes", padding=10)
         form.pack(fill=tk.X, pady=8)
         ttk.Label(form, text="Interval minutes:").grid(row=0, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.interval_var, width=10).grid(row=0, column=1, sticky="w", padx=5)
-        ttk.Label(form, text="Mode:").grid(row=0, column=2, sticky="w", padx=(20, 0))
-        self.mode_menu = ttk.OptionMenu(
-            form,
-            self.mode_var,
-            "shared",
-            "shared",
-            "same",
-            "montage",
-            "collage",
-            "postcard",
-            "polaroid",
-            "per-monitor",
-            "span",
+        ttk.Checkbutton(form, text="Scan folders recursively", variable=self.recursive_var).grid(
+            row=0,
+            column=2,
+            columnspan=2,
+            sticky="w",
+            padx=(20, 0),
         )
-        self.mode_menu.grid(row=0, column=3, sticky="w", padx=5)
-        ttk.Checkbutton(form, text="Scan folders recursively", variable=self.recursive_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
-        ttk.Label(form, text="Black screen hotkey:").grid(row=1, column=2, sticky="w", padx=(20, 0))
-        ttk.Entry(form, textvariable=self.hotkey_var, width=22).grid(row=1, column=3, sticky="w", padx=5)
-        ttk.Label(form, text="Desktop:").grid(row=2, column=0, sticky="w")
-        ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(row=2, column=1, sticky="w", padx=5)
-        ttk.Label(form, text="Effect:").grid(row=2, column=2, sticky="w", padx=(20, 0))
+        ttk.Label(form, text="Black screen hotkey:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(form, textvariable=self.hotkey_var, width=22).grid(
+            row=1,
+            column=1,
+            sticky="w",
+            padx=5,
+            pady=5,
+        )
+        ttk.Label(form, text="Desktop:").grid(row=1, column=2, sticky="w", padx=(20, 0))
+        ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(
+            row=1,
+            column=3,
+            sticky="w",
+            padx=5,
+        )
+        ttk.Label(form, text="Effect:").grid(row=2, column=0, sticky="w")
         self.effect_menu = ttk.OptionMenu(form, self.effect_var, EFFECT_CHOICES[0], *EFFECT_CHOICES)
-        self.effect_menu.grid(row=2, column=3, sticky="w", padx=5)
-        ttk.Label(form, text="Letterbox bars:").grid(row=3, column=0, sticky="w", pady=(5, 0))
+        self.effect_menu.grid(row=2, column=1, sticky="w", padx=5)
+        ttk.Label(form, text="Letterbox bars:").grid(row=2, column=2, sticky="w", padx=(20, 0))
         self.bar_color_menu = ttk.OptionMenu(
             form,
             self.bar_color_var,
             BAR_COLOR_CHOICES[0],
             *BAR_COLOR_CHOICES,
         )
-        self.bar_color_menu.grid(row=3, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.bar_color_menu.grid(row=2, column=3, sticky="w", padx=5)
         self.bar_color_help = ttk.Label(
             form,
             text="Blurred fills the bars with a scaled, softened copy while keeping the whole picture visible.",
@@ -363,6 +425,7 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
         )
         self.bar_color_help.grid(row=3, column=2, columnspan=2, sticky="w", padx=(20, 0), pady=(5, 0))
+        form.columnconfigure(3, weight=1)
 
         shared_frame = ttk.LabelFrame(self.general_tab, text="Shared picture sources", padding=8)
         shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)
@@ -410,7 +473,14 @@ class SettingsApp(tk.Tk):
         self.working_cancel_button = ttk.Button(working, text="Cancel Move", command=self._cancel_working_migration)
         self.working_cancel_button.grid(row=0, column=5, padx=(2, 0))
         self.working_cancel_button.state(["disabled"])
-        ttk.Label(working, textvariable=self.working_status_var, anchor="w").grid(
+        self.working_status_label = ttk.Label(
+            working,
+            textvariable=self.working_status_var,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=760,
+        )
+        self.working_status_label.grid(
             row=1,
             column=0,
             columnspan=6,
@@ -705,7 +775,7 @@ class SettingsApp(tk.Tk):
 
         bottom = ttk.Frame(root)
         bottom.pack(fill=tk.X)
-        self.apply_button = ttk.Button(bottom, text="Apply Next Now", command=self._apply_next)
+        self.apply_button = ttk.Button(bottom, text="Save & Apply Now", command=self._apply_next)
         self.apply_button.pack(side=tk.LEFT, padx=3)
         self.black_button = ttk.Button(bottom, text="Black Screen", command=self._black_screen)
         self.black_button.pack(side=tk.LEFT, padx=3)
@@ -1100,7 +1170,7 @@ class SettingsApp(tk.Tk):
             return
         messagebox.showinfo(
             "Picture added",
-            f"Added to the shared source list:\n{picture}\n\nChoose Save to keep this profile change.",
+            f"Added to the shared source list:\n{picture}\n\nChoose Save Profile to keep this profile change.",
             parent=self,
         )
 
@@ -1273,7 +1343,7 @@ class SettingsApp(tk.Tk):
     def _refresh_worker_controls(self) -> None:
         busy = self._any_worker_busy()
         self.close_button.state(["disabled"] if busy else ["!disabled"])
-        self.apply_button.configure(text="Applying..." if self._apply_busy else "Apply Next Now")
+        self.apply_button.configure(text="Applying..." if self._apply_busy else "Save & Apply Now")
         self.apply_button.state(["disabled"] if busy else ["!disabled"])
         for button in (
             self.profile_new_button,
@@ -1350,9 +1420,7 @@ class SettingsApp(tk.Tk):
         candidate = Path(selected).expanduser().absolute()
         if candidate.resolve(strict=False) == current.resolve(strict=False):
             self.working_directory_var.set(str(current))
-            self.working_status_var.set(
-                f"Active: {current} — source images remain in their original folders."
-            )
+            self.working_status_var.set(_active_working_directory_status(current))
             return
         create_candidate = not candidate.exists()
         if create_candidate and not candidate.parent.is_dir():
@@ -1446,9 +1514,7 @@ class SettingsApp(tk.Tk):
                     else:
                         self.config_data = load_config()
                         self.working_directory_var.set(str(result.destination))
-                        self.working_status_var.set(
-                            f"Active: {result.destination} — source images remain in their original folders."
-                        )
+                        self.working_status_var.set(_active_working_directory_status(result.destination))
                         messagebox.showinfo(
                             "Working folder changed",
                             (
@@ -1598,7 +1664,7 @@ class SettingsApp(tk.Tk):
         if not images:
             messagebox.showinfo(
                 "No current pictures",
-                "No source pictures are recorded for the current wallpaper. Choose Apply Next Now first.",
+                "No source pictures are recorded for the current wallpaper. Choose Save & Apply Now first.",
                 parent=self,
             )
             return
