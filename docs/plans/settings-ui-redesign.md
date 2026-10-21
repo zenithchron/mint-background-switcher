@@ -26,7 +26,7 @@
 
 **Objective:** Keep profile/layout context and saving available on every page without changing persistence or wallpaper behavior.
 
-**Status:** Implemented for `0.2.3`. The 70-test Settings suite and 469-test full suite pass under Xvfb, and a 1024×768 smoke checks all 11 pages with the persistent context strip and complete footer mapped inside the window. Increment 2 is next.
+**Status:** Implemented for `0.2.3`. The 70-test Settings suite and 469-test full suite pass under Xvfb, and a 1024×768 smoke checks all 11 pages with the persistent context strip and complete footer mapped inside the window. Increment 2 followed in `0.2.4`.
 
 **Files:**
 - Modify: `mint_background_switcher/settings_ui.py`
@@ -46,9 +46,11 @@
 5. Run focused non-display tests, the Settings Xvfb suite, and a 1024×768 screenshot/geometry smoke.
 6. Run the complete suite and package/version checks, independently review the diff, then commit, push, and verify the remote commit/tag.
 
-## Increment 2: Unified Layout workspace
+## Increment 2: Unified Layout workspace — complete in `0.2.4`
 
 **Objective:** Replace eight peer mode tabs with one Layout page whose selected controls and pending mode are always synchronized.
+
+**Status:** Implemented for `0.2.4`. The 71-test Settings suite and 470-test full suite pass under Xvfb. A forced 944×668 client smoke covers all eight layout selections, descriptions, contextual Postcard, Polaroid, and per-monitor controls, profile-driven synchronization, complete footer visibility, and non-mutating navigation across the four Settings pages. Increment 3 is next.
 
 **Files:**
 - Modify: `mint_background_switcher/settings_ui.py`

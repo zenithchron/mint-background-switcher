@@ -43,6 +43,26 @@ SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 WORKING_DIRECTORY_STATUS_PATH_LIMIT = 64
+LAYOUT_CHOICES = (
+    "shared",
+    "same",
+    "montage",
+    "collage",
+    "postcard",
+    "polaroid",
+    "per-monitor",
+    "span",
+)
+LAYOUT_DESCRIPTIONS = {
+    "shared": "Show a different image from the shared picture sources on each screen.",
+    "same": "Show the same image from the shared picture sources on every screen.",
+    "montage": "Arrange four images from the shared picture sources in a grid on each screen.",
+    "collage": "Arrange five images from the shared picture sources in an asymmetric collage on each screen.",
+    "postcard": "Randomly place bare photos from the shared picture sources without frames or pins.",
+    "polaroid": "Randomly place overlapping Polaroid-style prints from the shared picture sources.",
+    "per-monitor": "Choose separate picture folders for individual screens.",
+    "span": "Span one image from the shared picture sources across the complete virtual desktop.",
+}
 SUPPORTED_PICTURE_PATTERNS = " ".join(
     pattern
     for extension in SUPPORTED_EXTENSIONS
@@ -262,6 +282,7 @@ class SettingsApp(tk.Tk):
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
+        self.mode_var.trace_add("write", self._refresh_layout_workspace)
         self.postcard_span_var.trace_add("write", self._refresh_postcard_count_label)
         self.polaroid_span_var.trace_add("write", self._refresh_polaroid_count_label)
         self.protocol("WM_DELETE_WINDOW", self._request_close)
@@ -339,15 +360,9 @@ class SettingsApp(tk.Tk):
         self.mode_menu = ttk.OptionMenu(
             self.profile_context_frame,
             self.mode_var,
-            "shared",
-            "shared",
-            "same",
-            "montage",
-            "collage",
-            "postcard",
-            "polaroid",
-            "per-monitor",
-            "span",
+            LAYOUT_CHOICES[0],
+            *LAYOUT_CHOICES,
+            command=lambda selected: self._select_layout(str(selected)),
         )
         self.mode_menu.grid(row=0, column=7, sticky="w", padx=5)
         self.profile_save_button = ttk.Button(
@@ -361,23 +376,11 @@ class SettingsApp(tk.Tk):
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
         self.general_tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.general_tab, text="General")
-        self.mode_tabs: dict[str, ttk.Frame] = {}
-        for mode, title in (
-            ("shared", "Shared"),
-            ("same", "Same"),
-            ("montage", "Montage"),
-            ("collage", "Collage"),
-            ("postcard", "Postcard"),
-            ("polaroid", "Polaroid"),
-            ("per-monitor", "Per-monitor"),
-            ("span", "Span"),
-        ):
-            tab = ttk.Frame(self.notebook, padding=12)
-            self.mode_tabs[mode] = tab
-            self.notebook.add(tab, text=title)
-        self.about_tab = ttk.Frame(self.notebook, padding=12)
+        self.layout_tab = ttk.Frame(self.notebook, padding=12)
         self.collections_tab = ttk.Frame(self.notebook, padding=12)
+        self.about_tab = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(self.general_tab, text="General")
+        self.notebook.add(self.layout_tab, text="Layout")
         self.notebook.add(self.collections_tab, text="Collections")
         self.notebook.add(self.about_tab, text="About & Updates")
 
@@ -489,23 +492,39 @@ class SettingsApp(tk.Tk):
         )
         working.columnconfigure(1, weight=1)
 
-        mode_descriptions = {
-            "shared": "Shows a different image from the General shared picture sources on each screen.",
-            "same": "Shows the same image from the General shared picture sources on every screen.",
-            "montage": "Arranges four images from the General shared picture sources in a grid on each screen.",
-            "collage": "Arranges five images from the General shared picture sources in an asymmetric collage.",
-            "postcard": "Randomly places bare photos from the General shared picture sources without frames or pins.",
-            "span": "Spans one image from the General shared picture sources across the virtual desktop.",
+        self.layout_description_var = tk.StringVar(value=LAYOUT_DESCRIPTIONS[LAYOUT_CHOICES[0]])
+        ttk.Label(
+            self.layout_tab,
+            text="Choose a layout above. This page always shows the options for the pending layout.",
+            justify=tk.LEFT,
+            wraplength=820,
+        ).pack(anchor="w")
+        self.layout_description_label = ttk.Label(
+            self.layout_tab,
+            textvariable=self.layout_description_var,
+            justify=tk.LEFT,
+            wraplength=820,
+        )
+        self.layout_description_label.pack(anchor="w", pady=(6, 10))
+        self.layout_options_container = ttk.Frame(self.layout_tab)
+        self.layout_options_container.pack(fill=tk.BOTH, expand=True)
+        self.layout_panels: dict[str, ttk.Frame] = {
+            mode: ttk.Frame(self.layout_options_container) for mode in LAYOUT_CHOICES
         }
-        for mode, description in mode_descriptions.items():
-            ttk.Label(self.mode_tabs[mode], text=description, justify=tk.LEFT, wraplength=760).pack(anchor="w")
+        for mode in LAYOUT_CHOICES:
+            if mode not in {"postcard", "polaroid", "per-monitor"}:
+                ttk.Label(
+                    self.layout_panels[mode],
+                    text="This layout has no additional layout-specific options.",
+                    justify=tk.LEFT,
+                ).pack(anchor="w")
 
         photo_scale_style = ttk.Style(self)
         photo_scale_style.configure("ScatteredPhoto.Horizontal.TScale", sliderlength=36)
 
-        postcard_tab = self.mode_tabs["postcard"]
-        self.postcard_options = ttk.LabelFrame(postcard_tab, text="Postcard options", padding=10)
-        self.postcard_options.pack(fill=tk.X, pady=(12, 0))
+        postcard_panel = self.layout_panels["postcard"]
+        self.postcard_options = ttk.LabelFrame(postcard_panel, text="Postcard options", padding=10)
+        self.postcard_options.pack(fill=tk.X)
         postcard_layout_options = ttk.Frame(self.postcard_options)
         postcard_layout_options.pack(fill=tk.X)
         self.postcard_count_label = ttk.Label(postcard_layout_options, text="Postcard photos per screen:")
@@ -561,17 +580,8 @@ class SettingsApp(tk.Tk):
         )
         self.postcard_background_help.pack(anchor="w", pady=(6, 0))
 
-        polaroid_tab = self.mode_tabs["polaroid"]
-        ttk.Label(
-            polaroid_tab,
-            text=(
-                "Places randomly positioned Polaroid-style prints from the General shared "
-                "picture sources. Prints may overlap."
-            ),
-            justify=tk.LEFT,
-            wraplength=760,
-        ).pack(anchor="w", pady=(0, 12))
-        self.polaroid_options = ttk.LabelFrame(polaroid_tab, text="Polaroid options", padding=10)
+        polaroid_panel = self.layout_panels["polaroid"]
+        self.polaroid_options = ttk.LabelFrame(polaroid_panel, text="Polaroid options", padding=10)
         self.polaroid_options.pack(fill=tk.X)
         polaroid_layout_options = ttk.Frame(self.polaroid_options)
         polaroid_layout_options.pack(fill=tk.X)
@@ -611,7 +621,7 @@ class SettingsApp(tk.Tk):
         )
         self.polaroid_tilt_checkbutton.pack(anchor="w", pady=(8, 0))
 
-        monitor_frame = ttk.LabelFrame(self.mode_tabs["per-monitor"], text="Per-monitor folders", padding=8)
+        monitor_frame = ttk.LabelFrame(self.layout_panels["per-monitor"], text="Per-monitor folders", padding=8)
         monitor_frame.pack(fill=tk.BOTH, expand=True)
         monitors = self.detected_monitors
         self.monitor_names = [m.name for m in monitors]
@@ -638,6 +648,7 @@ class SettingsApp(tk.Tk):
         ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(6, 0))
         self.monitor_text = tk.Text(monitor_frame, height=6, width=48)
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
+        self._refresh_layout_workspace()
 
         ttk.Label(
             self.collections_tab,
@@ -798,6 +809,29 @@ class SettingsApp(tk.Tk):
         ttk.Label(bottom, text=f"Version {__version__}").pack(side=tk.RIGHT, padx=(3, 10))
         self._refresh_rollback_button()
         self._refresh_update_status()
+
+    def _select_layout(self, layout: str) -> None:
+        """Show the workspace for a user-selected pending layout without saving it."""
+
+        if layout not in self.layout_panels:
+            return
+        if self.mode_var.get() != layout:
+            self.mode_var.set(layout)
+        else:
+            self._refresh_layout_workspace()
+        self.notebook.select(self.layout_tab)
+
+    def _refresh_layout_workspace(self, *_args: object) -> None:
+        """Keep the unified Layout page synchronized with the pending layout value."""
+
+        layout = self.mode_var.get()
+        if layout not in self.layout_panels:
+            layout = LAYOUT_CHOICES[0]
+            self.mode_var.set(layout)
+        self.layout_description_var.set(LAYOUT_DESCRIPTIONS[layout])
+        for panel in self.layout_panels.values():
+            panel.pack_forget()
+        self.layout_panels[layout].pack(fill=tk.BOTH, expand=True)
 
     def _load_profile(self, name: str) -> None:
         profile = self.config_data.get_profile(name)

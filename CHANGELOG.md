@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.4] - 2026-10-21
+
+### Added
+
+- One unified **Layout** workspace, inspired by John’s Background Switcher’s single picture-mode workflow, with a plain-language description and only the contextual controls for the pending layout.
+- Xvfb-backed 1024×768 coverage for all eight layout selections, profile-driven synchronization, contextual Postcard, Polaroid, and per-monitor controls, and non-mutating page navigation.
+
+### Changed
+
+- Replaced the eight peer layout tabs with one **Layout** page; choosing a layout from the persistent strip opens the synchronized workspace without saving or applying pending edits.
+- Bumped the package version to `0.2.4`.
+
 ## [0.2.3] - 2026-10-18
 
 ### Added

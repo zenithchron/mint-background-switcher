@@ -187,21 +187,49 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
 
         menu = app.nametowidget(app.mode_menu["menu"])
         layout_values = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
-        assert layout_values == [
-            "shared",
-            "same",
-            "montage",
-            "collage",
-            "postcard",
-            "polaroid",
-            "per-monitor",
-            "span",
-        ]
-        menu.invoke(layout_values.index("span"))
-        assert app.mode_var.get() == "span"
+        assert layout_values == list(settings_ui.LAYOUT_CHOICES)
+        for layout in settings_ui.LAYOUT_CHOICES:
+            menu.invoke(layout_values.index(layout))
+            app.update_idletasks()
+            app.update()
+            assert app.mode_var.get() == layout
+            assert app.notebook.select() == str(app.layout_tab)
+            assert app.layout_description_var.get() == settings_ui.LAYOUT_DESCRIPTIONS[layout]
+            assert [
+                name for name, panel in app.layout_panels.items() if panel.winfo_ismapped()
+            ] == [layout]
+            layout_controls = [app.layout_description_label, app.layout_panels[layout]]
+            if layout == "postcard":
+                layout_controls.extend(
+                    (
+                        app.postcard_count_spinbox,
+                        app.postcard_size_scale,
+                        app.postcard_span_checkbutton,
+                        app.postcard_tilt_checkbutton,
+                        app.postcard_background_menu,
+                    )
+                )
+            elif layout == "polaroid":
+                layout_controls.extend(
+                    (
+                        app.polaroid_count_spinbox,
+                        app.polaroid_size_scale,
+                        app.polaroid_span_checkbutton,
+                        app.polaroid_tilt_checkbutton,
+                    )
+                )
+            elif layout == "per-monitor":
+                layout_controls.append(app.monitor_text)
+            for control in layout_controls:
+                assert_visible_inside_window(control)
 
         pages = app.notebook.tabs()
-        assert len(pages) == 11
+        assert [app.notebook.tab(page, "text") for page in pages] == [
+            "General",
+            "Layout",
+            "Collections",
+            "About & Updates",
+        ]
         for page in pages:
             app.notebook.select(page)
             app.update_idletasks()
@@ -210,6 +238,44 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             assert_visible_inside_window(app.profile_context_frame)
             for control in (*context_controls, *footer_controls):
                 assert_visible_inside_window(control)
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_layout_workspace_tracks_profile_loading_and_pending_layout_changes(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.config_data.profiles["Prints"] = settings_ui.Profile(
+            name="Prints",
+            mode="polaroid",
+            polaroid_count=9,
+            polaroid_span=True,
+        )
+        app.profile_var.set("Prints")
+        app.notebook.select(app.layout_tab)
+        app._load_profile("Prints")
+        app.update_idletasks()
+        app.update()
+
+        assert app.mode_var.get() == "polaroid"
+        assert app.layout_description_var.get() == settings_ui.LAYOUT_DESCRIPTIONS["polaroid"]
+        assert app.layout_panels["polaroid"].winfo_ismapped()
+        assert app.polaroid_options.winfo_ismapped()
+        assert app.polaroid_count_var.get() == 9
+        assert app.polaroid_span_var.get() is True
+
+        app.mode_var.set("postcard")
+        app.update_idletasks()
+        app.update()
+        assert app.layout_description_var.get() == settings_ui.LAYOUT_DESCRIPTIONS["postcard"]
+        assert [
+            name for name, panel in app.layout_panels.items() if panel.winfo_ismapped()
+        ] == ["postcard"]
+        assert app.notebook.select() == str(app.layout_tab)
     finally:
         app.destroy()
 
@@ -1419,8 +1485,10 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         assert "postcard" in labels
         assert app.mode_menu.winfo_ismapped()
         assert app.mode_menu.winfo_width() > 1
-        app.notebook.select(app.mode_tabs["postcard"])
+        menu.invoke(labels.index("postcard"))
         app.update_idletasks()
+        assert app.notebook.select() == str(app.layout_tab)
+        assert app.layout_panels["postcard"].winfo_ismapped()
         assert app.postcard_options.winfo_ismapped()
         assert int(float(app.postcard_count_spinbox.cget("to"))) == 100
         assert app.postcard_count_label.cget("text") == "Postcard photos per screen:"
@@ -1468,8 +1536,12 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         scale_style = app.postcard_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
         app.notebook.select(app.general_tab)
-        menu.invoke(labels.index("postcard"))
+        app.update_idletasks()
         assert app.mode_var.get() == "postcard"
+        assert not app.postcard_options.winfo_ismapped()
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        assert app.postcard_options.winfo_ismapped()
         app.postcard_count_var.set(7)
         app.postcard_size_var.set(0.8)
         app.postcard_span_var.set(True)
@@ -1545,29 +1617,21 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
 
         assert "polaroid" in labels
         tab_labels = [app.notebook.tab(tab_id, "text") for tab_id in app.notebook.tabs()]
-        assert tab_labels == [
-            "General",
-            "Shared",
-            "Same",
-            "Montage",
-            "Collage",
-            "Postcard",
-            "Polaroid",
-            "Per-monitor",
-            "Span",
-            "Collections",
-            "About & Updates",
-        ]
+        assert tab_labels == ["General", "Layout", "Collections", "About & Updates"]
         assert str(app.shared_text).startswith(str(app.general_tab))
-        assert str(app.monitor_text).startswith(str(app.mode_tabs["per-monitor"]))
+        assert str(app.monitor_text).startswith(str(app.layout_panels["per-monitor"]))
         assert str(app.update_button).startswith(str(app.about_tab))
         assert app.mode_menu.winfo_ismapped()
         assert app.mode_menu.winfo_width() > 1
         assert app.title() == f"{settings_ui.APP_NAME} Settings — {settings_ui.__version__}"
         assert app.mode_var.get() == "shared"
         assert not app.polaroid_options.winfo_ismapped()
-        app.notebook.select(app.mode_tabs["polaroid"])
+        menu.invoke(labels.index("polaroid"))
         app.update_idletasks()
+        assert app.notebook.select() == str(app.layout_tab)
+        assert app.mode_var.get() == "polaroid"
+        assert app.layout_description_var.get() == settings_ui.LAYOUT_DESCRIPTIONS["polaroid"]
+        assert app.layout_panels["polaroid"].winfo_ismapped()
         assert app.polaroid_options.winfo_ismapped()
         assert int(float(app.polaroid_count_spinbox.cget("to"))) == 100
         assert app.polaroid_count_label.cget("text") == "Polaroid photos per screen:"
@@ -1585,13 +1649,11 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         )
         scale_style = app.polaroid_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
-        assert app.mode_var.get() == "shared"
         app.notebook.select(app.general_tab)
-        menu.invoke(labels.index("polaroid"))
         app.update_idletasks()
         assert app.mode_var.get() == "polaroid"
         assert not app.polaroid_options.winfo_ismapped()
-        app.notebook.select(app.mode_tabs["polaroid"])
+        app.notebook.select(app.layout_tab)
         app.update_idletasks()
         assert app.polaroid_options.winfo_ismapped()
         app.polaroid_count_var.set(7)

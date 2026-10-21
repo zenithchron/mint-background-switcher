@@ -16,14 +16,14 @@ This roadmap turns the John’s Background Switcher 6.1 parity audit into an imp
 
 ### 1. Settings UI redesign — active
 
-Before `0.2.3`, the Settings window exposed most features through navigation that reflected implementation history rather than user tasks: Profile context and Save were limited to General, while the selected layout was separate from the layout tab being viewed. Increment 1 makes Profile, Layout, and Save persistent; the layout-selector/page mismatch remains for Increment 2.
+Before `0.2.3`, the Settings window exposed most features through navigation that reflected implementation history rather than user tasks: Profile context and Save were limited to General, while the selected layout was separate from the layout tab being viewed. Increment 1 made Profile, Layout, and Save persistent; Increment 2 replaced the eight peer layout tabs with one synchronized Layout workspace.
 
-**Status:** Increment 1 is complete in `0.2.3`; Increment 2 remains planned.
+**Status:** Increments 1 and 2 are complete in `0.2.3` and `0.2.4`; Increment 3 is next.
 
 Implement the redesign in small, testable increments:
 
 1. **Persistent editing context and clearer actions — complete in `0.2.3`** — Profile, profile management, Layout, and Save Profile now remain above the page tabs; Apply Next Now is now Save & Apply Now. Existing behavior and all 11 pages are preserved.
-2. **Unified Layout workspace** — replace the eight peer layout tabs with one Layout page. Selecting a layout must show its description and relevant Postcard, Polaroid, or per-monitor controls without allowing the visible layout and pending selection to disagree.
+2. **Unified Layout workspace — complete in `0.2.4`** — the eight peer layout tabs are now one Layout page. Selecting a layout opens its plain-language description and the relevant Postcard, Polaroid, or per-monitor controls, so the visible workspace and pending selection cannot disagree.
 3. **Task-based navigation** — reorganize profile settings into Sources, Layout & Appearance, and Rotation & Shortcuts; separate application-wide Collections, Storage, and Updates & About.
 4. **Structured source management** — replace editable path syntax with rows showing source type, location, scope, and availability, plus explicit Add, Remove, and Reveal actions.
 5. **Safe edit lifecycle** — add a dirty indicator, Revert, and save/discard/cancel protection when switching profiles or closing. Make emergency Black Screen independent of unrelated pending edits.
