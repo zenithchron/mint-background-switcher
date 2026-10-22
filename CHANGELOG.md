@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Storage page working-files row: shortened the row label to "Working directory:" and narrowed the path entry so the whole row fits the minimum 944×668 Settings window under wider font metrics.
 - Profile and layout strip: narrowed the profile entry, renamed Rename to Edit, and tightened padding so the strip fits the minimum window width under the clam theme as well.
+- Footer action row: shortened "Save Current Wallpaper..." to "Save Wallpaper..." and "View Current Pictures..." to "View Pictures..." so the full row, including the version label, fits the minimum window width under the clam theme.
 
 ## [0.2.4] - 2026-10-21
 

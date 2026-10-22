@@ -933,11 +933,11 @@ class SettingsApp(tk.Tk):
         self.apply_button.pack(side=tk.LEFT, padx=1)
         self.black_button = ttk.Button(bottom, text="Black Screen", command=self._black_screen)
         self.black_button.pack(side=tk.LEFT, padx=1)
-        self.export_button = ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper)
+        self.export_button = ttk.Button(bottom, text="Save Wallpaper...", command=self._export_current_wallpaper)
         self.export_button.pack(side=tk.LEFT, padx=1)
         self.current_pictures_button = ttk.Button(
             bottom,
-            text="View Current Pictures...",
+            text="View Pictures...",
             command=self._view_current_pictures,
         )
         self.current_pictures_button.pack(side=tk.LEFT, padx=1)
@@ -950,7 +950,7 @@ class SettingsApp(tk.Tk):
         )
         self.about_button.pack(side=tk.RIGHT, padx=1)
         self.footer_version_label = ttk.Label(bottom, text=f"v{__version__}")
-        self.footer_version_label.pack(side=tk.RIGHT, padx=(2, 6))
+        self.footer_version_label.pack(side=tk.RIGHT, padx=(2, 4))
         self._refresh_rollback_button()
         self._refresh_update_status()
 
