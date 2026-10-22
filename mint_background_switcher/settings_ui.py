@@ -321,7 +321,7 @@ class SettingsApp(tk.Tk):
         self.profile_context_frame = ttk.LabelFrame(
             root,
             text="Profile and layout",
-            padding=(8, 6),
+            padding=(6, 6),
         )
         self.profile_context_frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(self.profile_context_frame, text="Profile:").grid(row=0, column=0, sticky="w")
@@ -330,7 +330,7 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_var,
             values=sorted(self.config_data.profiles),
             state="readonly",
-            width=18,
+            width=15,
         )
         self.profile_combo.grid(row=0, column=1, sticky="w", padx=(5, 8))
         self.profile_combo.bind(
@@ -345,7 +345,7 @@ class SettingsApp(tk.Tk):
         self.profile_new_button.grid(row=0, column=2, padx=2)
         self.profile_rename_button = ttk.Button(
             self.profile_context_frame,
-            text="Rename",
+            text="Edit",
             command=self._rename_profile,
         )
         self.profile_rename_button.grid(row=0, column=3, padx=2)
@@ -359,7 +359,7 @@ class SettingsApp(tk.Tk):
             row=0,
             column=6,
             sticky="e",
-            padx=(12, 0),
+            padx=(8, 0),
         )
         self.mode_menu = ttk.OptionMenu(
             self.profile_context_frame,
