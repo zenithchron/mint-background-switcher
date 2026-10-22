@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.5] - 2026-10-22
+
+### Added
+
+- Task-based Settings navigation inspired by John’s Background Switcher’s simplified workflow: profile **Sources**, **Layout & Appearance**, and **Rotation & Shortcuts**, followed by application-wide **Public Collections**, **Storage**, and **Updates & About**.
+- Explicit profile/application scope labels, selected-profile collection targeting with profile switching locked during active operations, and keyboard traversal across the six pages.
+- A forced 944×668 Xvfb check for page order, keyboard navigation, scope labels, moved-control presence, all eight layouts, built-in theme geometry, and complete context/footer visibility.
+
+### Changed
+
+- Moved existing controls into their task pages without changing profile persistence, rendering, collection, storage, update, or apply behavior.
+- Bumped the package version to `0.2.5`.
+
 ## [0.2.4] - 2026-10-21
 
 ### Added

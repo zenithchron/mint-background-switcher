@@ -232,6 +232,8 @@ class SettingsApp(tk.Tk):
         self.title(f"{APP_NAME} Settings — {__version__}")
         self.config_data: Config = load_config()
         self.profile_var = tk.StringVar(value=self.config_data.active_profile)
+        self.profile_scope_var = tk.StringVar()
+        self.collections_profile_scope_var = tk.StringVar()
         self.interval_var = tk.StringVar()
         self.mode_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar()
@@ -282,9 +284,11 @@ class SettingsApp(tk.Tk):
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
+        self.profile_var.trace_add("write", self._refresh_profile_scope_labels)
         self.mode_var.trace_add("write", self._refresh_layout_workspace)
         self.postcard_span_var.trace_add("write", self._refresh_postcard_count_label)
         self.polaroid_span_var.trace_add("write", self._refresh_polaroid_count_label)
+        self._refresh_profile_scope_labels()
         self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._load_profile(self.profile_var.get())
         self._set_initial_window_geometry()
@@ -375,62 +379,45 @@ class SettingsApp(tk.Tk):
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        self.general_tab = ttk.Frame(self.notebook, padding=10)
+        self.sources_tab = ttk.Frame(self.notebook, padding=10)
         self.layout_tab = ttk.Frame(self.notebook, padding=12)
+        self.rotation_tab = ttk.Frame(self.notebook, padding=12)
         self.collections_tab = ttk.Frame(self.notebook, padding=12)
+        self.storage_tab = ttk.Frame(self.notebook, padding=12)
         self.about_tab = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(self.general_tab, text="General")
-        self.notebook.add(self.layout_tab, text="Layout")
-        self.notebook.add(self.collections_tab, text="Collections")
-        self.notebook.add(self.about_tab, text="About & Updates")
+        # Retain the old attribute for third-party automation while the visible page is task-named.
+        self.general_tab = self.sources_tab
+        self.notebook.add(self.sources_tab, text="Sources", underline=0)
+        self.notebook.add(self.layout_tab, text="Layout & Appearance", underline=0)
+        self.notebook.add(self.rotation_tab, text="Rotation & Shortcuts", underline=0)
+        self.notebook.add(self.collections_tab, text="Public Collections", underline=0)
+        self.notebook.add(self.storage_tab, text="Storage", underline=1)
+        self.notebook.add(self.about_tab, text="Updates & About", underline=0)
+        self.notebook.enable_traversal()
 
-        form = ttk.LabelFrame(self.general_tab, text="Settings applying to all modes", padding=10)
-        form.pack(fill=tk.X, pady=8)
-        ttk.Label(form, text="Interval minutes:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(form, textvariable=self.interval_var, width=10).grid(row=0, column=1, sticky="w", padx=5)
-        ttk.Checkbutton(form, text="Scan folders recursively", variable=self.recursive_var).grid(
-            row=0,
-            column=2,
-            columnspan=2,
-            sticky="w",
-            padx=(20, 0),
+        self.sources_scope_label = ttk.Label(
+            self.sources_tab,
+            textvariable=self.profile_scope_var,
+            style="Heading.TLabel",
         )
-        ttk.Label(form, text="Black screen hotkey:").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(form, textvariable=self.hotkey_var, width=22).grid(
-            row=1,
-            column=1,
-            sticky="w",
-            padx=5,
-            pady=5,
-        )
-        ttk.Label(form, text="Desktop:").grid(row=1, column=2, sticky="w", padx=(20, 0))
-        ttk.OptionMenu(form, self.desktop_var, "auto", "auto", "cinnamon", "gnome", "mate", "xfce").grid(
-            row=1,
-            column=3,
-            sticky="w",
-            padx=5,
-        )
-        ttk.Label(form, text="Effect:").grid(row=2, column=0, sticky="w")
-        self.effect_menu = ttk.OptionMenu(form, self.effect_var, EFFECT_CHOICES[0], *EFFECT_CHOICES)
-        self.effect_menu.grid(row=2, column=1, sticky="w", padx=5)
-        ttk.Label(form, text="Letterbox bars:").grid(row=2, column=2, sticky="w", padx=(20, 0))
-        self.bar_color_menu = ttk.OptionMenu(
-            form,
-            self.bar_color_var,
-            BAR_COLOR_CHOICES[0],
-            *BAR_COLOR_CHOICES,
-        )
-        self.bar_color_menu.grid(row=2, column=3, sticky="w", padx=5)
-        self.bar_color_help = ttk.Label(
-            form,
-            text="Blurred fills the bars with a scaled, softened copy while keeping the whole picture visible.",
-            wraplength=360,
+        self.sources_scope_label.pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            self.sources_tab,
+            text="Choose local folders and pictures for this profile. Source files remain read-only.",
             justify=tk.LEFT,
-        )
-        self.bar_color_help.grid(row=3, column=2, columnspan=2, sticky="w", padx=(20, 0), pady=(5, 0))
-        form.columnconfigure(3, weight=1)
+            wraplength=840,
+        ).pack(anchor="w", pady=(0, 8))
 
-        shared_frame = ttk.LabelFrame(self.general_tab, text="Shared picture sources", padding=8)
+        source_options = ttk.LabelFrame(self.sources_tab, text="Folder scanning", padding=(8, 5))
+        source_options.pack(fill=tk.X, pady=(0, 4))
+        self.recursive_checkbutton = ttk.Checkbutton(
+            source_options,
+            text="Scan folders recursively",
+            variable=self.recursive_var,
+        )
+        self.recursive_checkbutton.pack(anchor="w")
+
+        shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
         shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)
         ttk.Label(
             shared_frame,
@@ -462,35 +449,38 @@ class SettingsApp(tk.Tk):
         )
         self.shared_browse_drives_button.pack(side=tk.LEFT)
 
-        working = ttk.LabelFrame(self.general_tab, text="Working files", padding=(8, 5))
-        working.pack(fill=tk.X, pady=(0, 4))
-        ttk.Label(working, text="Generated wallpapers and library index:").grid(row=0, column=0, sticky="w")
-        self.working_directory_entry = ttk.Entry(working, textvariable=self.working_directory_var, width=19)
-        self.working_directory_entry.grid(row=0, column=1, sticky="ew", padx=6)
-        self.working_browse_button = ttk.Button(working, text="Browse...", command=self._browse_working_directory)
-        self.working_browse_button.grid(row=0, column=2, padx=2)
-        self.working_create_button = ttk.Button(working, text="Create Folder...", command=self._create_working_directory)
-        self.working_create_button.grid(row=0, column=3, padx=2)
-        self.working_use_button = ttk.Button(working, text="Use Folder...", command=self._use_working_directory)
-        self.working_use_button.grid(row=0, column=4, padx=2)
-        self.working_cancel_button = ttk.Button(working, text="Cancel Move", command=self._cancel_working_migration)
-        self.working_cancel_button.grid(row=0, column=5, padx=(2, 0))
-        self.working_cancel_button.state(["disabled"])
-        self.working_status_label = ttk.Label(
-            working,
-            textvariable=self.working_status_var,
-            anchor="w",
+        self.layout_scope_label = ttk.Label(
+            self.layout_tab,
+            textvariable=self.profile_scope_var,
+            style="Heading.TLabel",
+        )
+        self.layout_scope_label.pack(anchor="w", pady=(0, 4))
+        appearance = ttk.LabelFrame(self.layout_tab, text="Appearance", padding=(8, 4))
+        appearance.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(appearance, text="Effect:").grid(row=0, column=0, sticky="w")
+        self.effect_menu = ttk.OptionMenu(
+            appearance,
+            self.effect_var,
+            EFFECT_CHOICES[0],
+            *EFFECT_CHOICES,
+        )
+        self.effect_menu.grid(row=0, column=1, sticky="w", padx=(5, 20))
+        ttk.Label(appearance, text="Letterbox bars:").grid(row=0, column=2, sticky="w")
+        self.bar_color_menu = ttk.OptionMenu(
+            appearance,
+            self.bar_color_var,
+            BAR_COLOR_CHOICES[0],
+            *BAR_COLOR_CHOICES,
+        )
+        self.bar_color_menu.grid(row=0, column=3, sticky="w", padx=5)
+        self.bar_color_help = ttk.Label(
+            appearance,
+            text="Blurred fills unused space with a softened copy while keeping the whole picture visible.",
+            wraplength=500,
             justify=tk.LEFT,
-            wraplength=760,
         )
-        self.working_status_label.grid(
-            row=1,
-            column=0,
-            columnspan=6,
-            sticky="ew",
-            pady=(4, 0),
-        )
-        working.columnconfigure(1, weight=1)
+        self.bar_color_help.grid(row=1, column=2, columnspan=2, sticky="w", pady=(3, 0))
+        appearance.columnconfigure(3, weight=1)
 
         self.layout_description_var = tk.StringVar(value=LAYOUT_DESCRIPTIONS[LAYOUT_CHOICES[0]])
         ttk.Label(
@@ -505,7 +495,7 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
             wraplength=820,
         )
-        self.layout_description_label.pack(anchor="w", pady=(6, 10))
+        self.layout_description_label.pack(anchor="w", pady=(4, 6))
         self.layout_options_container = ttk.Frame(self.layout_tab)
         self.layout_options_container.pack(fill=tk.BOTH, expand=True)
         self.layout_panels: dict[str, ttk.Frame] = {
@@ -650,6 +640,149 @@ class SettingsApp(tk.Tk):
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
         self._refresh_layout_workspace()
 
+        self.rotation_scope_label = ttk.Label(
+            self.rotation_tab,
+            textvariable=self.profile_scope_var,
+            style="Heading.TLabel",
+        )
+        self.rotation_scope_label.pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            self.rotation_tab,
+            text="Control when this profile rotates and how Mint/Cinnamon reaches its safety action.",
+            justify=tk.LEFT,
+            wraplength=840,
+        ).pack(anchor="w", pady=(0, 8))
+        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=10)
+        rotation_schedule.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(rotation_schedule, text="Interval minutes:").grid(row=0, column=0, sticky="w")
+        self.interval_entry = ttk.Entry(rotation_schedule, textvariable=self.interval_var, width=10)
+        self.interval_entry.grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Label(
+            rotation_schedule,
+            text="The background loop reloads this saved value before each rotation.",
+            justify=tk.LEFT,
+            wraplength=570,
+        ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+        rotation_schedule.columnconfigure(2, weight=1)
+
+        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=10)
+        shortcuts.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(shortcuts, text="Black screen hotkey:").grid(row=0, column=0, sticky="w")
+        self.hotkey_entry = ttk.Entry(shortcuts, textvariable=self.hotkey_var, width=22)
+        self.hotkey_entry.grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Label(
+            shortcuts,
+            text="Save the profile, then register this shortcut with the command-line hotkey action.",
+            justify=tk.LEFT,
+            wraplength=520,
+        ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+        shortcuts.columnconfigure(2, weight=1)
+
+        desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=10)
+        desktop_integration.pack(fill=tk.X)
+        ttk.Label(desktop_integration, text="Desktop:").grid(row=0, column=0, sticky="w")
+        self.desktop_menu = ttk.OptionMenu(
+            desktop_integration,
+            self.desktop_var,
+            "auto",
+            "auto",
+            "cinnamon",
+            "gnome",
+            "mate",
+            "xfce",
+        )
+        self.desktop_menu.grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Label(
+            desktop_integration,
+            text="Auto is recommended for Linux Mint and detects the active desktop at apply time.",
+            justify=tk.LEFT,
+            wraplength=570,
+        ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+        desktop_integration.columnconfigure(2, weight=1)
+
+        self.storage_scope_label = ttk.Label(
+            self.storage_tab,
+            text="Application setting — shared by every profile",
+            style="Heading.TLabel",
+        )
+        self.storage_scope_label.pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            self.storage_tab,
+            text=(
+                "Choose where generated wallpapers and the image-library index live. "
+                "Changing this does not move or modify source pictures."
+            ),
+            justify=tk.LEFT,
+            wraplength=840,
+        ).pack(anchor="w", pady=(0, 8))
+        self.working_frame = ttk.LabelFrame(self.storage_tab, text="Working files", padding=(8, 8))
+        self.working_frame.pack(fill=tk.X)
+        ttk.Label(self.working_frame, text="Generated wallpapers and library index:").grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
+        self.working_directory_entry = ttk.Entry(
+            self.working_frame,
+            textvariable=self.working_directory_var,
+            width=19,
+        )
+        self.working_directory_entry.grid(row=0, column=1, sticky="ew", padx=6)
+        self.working_browse_button = ttk.Button(
+            self.working_frame,
+            text="Browse...",
+            command=self._browse_working_directory,
+        )
+        self.working_browse_button.grid(row=0, column=2, padx=2)
+        self.working_create_button = ttk.Button(
+            self.working_frame,
+            text="Create Folder...",
+            command=self._create_working_directory,
+        )
+        self.working_create_button.grid(row=0, column=3, padx=2)
+        self.working_use_button = ttk.Button(
+            self.working_frame,
+            text="Use Folder...",
+            command=self._use_working_directory,
+        )
+        self.working_use_button.grid(row=0, column=4, padx=2)
+        self.working_cancel_button = ttk.Button(
+            self.working_frame,
+            text="Cancel Move",
+            command=self._cancel_working_migration,
+        )
+        self.working_cancel_button.grid(row=0, column=5, padx=(2, 0))
+        self.working_cancel_button.state(["disabled"])
+        self.working_status_label = ttk.Label(
+            self.working_frame,
+            textvariable=self.working_status_var,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=760,
+        )
+        self.working_status_label.grid(
+            row=1,
+            column=0,
+            columnspan=6,
+            sticky="ew",
+            pady=(6, 0),
+        )
+        self.working_frame.columnconfigure(1, weight=1)
+
+        self.collections_scope_label = ttk.Label(
+            self.collections_tab,
+            text="Application feature — downloads run only when requested",
+            style="Heading.TLabel",
+        )
+        self.collections_scope_label.pack(anchor="w")
+        self.collections_profile_label = ttk.Label(
+            self.collections_tab,
+            textvariable=self.collections_profile_scope_var,
+            justify=tk.LEFT,
+            wraplength=840,
+        )
+        self.collections_profile_label.pack(anchor="w", pady=(0, 4))
+
         ttk.Label(
             self.collections_tab,
             text=(
@@ -659,8 +792,12 @@ class SettingsApp(tk.Tk):
             ),
             justify=tk.LEFT,
             wraplength=860,
-        ).pack(anchor="w", pady=(0, 10))
-        automatic = ttk.LabelFrame(self.collections_tab, text="Automatic collections — no account required", padding=10)
+        ).pack(anchor="w", pady=(0, 6))
+        automatic = ttk.LabelFrame(
+            self.collections_tab,
+            text="Automatic collections — no account required",
+            padding=(10, 6),
+        )
         automatic.pack(fill=tk.X)
         ttk.Label(automatic, text="Collection:").grid(row=0, column=0, sticky="w")
         self.collections_combo = ttk.Combobox(
@@ -687,7 +824,7 @@ class SettingsApp(tk.Tk):
             textvariable=self.collections_description_var,
             justify=tk.LEFT,
             wraplength=800,
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 10))
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 6))
         ttk.Label(automatic, text="Collection library folder:").grid(row=2, column=0, sticky="w")
         self.collections_root_entry = ttk.Entry(automatic, textvariable=self.collections_root_var)
         self.collections_root_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6)
@@ -699,12 +836,12 @@ class SettingsApp(tk.Tk):
         self.collections_browse_button.grid(row=2, column=3, sticky="w")
         self.collections_add_source_checkbutton = ttk.Checkbutton(
             automatic,
-            text="Add the downloaded collection folder to the current profile and save",
+            text="Add the downloaded collection folder to the selected profile and save it",
             variable=self.collections_add_source_var,
         )
-        self.collections_add_source_checkbutton.grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 4))
+        self.collections_add_source_checkbutton.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 2))
         collection_actions = ttk.Frame(automatic)
-        collection_actions.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        collection_actions.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         self.collections_download_button = ttk.Button(
             collection_actions,
             text="Download Collection",
@@ -729,9 +866,9 @@ class SettingsApp(tk.Tk):
         recommended = ttk.LabelFrame(
             self.collections_tab,
             text="Additional recommended sources — manual access or personal API key required",
-            padding=10,
+            padding=(10, 6),
         )
-        recommended.pack(fill=tk.X, pady=(12, 0))
+        recommended.pack(fill=tk.X, pady=(8, 0))
         self.collection_source_buttons = []
         for row, source in enumerate(public_collections.RECOMMENDED_SOURCES):
             ttk.Label(recommended, text=source.name, width=24).grid(row=row, column=0, sticky="nw", pady=3)
@@ -750,17 +887,23 @@ class SettingsApp(tk.Tk):
             button.grid(row=row, column=2, sticky="e", pady=3)
             self.collection_source_buttons.append(button)
         recommended.columnconfigure(1, weight=1)
-        ttk.Label(
+        self.collections_safety_label = ttk.Label(
             self.collections_tab,
             text=(
-                "A provenance manifest is stored with each collection. Public-domain and CC0 status concerns "
-                "copyright only; trademarks, privacy/publicity rights, embedded labels, and visual suitability "
-                "may still require review before redistribution."
+                "Provenance is saved. CC0/public-domain status covers copyright only; "
+                "review other rights and suitability before sharing."
             ),
             justify=tk.LEFT,
             wraplength=860,
-        ).pack(anchor="w", pady=(10, 0))
+        )
+        self.collections_safety_label.pack(anchor="w", pady=(6, 0))
 
+        self.about_scope_label = ttk.Label(
+            self.about_tab,
+            text="Application settings and information — shared by every profile",
+            style="Heading.TLabel",
+        )
+        self.about_scope_label.pack(anchor="w", pady=(0, 6))
         ttk.Label(
             self.about_tab,
             text=f"{APP_NAME}\nVersion {__version__}",
@@ -787,28 +930,38 @@ class SettingsApp(tk.Tk):
         bottom = ttk.Frame(root)
         bottom.pack(fill=tk.X)
         self.apply_button = ttk.Button(bottom, text="Save & Apply Now", command=self._apply_next)
-        self.apply_button.pack(side=tk.LEFT, padx=3)
+        self.apply_button.pack(side=tk.LEFT, padx=1)
         self.black_button = ttk.Button(bottom, text="Black Screen", command=self._black_screen)
-        self.black_button.pack(side=tk.LEFT, padx=3)
+        self.black_button.pack(side=tk.LEFT, padx=1)
         self.export_button = ttk.Button(bottom, text="Save Current Wallpaper...", command=self._export_current_wallpaper)
-        self.export_button.pack(side=tk.LEFT, padx=3)
+        self.export_button.pack(side=tk.LEFT, padx=1)
         self.current_pictures_button = ttk.Button(
             bottom,
             text="View Current Pictures...",
             command=self._view_current_pictures,
         )
-        self.current_pictures_button.pack(side=tk.LEFT, padx=3)
+        self.current_pictures_button.pack(side=tk.LEFT, padx=1)
         self.close_button = ttk.Button(bottom, text="Close", command=self._request_close)
-        self.close_button.pack(side=tk.RIGHT, padx=3)
+        self.close_button.pack(side=tk.RIGHT, padx=1)
         self.about_button = ttk.Button(
             bottom,
-            text="About & Updates",
+            text="Updates & About",
             command=lambda: self.notebook.select(self.about_tab),
         )
-        self.about_button.pack(side=tk.RIGHT, padx=3)
-        ttk.Label(bottom, text=f"Version {__version__}").pack(side=tk.RIGHT, padx=(3, 10))
+        self.about_button.pack(side=tk.RIGHT, padx=1)
+        self.footer_version_label = ttk.Label(bottom, text=f"Version {__version__}")
+        self.footer_version_label.pack(side=tk.RIGHT, padx=(2, 6))
         self._refresh_rollback_button()
         self._refresh_update_status()
+
+    def _refresh_profile_scope_labels(self, *_args: object) -> None:
+        """Keep profile-scoped pages and collection targeting explicit."""
+
+        profile_name = self.profile_var.get().strip() or "selected profile"
+        self.profile_scope_var.set(f"Profile settings for “{profile_name}”")
+        self.collections_profile_scope_var.set(
+            f"Optional source setup targets the selected profile: “{profile_name}”."
+        )
 
     def _select_layout(self, layout: str) -> None:
         """Show the workspace for a user-selected pending layout without saving it."""
@@ -1398,6 +1551,7 @@ class SettingsApp(tk.Tk):
         ):
             button.state(["disabled"] if busy else ["!disabled"])
         for control in (
+            self.profile_combo,
             self.collections_combo,
             self.collections_count_spinbox,
             self.collections_root_entry,
@@ -1583,7 +1737,7 @@ class SettingsApp(tk.Tk):
                     if self.collections_add_source_var.get():
                         self._append_text_line(self.shared_text, str(result.destination))
                         if self._save_current(show_success=False):
-                            source_note = "The collection folder was added to the current profile and saved."
+                            source_note = "The collection folder was added to the selected profile and saved."
                         else:
                             source_note = "The images were downloaded, but the profile source change could not be saved."
                     self.collections_status_var.set(

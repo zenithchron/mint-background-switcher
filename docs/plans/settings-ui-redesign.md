@@ -50,7 +50,7 @@
 
 **Objective:** Replace eight peer mode tabs with one Layout page whose selected controls and pending mode are always synchronized.
 
-**Status:** Implemented for `0.2.4`. The 71-test Settings suite and 470-test full suite pass under Xvfb. A forced 944×668 client smoke covers all eight layout selections, descriptions, contextual Postcard, Polaroid, and per-monitor controls, profile-driven synchronization, complete footer visibility, and non-mutating navigation across the four Settings pages. Increment 3 is next.
+**Status:** Implemented for `0.2.4`. The 71-test Settings suite and 470-test full suite pass under Xvfb. A forced 944×668 client smoke covers all eight layout selections, descriptions, contextual Postcard, Polaroid, and per-monitor controls, profile-driven synchronization, complete footer visibility, and non-mutating navigation across the four Settings pages. Increment 3 followed in `0.2.5`.
 
 **Files:**
 - Modify: `mint_background_switcher/settings_ui.py`
@@ -66,9 +66,11 @@
 4. Remove the old peer mode tabs and verify selecting a layout changes pending form state only until Save Profile or Save & Apply Now.
 5. Run 1024×768, all-layout, Save/Apply, profile-switch, full-suite, and review gates.
 
-## Increment 3: Task-based navigation and setting scope
+## Increment 3: Task-based navigation and setting scope — complete in `0.2.5`
 
 **Objective:** Organize Settings into profile tasks and application tasks.
+
+**Status:** Implemented for `0.2.5`. The 71-test Settings suite and 470-test full suite pass under Xvfb. A forced 944×668 client smoke verifies the six-page order, `Ctrl+Tab` navigation, profile/application scope labels, selected-profile collection targeting with profile switching locked during active operations, moved-control presence, built-in theme geometry, all eight layouts, and complete persistent context/footer geometry. Increment 4 is next.
 
 **Target navigation:**
 

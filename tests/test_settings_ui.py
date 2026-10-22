@@ -172,10 +172,11 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             app.black_button,
             app.export_button,
             app.current_pictures_button,
+            app.footer_version_label,
             app.about_button,
             app.close_button,
         )
-        assert not is_descendant(app.profile_context_frame, app.general_tab)
+        assert not is_descendant(app.profile_context_frame, app.sources_tab)
         assert all(is_descendant(control, app.profile_context_frame) for control in context_controls)
         assert any(
             child.winfo_class() == "TLabel" and child.cget("text") == "Layout:"
@@ -183,6 +184,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         )
         assert app.profile_save_button.cget("text") == "Save Profile"
         assert app.apply_button.cget("text") == "Save & Apply Now"
+        assert app.footer_version_label.cget("text") == f"Version {settings_ui.__version__}"
         assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
 
         menu = app.nametowidget(app.mode_menu["menu"])
@@ -225,18 +227,120 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
 
         pages = app.notebook.tabs()
         assert [app.notebook.tab(page, "text") for page in pages] == [
-            "General",
-            "Layout",
-            "Collections",
-            "About & Updates",
+            "Sources",
+            "Layout & Appearance",
+            "Rotation & Shortcuts",
+            "Public Collections",
+            "Storage",
+            "Updates & About",
         ]
+        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 1, 0]
+        app.notebook.select(app.sources_tab)
+        app.notebook.focus_force()
+        app.update()
+        app.event_generate("<Control-Tab>")
+        app.update()
+        assert app.notebook.select() == str(app.layout_tab)
+        assert is_descendant(app.shared_text, app.sources_tab)
+        assert is_descendant(app.recursive_checkbutton, app.sources_tab)
+        assert is_descendant(app.effect_menu, app.layout_tab)
+        assert is_descendant(app.bar_color_menu, app.layout_tab)
+        assert is_descendant(app.interval_entry, app.rotation_tab)
+        assert is_descendant(app.hotkey_entry, app.rotation_tab)
+        assert is_descendant(app.desktop_menu, app.rotation_tab)
+        assert is_descendant(app.collections_download_button, app.collections_tab)
+        assert is_descendant(app.working_directory_entry, app.storage_tab)
+        assert is_descendant(app.update_button, app.about_tab)
+        assert app.profile_scope_var.get() == "Profile settings for “Default”"
+        assert app.collections_profile_scope_var.get() == (
+            "Optional source setup targets the selected profile: “Default”."
+        )
+
+        page_controls = {
+            str(app.sources_tab): (app.sources_scope_label, app.recursive_checkbutton, app.shared_text),
+            str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu),
+            str(app.rotation_tab): (
+                app.rotation_scope_label,
+                app.interval_entry,
+                app.hotkey_entry,
+                app.desktop_menu,
+            ),
+            str(app.collections_tab): (
+                app.collections_scope_label,
+                app.collections_profile_label,
+                app.collections_download_button,
+                app.collections_safety_label,
+            ),
+            str(app.storage_tab): (
+                app.storage_scope_label,
+                app.working_directory_entry,
+                app.working_use_button,
+            ),
+            str(app.about_tab): (app.about_scope_label, app.update_button, app.rollback_button),
+        }
         for page in pages:
             app.notebook.select(page)
             app.update_idletasks()
             app.update()
             assert app.mode_var.get() == "span"
             assert_visible_inside_window(app.profile_context_frame)
-            for control in (*context_controls, *footer_controls):
+            for control in (*context_controls, *footer_controls, *page_controls[page]):
+                assert_visible_inside_window(control)
+
+        style = settings_ui.ttk.Style(app)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+            app.geometry("944x668+40+33")
+            for layout in settings_ui.LAYOUT_CHOICES:
+                menu.invoke(layout_values.index(layout))
+                app.notebook.select(app.layout_tab)
+                app.update_idletasks()
+                app.update()
+                clam_layout_controls = [
+                    app.profile_context_frame,
+                    *context_controls,
+                    app.layout_scope_label,
+                    app.effect_menu,
+                    app.bar_color_menu,
+                    app.layout_description_label,
+                    app.layout_panels[layout],
+                    *footer_controls,
+                ]
+                if layout == "postcard":
+                    clam_layout_controls.extend(
+                        (
+                            app.postcard_count_spinbox,
+                            app.postcard_size_scale,
+                            app.postcard_span_checkbutton,
+                            app.postcard_tilt_checkbutton,
+                            app.postcard_background_menu,
+                        )
+                    )
+                elif layout == "polaroid":
+                    clam_layout_controls.extend(
+                        (
+                            app.polaroid_count_spinbox,
+                            app.polaroid_size_scale,
+                            app.polaroid_span_checkbutton,
+                            app.polaroid_tilt_checkbutton,
+                        )
+                    )
+                elif layout == "per-monitor":
+                    clam_layout_controls.append(app.monitor_text)
+                for control in clam_layout_controls:
+                    assert_visible_inside_window(control)
+                assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
+                assert app.winfo_reqheight() <= settings_ui.SETTINGS_WINDOW_TARGET_HEIGHT
+
+            app.notebook.select(app.collections_tab)
+            app.update_idletasks()
+            app.update()
+            for control in (
+                app.profile_context_frame,
+                *context_controls,
+                *footer_controls,
+                *page_controls[str(app.collections_tab)],
+            ):
                 assert_visible_inside_window(control)
     finally:
         app.destroy()
@@ -262,6 +366,10 @@ def test_layout_workspace_tracks_profile_loading_and_pending_layout_changes(monk
         app.update()
 
         assert app.mode_var.get() == "polaroid"
+        assert app.profile_scope_var.get() == "Profile settings for “Prints”"
+        assert app.collections_profile_scope_var.get() == (
+            "Optional source setup targets the selected profile: “Prints”."
+        )
         assert app.layout_description_var.get() == settings_ui.LAYOUT_DESCRIPTIONS["polaroid"]
         assert app.layout_panels["polaroid"].winfo_ismapped()
         assert app.polaroid_options.winfo_ismapped()
@@ -585,6 +693,9 @@ def test_settings_effect_menu_exposes_vignette_and_is_visible(monkeypatch, tmp_p
         )
 
         assert "vignette" in labels
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("vignette"))
@@ -628,6 +739,9 @@ def test_settings_effect_menu_exposes_calendar_and_applies_selection(monkeypatch
         )
 
         assert "calendar" in labels
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("calendar"))
@@ -679,6 +793,9 @@ def test_settings_effect_menu_exposes_invert_and_applies_selection(monkeypatch, 
         )
 
         assert "invert" in labels
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("invert"))
@@ -746,6 +863,9 @@ def test_settings_effect_menu_exposes_desaturate_and_applies_selection(
         )
 
         assert "desaturate" in labels
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("desaturate"))
@@ -815,7 +935,10 @@ def test_settings_effect_menu_exposes_saturate_and_applies_selection(
         )
 
         assert "saturate" in labels
-        assert str(app.effect_menu).startswith(str(app.general_tab))
+        assert str(app.effect_menu).startswith(str(app.layout_tab))
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("saturate"))
@@ -885,7 +1008,10 @@ def test_settings_effect_menu_exposes_contrast_and_applies_selection(
         )
 
         assert "contrast" in labels
-        assert str(app.effect_menu).startswith(str(app.general_tab))
+        assert str(app.effect_menu).startswith(str(app.layout_tab))
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("contrast"))
@@ -955,7 +1081,10 @@ def test_settings_effect_menu_exposes_brighten_and_applies_selection(
         )
 
         assert "brighten" in labels
-        assert str(app.effect_menu).startswith(str(app.general_tab))
+        assert str(app.effect_menu).startswith(str(app.layout_tab))
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("brighten"))
@@ -1025,7 +1154,10 @@ def test_settings_effect_menu_exposes_darken_and_applies_selection(
         )
 
         assert "darken" in labels
-        assert str(app.effect_menu).startswith(str(app.general_tab))
+        assert str(app.effect_menu).startswith(str(app.layout_tab))
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("darken"))
@@ -1095,7 +1227,10 @@ def test_settings_effect_menu_exposes_random_and_applies_selection(
         )
 
         assert "random" in labels
-        assert str(app.effect_menu).startswith(str(app.general_tab))
+        assert str(app.effect_menu).startswith(str(app.layout_tab))
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.effect_menu.winfo_ismapped()
         assert app.effect_menu.winfo_width() > 1
         menu.invoke(labels.index("random"))
@@ -1163,7 +1298,10 @@ def test_settings_letterbox_menu_exposes_blurred_edges_and_applies_selection(
         )
 
         assert labels == ["black", "auto", "blurred"]
-        assert str(app.bar_color_menu).startswith(str(app.general_tab))
+        assert str(app.bar_color_menu).startswith(str(app.layout_tab))
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
         assert app.bar_color_menu.winfo_ismapped()
         assert app.bar_color_menu.winfo_width() > 1
         assert app.bar_color_help.winfo_ismapped()
@@ -1535,7 +1673,7 @@ def test_settings_mode_menu_exposes_postcard_and_applies_selection(monkeypatch, 
         app.postcard_background_var.set("dark")
         scale_style = app.postcard_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
-        app.notebook.select(app.general_tab)
+        app.notebook.select(app.sources_tab)
         app.update_idletasks()
         assert app.mode_var.get() == "postcard"
         assert not app.postcard_options.winfo_ismapped()
@@ -1617,8 +1755,15 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
 
         assert "polaroid" in labels
         tab_labels = [app.notebook.tab(tab_id, "text") for tab_id in app.notebook.tabs()]
-        assert tab_labels == ["General", "Layout", "Collections", "About & Updates"]
-        assert str(app.shared_text).startswith(str(app.general_tab))
+        assert tab_labels == [
+            "Sources",
+            "Layout & Appearance",
+            "Rotation & Shortcuts",
+            "Public Collections",
+            "Storage",
+            "Updates & About",
+        ]
+        assert str(app.shared_text).startswith(str(app.sources_tab))
         assert str(app.monitor_text).startswith(str(app.layout_panels["per-monitor"]))
         assert str(app.update_button).startswith(str(app.about_tab))
         assert app.mode_menu.winfo_ismapped()
@@ -1649,7 +1794,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         )
         scale_style = app.polaroid_size_scale.cget("style")
         assert int(float(settings_ui.ttk.Style(app).lookup(scale_style, "sliderlength"))) >= 32
-        app.notebook.select(app.general_tab)
+        app.notebook.select(app.sources_tab)
         app.update_idletasks()
         assert app.mode_var.get() == "polaroid"
         assert not app.polaroid_options.winfo_ismapped()
@@ -2219,8 +2364,13 @@ def test_settings_exposes_working_folder_controls_at_1024x768(monkeypatch, tmp_p
         app.update()
 
         assert app.working_directory_var.get() == str(cache.absolute())
+        assert app.shared_add_picture_button.winfo_ismapped()
+        assert app.shared_add_picture_button.winfo_width() > 1
+
+        app.notebook.select(app.storage_tab)
+        app.update_idletasks()
+        app.update()
         for widget in (
-            app.shared_add_picture_button,
             app.working_directory_entry,
             app.working_browse_button,
             app.working_create_button,
@@ -2474,6 +2624,11 @@ def test_public_collection_download_runs_off_tk_thread_and_adds_saved_source(mon
     )
     app = settings_ui.SettingsApp()
     try:
+        app.config_data.profiles["Other"] = settings_ui.Profile(
+            name="Other",
+            shared_folders=[str(tmp_path / "Other Pictures")],
+        )
+        app._refresh_profiles()
         app.notebook.select(app.collections_tab)
         app.update_idletasks()
         assert app.collections_download_button.winfo_ismapped()
@@ -2492,6 +2647,11 @@ def test_public_collection_download_runs_off_tk_thread_and_adds_saved_source(mon
         assert app._collection_worker is not None
         assert app._collection_worker.daemon is False
         assert app._collection_worker.is_alive()
+        assert "disabled" in app.profile_combo.state()
+        assert app.profile_var.get() == "Default"
+        assert app.collections_profile_scope_var.get() == (
+            "Optional source setup targets the selected profile: “Default”."
+        )
         assert "disabled" in app.collections_download_button.state()
         assert "disabled" not in app.collections_cancel_button.state()
         _pump_until(app, lambda: app.collections_status_var.get() == "Downloading 1/10: Nebula")
@@ -2500,7 +2660,12 @@ def test_public_collection_download_runs_off_tk_thread_and_adds_saved_source(mon
         _pump_until(app, lambda: not app._collection_busy)
 
         destination = (tmp_path / "Public Collections" / "nasa-space").absolute()
-        assert str(destination) in settings_ui.load_config().get_profile().shared_folders
+        saved_config = settings_ui.load_config()
+        assert str(destination) in saved_config.get_profile("Default").shared_folders
+        assert str(destination) not in saved_config.get_profile("Other").shared_folders
+        assert saved_config.get_profile("Other").shared_folders == [str(tmp_path / "Other Pictures")]
+        assert "disabled" not in app.profile_combo.state()
+        assert "readonly" in app.profile_combo.state()
         assert messages and messages[-1][0] == "Collection downloaded"
         assert "1 new" in messages[-1][1]
         assert "9 could not" in messages[-1][1]
