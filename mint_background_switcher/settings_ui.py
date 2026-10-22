@@ -717,7 +717,7 @@ class SettingsApp(tk.Tk):
         ).pack(anchor="w", pady=(0, 8))
         self.working_frame = ttk.LabelFrame(self.storage_tab, text="Working files", padding=(8, 8))
         self.working_frame.pack(fill=tk.X)
-        ttk.Label(self.working_frame, text="Generated wallpapers and library index:").grid(
+        ttk.Label(self.working_frame, text="Working directory:").grid(
             row=0,
             column=0,
             sticky="w",
@@ -725,7 +725,7 @@ class SettingsApp(tk.Tk):
         self.working_directory_entry = ttk.Entry(
             self.working_frame,
             textvariable=self.working_directory_var,
-            width=19,
+            width=16,
         )
         self.working_directory_entry.grid(row=0, column=1, sticky="ew", padx=6)
         self.working_browse_button = ttk.Button(

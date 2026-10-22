@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Moved existing controls into their task pages without changing profile persistence, rendering, collection, storage, update, or apply behavior.
 - Bumped the package version to `0.2.5`.
 
+### Fixed
+
+- Storage page working-files row: shortened the row label to "Working directory:" and narrowed the path entry so the whole row fits the minimum 944×668 Settings window under wider font metrics.
+
 ## [0.2.4] - 2026-10-21
 
 ### Added
