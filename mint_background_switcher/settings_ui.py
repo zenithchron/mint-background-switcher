@@ -315,7 +315,7 @@ class SettingsApp(tk.Tk):
         self.minsize(min_width, min_height)
 
     def _build(self) -> None:
-        root = ttk.Frame(self, padding=10)
+        root = ttk.Frame(self, padding=8)
         root.pack(fill=tk.BOTH, expand=True)
 
         self.profile_context_frame = ttk.LabelFrame(
@@ -330,9 +330,9 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_var,
             values=sorted(self.config_data.profiles),
             state="readonly",
-            width=15,
+            width=14,
         )
-        self.profile_combo.grid(row=0, column=1, sticky="w", padx=(5, 8))
+        self.profile_combo.grid(row=0, column=1, sticky="w", padx=(4, 6))
         self.profile_combo.bind(
             "<<ComboboxSelected>>",
             lambda _e: self._load_profile(self.profile_var.get()),
