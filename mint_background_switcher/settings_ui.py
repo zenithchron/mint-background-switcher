@@ -949,7 +949,7 @@ class SettingsApp(tk.Tk):
             command=lambda: self.notebook.select(self.about_tab),
         )
         self.about_button.pack(side=tk.RIGHT, padx=1)
-        self.footer_version_label = ttk.Label(bottom, text=f"Version {__version__}")
+        self.footer_version_label = ttk.Label(bottom, text=f"v{__version__}")
         self.footer_version_label.pack(side=tk.RIGHT, padx=(2, 6))
         self._refresh_rollback_button()
         self._refresh_update_status()

@@ -184,7 +184,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         )
         assert app.profile_save_button.cget("text") == "Save Profile"
         assert app.apply_button.cget("text") == "Save & Apply Now"
-        assert app.footer_version_label.cget("text") == f"Version {settings_ui.__version__}"
+        assert app.footer_version_label.cget("text") == f"v{settings_ui.__version__}"
         assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
 
         menu = app.nametowidget(app.mode_menu["menu"])
@@ -594,7 +594,7 @@ def test_settings_view_current_pictures_is_visible_refreshes_and_opens_selected_
             <= app.current_pictures_button.master.winfo_width()
         )
         assert app.title() == f"{settings_ui.APP_NAME} Settings — {settings_ui.__version__}"
-        assert f"Version {settings_ui.__version__}" in descendant_texts(app)
+        assert f"v{settings_ui.__version__}" in descendant_texts(app)
 
         app.current_pictures_button.invoke()
         app.update_idletasks()
