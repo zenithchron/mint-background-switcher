@@ -33,6 +33,21 @@ def test_config_roundtrip():
     assert profile.folders_for_monitor("missing") == ["/pics"]
 
 
+def test_min_image_size_roundtrip_and_coercion():
+    assert Profile(name="P").min_image_size == 0
+
+    loaded = Profile.from_dict("P", {"min_image_size": 720})
+    assert loaded.min_image_size == 720
+    assert loaded.to_dict()["min_image_size"] == 720
+
+    assert Profile.from_dict("P", {}).min_image_size == 0
+    assert Profile.from_dict("P", {"min_image_size": "1080"}).min_image_size == 1080
+    assert Profile.from_dict("P", {"min_image_size": -80}).min_image_size == 0
+    assert Profile.from_dict("P", {"min_image_size": "not-a-number"}).min_image_size == 0
+    assert Profile.from_dict("P", {"min_image_size": None}).min_image_size == 0
+    assert Profile.from_dict("P", {"min_image_size": 10_000_000}).min_image_size == 100_000
+
+
 def test_stale_profile_save_preserves_newer_working_directory(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     initial = Config(active_profile="P", profiles={"P": Profile(name="P")})

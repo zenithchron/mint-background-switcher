@@ -237,6 +237,7 @@ class SettingsApp(tk.Tk):
         self.interval_var = tk.StringVar()
         self.mode_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar()
+        self.min_image_size_var = tk.StringVar()
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
@@ -415,7 +416,15 @@ class SettingsApp(tk.Tk):
             text="Scan folders recursively",
             variable=self.recursive_var,
         )
-        self.recursive_checkbutton.pack(anchor="w")
+        self.recursive_checkbutton.grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(source_options, text="Minimum image size:").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        self.min_image_size_entry = ttk.Entry(source_options, textvariable=self.min_image_size_var, width=6)
+        self.min_image_size_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(5, 0))
+        ttk.Label(
+            source_options,
+            text="px on the smallest side; 0 means no limit. Smaller pictures are skipped when the library is scanned.",
+        ).grid(row=1, column=2, sticky="w", pady=(5, 0))
+        source_options.columnconfigure(2, weight=1)
 
         shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
         shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)
@@ -991,6 +1000,7 @@ class SettingsApp(tk.Tk):
         self.interval_var.set(str(profile.interval_minutes))
         self.mode_var.set(profile.mode)
         self.recursive_var.set(profile.recursive)
+        self.min_image_size_var.set(str(profile.min_image_size))
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
@@ -1050,6 +1060,17 @@ class SettingsApp(tk.Tk):
         size_var = vars(self).get("polaroid_size_var")
         span_var = vars(self).get("polaroid_span_var")
         tilt_var = vars(self).get("polaroid_tilt_var")
+        min_image_size_var = vars(self).get("min_image_size_var")
+        if min_image_size_var is None:
+            min_image_size = 0
+        else:
+            raw_min_image_size = str(min_image_size_var.get()).strip()
+            try:
+                min_image_size = max(0, min(int(raw_min_image_size), 100_000))
+            except ValueError:
+                raise ValueError(
+                    "Minimum image size must be a whole number of pixels (0 means no limit)."
+                ) from None
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -1072,6 +1093,7 @@ class SettingsApp(tk.Tk):
             interval_minutes=float(self.interval_var.get()),
             mode=self.mode_var.get(),
             recursive=self.recursive_var.get(),
+            min_image_size=min_image_size,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",

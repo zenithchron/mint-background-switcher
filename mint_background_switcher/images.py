@@ -121,7 +121,25 @@ def _save_png_atomic(image: Image.Image, output_path: str | Path) -> Path:
     return output
 
 
-def scan_images(folders: Iterable[str], recursive: bool = True) -> list[str]:
+def image_min_dimension(path: str | Path) -> int | None:
+    """Return an image's smallest side in pixels from its header, or None when unreadable."""
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
+        return None
+    return min(width, height)
+
+
+def meets_min_image_size(path: str | Path, min_image_size: int) -> bool:
+    """Return whether a source meets the smallest-side minimum (0 disables the check)."""
+    if min_image_size <= 0:
+        return True
+    dimension = image_min_dimension(path)
+    return dimension is not None and dimension >= min_image_size
+
+
+def scan_images(folders: Iterable[str], recursive: bool = True, min_image_size: int = 0) -> list[str]:
     images: list[str] = []
     for raw_folder in folders:
         if not raw_folder:
@@ -129,7 +147,8 @@ def scan_images(folders: Iterable[str], recursive: bool = True) -> list[str]:
         path = Path(raw_folder).expanduser()
         try:
             if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-                images.append(str(path.resolve()))
+                if meets_min_image_size(path, min_image_size):
+                    images.append(str(path.resolve()))
                 continue
             is_dir = path.is_dir()
         except OSError:
@@ -141,6 +160,8 @@ def scan_images(folders: Iterable[str], recursive: bool = True) -> list[str]:
                 for filename in files:
                     item = Path(root) / filename
                     if item.suffix.lower() in SUPPORTED_EXTENSIONS:
+                        if not meets_min_image_size(item, min_image_size):
+                            continue
                         try:
                             images.append(str(item.resolve()))
                         except OSError:
@@ -153,7 +174,8 @@ def scan_images(folders: Iterable[str], recursive: bool = True) -> list[str]:
             for item in iterator:
                 try:
                     if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS:
-                        images.append(str(item.resolve()))
+                        if meets_min_image_size(item, min_image_size):
+                            images.append(str(item.resolve()))
                 except OSError:
                     continue
     return sorted(set(images))

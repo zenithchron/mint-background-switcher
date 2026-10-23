@@ -129,14 +129,16 @@ def _load_image_pool(
     selection: LibrarySelection | None,
     cancelled: Callable[[], bool] | None,
     progress: Callable[[int, str], None] | None,
+    min_image_size: int = 0,
 ) -> _ImagePool:
     if dry_run:
-        return _ImagePool(paths=scan_images(folders, recursive))
+        return _ImagePool(paths=scan_images(folders, recursive, min_image_size))
     if index is None:  # pragma: no cover - guarded by switch setup
         raise RuntimeError("live wallpaper rotation requires an image index")
     snapshot = index.ensure(
         folders,
         recursive=recursive,
+        min_image_size=min_image_size,
         cancelled=cancelled,
         progress=progress,
     )
@@ -371,6 +373,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -400,6 +403,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -434,6 +438,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -503,6 +508,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -570,6 +576,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -636,6 +643,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -666,6 +674,7 @@ def _switch_once_with_state(
             selection=selection,
             cancelled=cancelled,
             progress=progress,
+            min_image_size=profile.min_image_size,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -702,6 +711,7 @@ def _switch_once_with_state(
                 selection=selection,
                 cancelled=cancelled,
                 progress=progress,
+                min_image_size=profile.min_image_size,
             )
             if not pool.empty:
                 pools_by_monitor[monitor.name] = pool

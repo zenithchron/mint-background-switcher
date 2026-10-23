@@ -38,7 +38,9 @@ from mint_background_switcher.images import (
     compose_postcard,
     compose_span,
     fit_with_black_bars,
+    image_min_dimension,
     is_usable_image,
+    meets_min_image_size,
     scan_images,
 )
 from mint_background_switcher.monitor import Monitor
@@ -132,6 +134,53 @@ def test_scan_images_accepts_an_individual_picture_source(tmp_path: Path):
     picture.write_bytes(b"extension is sufficient for discovery")
 
     assert scan_images([str(picture)], recursive=False) == [str(picture.resolve())]
+
+
+def test_image_min_dimension_reports_smallest_side(tmp_path: Path):
+    landscape = tmp_path / "landscape.png"
+    Image.new("RGB", (120, 80), (10, 20, 30)).save(landscape)
+    portrait = tmp_path / "portrait.png"
+    Image.new("RGB", (80, 120), (30, 20, 10)).save(portrait)
+
+    assert image_min_dimension(landscape) == 80
+    assert image_min_dimension(portrait) == 80
+
+
+def test_image_min_dimension_returns_none_for_unreadable_sources(tmp_path: Path):
+    missing = tmp_path / "missing.png"
+    garbage = tmp_path / "garbage.png"
+    garbage.write_bytes(b"not a decodable image")
+
+    assert image_min_dimension(missing) is None
+    assert image_min_dimension(garbage) is None
+
+
+def test_meets_min_image_size_is_disabled_at_zero_and_excludes_small_pictures(tmp_path: Path):
+    small = tmp_path / "small.png"
+    Image.new("RGB", (60, 40), (1, 2, 3)).save(small)
+    garbage = tmp_path / "garbage.png"
+    garbage.write_bytes(b"not a decodable image")
+
+    assert meets_min_image_size(small, 0) is True
+    assert meets_min_image_size(garbage, 0) is True
+    assert meets_min_image_size(small, 40) is True
+    assert meets_min_image_size(small, 41) is False
+    assert meets_min_image_size(garbage, 1) is False
+
+
+def test_scan_images_filters_by_smallest_side(tmp_path: Path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    small = tmp_path / "small.png"
+    Image.new("RGB", (90, 50), (1, 2, 3)).save(small)
+    big = nested / "big.png"
+    Image.new("RGB", (300, 200), (3, 2, 1)).save(big)
+    (tmp_path / "notes.txt").write_text("not an image")
+
+    assert len(scan_images([str(tmp_path)], recursive=True)) == 2
+    assert scan_images([str(tmp_path)], recursive=True, min_image_size=100) == [str(big.resolve())]
+    assert scan_images([str(small)], recursive=True, min_image_size=100) == []
+    assert scan_images([str(small)], recursive=True, min_image_size=50) == [str(small.resolve())]
 
 
 def test_is_usable_image_rejects_files_pillow_cannot_decode(tmp_path: Path):

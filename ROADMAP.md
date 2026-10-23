@@ -54,7 +54,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 ### 4. Source, filtering, and scheduling controls
 
 - Independent source-set add, edit, enable, disable, and cross-source mixing.
-- Orientation matching, minimum dimensions, ignored folders, path exclusions, and temporary-unavailability handling.
+- Orientation matching, ignored folders, path exclusions, and temporary-unavailability handling. Minimum dimensions (smallest side) shipped in `0.2.6` as a per-profile Settings filter.
 - Broader intervals, switch at startup, startup delay, and topology-change refresh.
 - Optional suppression while locked, on battery, not idle, or while selected applications are running.
 - Optional post-switch command hook.

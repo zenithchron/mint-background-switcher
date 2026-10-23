@@ -243,6 +243,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert app.notebook.select() == str(app.layout_tab)
         assert is_descendant(app.shared_text, app.sources_tab)
         assert is_descendant(app.recursive_checkbutton, app.sources_tab)
+        assert is_descendant(app.min_image_size_entry, app.sources_tab)
         assert is_descendant(app.effect_menu, app.layout_tab)
         assert is_descendant(app.bar_color_menu, app.layout_tab)
         assert is_descendant(app.interval_entry, app.rotation_tab)
@@ -257,7 +258,12 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         )
 
         page_controls = {
-            str(app.sources_tab): (app.sources_scope_label, app.recursive_checkbutton, app.shared_text),
+            str(app.sources_tab): (
+                app.sources_scope_label,
+                app.recursive_checkbutton,
+                app.min_image_size_entry,
+                app.shared_text,
+            ),
             str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu),
             str(app.rotation_tab): (
                 app.rotation_scope_label,
@@ -1873,6 +1879,73 @@ def test_save_current_returns_false_on_validation_failure(monkeypatch):
 
     assert settings_ui.SettingsApp._save_current(dummy, show_success=False) is False
     assert errors and errors[0][0] == "Save failed"
+
+
+def test_save_current_rejects_non_numeric_min_image_size(monkeypatch):
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args: None)
+    monkeypatch.setattr(settings_ui, "save_config", lambda _cfg: (_ for _ in ()).throw(AssertionError("should not save")))
+
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "profile_var", _Var("P"))
+    setattr(dummy, "interval_var", _Var("10"))
+    setattr(dummy, "mode_var", _Var("shared"))
+    setattr(dummy, "recursive_var", _Var(True))
+    setattr(dummy, "min_image_size_var", _Var("not-a-number"))
+    setattr(dummy, "hotkey_var", _Var("<Primary><Alt>b"))
+    setattr(dummy, "desktop_var", _Var("auto"))
+    setattr(dummy, "effect_var", _Var("none"))
+    setattr(dummy, "bar_color_var", _Var("black"))
+    setattr(dummy, "shared_text", _Text("/tmp/images"))
+    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
+    setattr(dummy, "profile_combo", _Combo())
+
+    assert settings_ui.SettingsApp._save_current(dummy, show_success=False) is False
+    assert errors and errors[0][0] == "Save failed"
+    assert "Minimum image size" in errors[0][1]
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_min_image_size_entry_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+        assert app.min_image_size_var.get() == "0"
+        assert is_descendant(app.min_image_size_entry, app.sources_tab)
+        assert app.min_image_size_entry.winfo_ismapped()
+        assert app.min_image_size_entry.winfo_width() >= app.min_image_size_entry.winfo_reqwidth()
+
+        app.min_image_size_var.set("720")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.min_image_size == 720
+
+        app._load_profile("Default")
+        assert app.min_image_size_var.get() == "720"
+    finally:
+        app.destroy()
 
 
 def test_apply_next_aborts_when_save_fails(monkeypatch):

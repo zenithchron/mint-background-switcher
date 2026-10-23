@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from mint_background_switcher.library_index import (
     INDEX_FILENAME,
@@ -81,6 +82,99 @@ def test_refresh_indexes_an_individual_picture_source(tmp_path):
 
     assert snapshot.image_count == 1
     assert index.paths(snapshot.signature) == [str(picture.resolve())]
+
+
+def _write_sized_images(root: Path) -> dict[str, Path]:
+    root.mkdir(parents=True, exist_ok=True)
+    sized = {
+        "small": Image.new("RGB", (60, 40), (1, 2, 3)),
+        "medium": Image.new("RGB", (100, 80), (2, 3, 1)),
+        "large": Image.new("RGB", (200, 150), (3, 1, 2)),
+    }
+    paths = {}
+    for name, image in sized.items():
+        path = root / f"{name}.png"
+        image.save(path)
+        paths[name] = path
+    return paths
+
+
+def test_scan_signature_changes_with_min_image_size(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    roots = normalized_scan_roots([str(root)])
+
+    assert scan_signature(roots, recursive=True) == scan_signature(roots, recursive=True, min_image_size=0)
+    assert scan_signature(roots, recursive=True) != scan_signature(roots, recursive=True, min_image_size=720)
+    assert scan_signature(roots, recursive=True, min_image_size=720) != scan_signature(
+        roots, recursive=True, min_image_size=1080
+    )
+
+
+def test_refresh_excludes_images_below_min_size(tmp_path):
+    root = tmp_path / "photos"
+    paths = _write_sized_images(root)
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(root)], recursive=True, min_image_size=100)
+
+    assert snapshot.image_count == 1
+    assert index.paths(snapshot.signature) == [str(paths["large"].resolve())]
+
+
+def test_refresh_keeps_image_whose_smallest_side_equals_min_size(tmp_path):
+    root = tmp_path / "photos"
+    paths = _write_sized_images(root)
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(root)], recursive=True, min_image_size=80)
+
+    assert sorted(index.paths(snapshot.signature)) == sorted(
+        [str(paths["medium"].resolve()), str(paths["large"].resolve())]
+    )
+
+
+def test_filter_emptied_root_still_counts_as_complete_without_rescanning(monkeypatch, tmp_path):
+    root = tmp_path / "photos"
+    _write_sized_images(root)
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(root)], recursive=True, min_image_size=10_000, now_ns=1_000_000_000)
+    assert snapshot.image_count == 0
+    assert snapshot.refreshed_ns == 1_000_000_000
+
+    monkeypatch.setattr(os, "walk", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("rescanned")))
+    reused = index.ensure([str(root)], recursive=True, min_image_size=10_000, now_ns=1_000_000_000 + 1)
+    assert reused == snapshot
+
+
+def test_filter_excludes_undecodable_files(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    real = root / "real.png"
+    Image.new("RGB", (100, 80), (1, 1, 1)).save(real)
+    garbage = root / "garbage.jpg"
+    garbage.write_bytes(b"extension is sufficient but bytes are not")
+    index = LibraryIndex(tmp_path / "working")
+
+    unfiltered = index.refresh([str(root)], recursive=True)
+    filtered = index.refresh([str(root)], recursive=True, min_image_size=1)
+
+    assert unfiltered.image_count == 2
+    assert filtered.image_count == 1
+    assert index.paths(filtered.signature) == [str(real.resolve())]
+
+
+def test_individual_picture_root_respects_min_size(tmp_path):
+    small = tmp_path / "small.png"
+    Image.new("RGB", (60, 40), (1, 2, 3)).save(small)
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(small)], recursive=True, min_image_size=100, now_ns=1_000_000_000)
+
+    assert snapshot.image_count == 0
+    assert snapshot.refreshed_ns == 1_000_000_000
+    assert index.paths(snapshot.signature) == []
 
 
 def test_fresh_index_is_reused_without_rescanning(monkeypatch, tmp_path):

@@ -13,7 +13,7 @@ import sqlite3
 import time
 import uuid
 
-from .images import SUPPORTED_EXTENSIONS
+from .images import SUPPORTED_EXTENSIONS, meets_min_image_size
 
 INDEX_FILENAME = "library-index.sqlite3"
 SCHEMA_VERSION = 2
@@ -85,9 +85,13 @@ def normalized_scan_roots(folders: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(roots))
 
 
-def scan_signature(roots: Iterable[str], *, recursive: bool) -> str:
+def scan_signature(roots: Iterable[str], *, recursive: bool, min_image_size: int = 0) -> str:
+    try:
+        size = int(min_image_size)
+    except (TypeError, ValueError, OverflowError):
+        size = 0
     payload = json.dumps(
-        {"recursive": bool(recursive), "roots": list(roots)},
+        {"recursive": bool(recursive), "min_image_size": max(0, size), "roots": list(roots)},
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
@@ -107,6 +111,7 @@ def _iter_image_paths(
     cancelled: Callable[[], bool] | None,
     progress: Callable[[int, str], None] | None,
     root_counts: dict[str, int] | None = None,
+    min_image_size: int = 0,
 ):
     count = 0
     for raw_root in roots:
@@ -117,9 +122,11 @@ def _iter_image_paths(
         try:
             if root.is_file():
                 if root.suffix.lower() in SUPPORTED_EXTENSIONS:
-                    count += 1
                     if root_counts is not None:
                         root_counts[raw_root] += 1
+                    if not meets_min_image_size(root, min_image_size):
+                        continue
+                    count += 1
                     path = str(_absolute(root))
                     if progress is not None and (count == 1 or count % 500 == 0):
                         progress(count, path)
@@ -139,10 +146,12 @@ def _iter_image_paths(
                     _cancel_if_requested(cancelled)
                     if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
                         continue
-                    path = os.path.abspath(os.path.join(directory, filename))
-                    count += 1
                     if root_counts is not None:
                         root_counts[raw_root] += 1
+                    if not meets_min_image_size(os.path.join(directory, filename), min_image_size):
+                        continue
+                    path = os.path.abspath(os.path.join(directory, filename))
+                    count += 1
                     if progress is not None and (count == 1 or count % 500 == 0):
                         progress(count, path)
                     yield path
@@ -159,10 +168,12 @@ def _iter_image_paths(
                     continue
                 if not is_image:
                     continue
-                path = str(_absolute(entry))
-                count += 1
                 if root_counts is not None:
                     root_counts[raw_root] += 1
+                if not meets_min_image_size(entry, min_image_size):
+                    continue
+                path = str(_absolute(entry))
+                count += 1
                 if progress is not None and (count == 1 or count % 500 == 0):
                     progress(count, path)
                 yield path
@@ -265,12 +276,13 @@ class LibraryIndex:
         folders: Iterable[str],
         *,
         recursive: bool,
+        min_image_size: int = 0,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
     ) -> IndexSnapshot:
         roots = normalized_scan_roots(folders)
-        signature = scan_signature(roots, recursive=recursive)
+        signature = scan_signature(roots, recursive=recursive, min_image_size=min_image_size)
         refreshed_ns = time.time_ns() if now_ns is None else int(now_ns)
         connection = self._open()
         try:
@@ -285,6 +297,7 @@ class LibraryIndex:
                 cancelled=cancelled,
                 progress=progress,
                 root_counts=root_counts,
+                min_image_size=min_image_size,
             ):
                 batch.append((path,))
                 if len(batch) >= 1000:
@@ -340,13 +353,14 @@ class LibraryIndex:
         folders: Iterable[str],
         *,
         recursive: bool,
+        min_image_size: int = 0,
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
     ) -> IndexSnapshot:
         roots = normalized_scan_roots(folders)
-        signature = scan_signature(roots, recursive=recursive)
+        signature = scan_signature(roots, recursive=recursive, min_image_size=min_image_size)
         current = self.snapshot(signature)
         current_time = time.time_ns() if now_ns is None else int(now_ns)
         max_age_ns = max(0, int(max_age_seconds * 1_000_000_000))
@@ -359,6 +373,7 @@ class LibraryIndex:
         return self.refresh(
             roots,
             recursive=recursive,
+            min_image_size=min_image_size,
             cancelled=cancelled,
             progress=progress,
             now_ns=current_time,

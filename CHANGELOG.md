@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.6] - 2026-10-23
+
+### Added
+
+- Per-profile **Minimum image size** filter inspired by John’s Background Switcher’s minimum-picture-size option: pictures whose smallest side is smaller than the limit are excluded from rotation, with no limit by default.
+- Exposed it under **Settings → Sources → Folder scanning**, with Save Profile error feedback for non-numeric values.
+- Header-only dimension checks that read only image headers during library scans, a filter-aware scan signature so changing the limit refreshes the index exactly once, and scan-completeness semantics that treat a filter-emptied folder as scanned instead of rescanning it forever.
+
+### Changed
+
+- Bumped the package version to `0.2.6`.
+
 ## [0.2.5] - 2026-10-22
 
 ### Added

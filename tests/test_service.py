@@ -1702,3 +1702,56 @@ def test_dry_run_black_fallback_does_not_persist_state(monkeypatch, tmp_path: Pa
     assert result.wallpaper.name == "P-dry-run.png"
     assert result.wallpaper.exists()
     assert load_state().to_dict() == before
+
+
+def test_min_image_size_excludes_small_pictures_in_dry_run(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    allowed = {str((image_dir / "img2.png").resolve()), str((image_dir / "img3.png").resolve())}
+    cfg = service.load_config()
+    cfg.get_profile("P").min_image_size = 50
+    save_config(cfg)
+    original = load_state().to_dict()
+    source_bytes = {path: path.read_bytes() for path in image_dir.glob("*.png")}
+
+    result = switch_once("P", dry_run=True, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert len(result.images) == 2
+    assert set(result.images) <= allowed
+    assert {path: path.read_bytes() for path in image_dir.glob("*.png")} == source_bytes
+    assert load_state().to_dict() == original
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+
+def test_min_image_size_excludes_small_pictures_from_live_indexed_rotation(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    allowed = {str((image_dir / "img2.png").resolve()), str((image_dir / "img3.png").resolve())}
+    cfg = service.load_config()
+    cfg.get_profile("P").min_image_size = 50
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is True
+    assert set(result.images) <= allowed
+    assert load_state().last_images == result.images
+    assert (tmp_path / "cache" / "library-index.sqlite3").is_file()
+
+
+def test_min_image_size_exhausting_pool_falls_back_to_black(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").min_image_size = 100
+    save_config(cfg)
+    original = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(2))
+
+    assert result.action == "black-fallback"
+    assert result.applied is False
+    assert result.wallpaper.exists()
+    assert load_state().to_dict() == original

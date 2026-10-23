@@ -94,6 +94,14 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def _coerce_min_image_size(value: Any, default: int = 0) -> int:
+    try:
+        size = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0, min(size, 100_000))
+
+
 def _coerce_str_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -132,6 +140,7 @@ class Profile:
     polaroid_tilt: bool = True
     postcard_tilt: bool = True
     postcard_background: str = "dark"
+    min_image_size: int = 0
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -152,6 +161,7 @@ class Profile:
             interval_minutes=_coerce_interval(data.get("interval_minutes", 10.0)),
             mode=mode,
             recursive=bool(data.get("recursive", True)),
+            min_image_size=_coerce_min_image_size(data.get("min_image_size", 0)),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -174,6 +184,7 @@ class Profile:
             "interval_minutes": self.interval_minutes,
             "mode": self.mode,
             "recursive": self.recursive,
+            "min_image_size": self.min_image_size,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,
