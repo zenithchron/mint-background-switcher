@@ -111,6 +111,93 @@ def test_scan_signature_changes_with_min_image_size(tmp_path):
     )
 
 
+def test_scan_signature_changes_with_ignore_hidden(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    roots = normalized_scan_roots([str(root)])
+
+    assert scan_signature(roots, recursive=True) == scan_signature(roots, recursive=True, ignore_hidden=False)
+    assert scan_signature(roots, recursive=True) != scan_signature(roots, recursive=True, ignore_hidden=True)
+
+
+def test_refresh_ignores_hidden_files_and_folders(tmp_path):
+    root = tmp_path / "photos"
+    hidden = root / ".hidden"
+    hidden.mkdir(parents=True)
+    visible = root / "visible.jpg"
+    visible.write_bytes(b"image")
+    hidden_file = root / ".hidden-file.jpg"
+    hidden_file.write_bytes(b"image")
+    hidden_nested = hidden / "nested.jpg"
+    hidden_nested.write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+
+    default = index.refresh([str(root)], recursive=True)
+    assert default.image_count == 3
+
+    filtered = index.refresh([str(root)], recursive=True, ignore_hidden=True)
+    assert filtered.image_count == 1
+    assert index.paths(filtered.signature) == [str(visible.resolve())]
+
+
+def test_ignore_hidden_still_scans_explicit_hidden_root(tmp_path):
+    root = tmp_path / ".wallpapers"
+    inner = root / "inner"
+    inner.mkdir(parents=True)
+    deep = root / ".deep"
+    deep.mkdir()
+    top = root / "top.jpg"
+    top.write_bytes(b"image")
+    inner_image = inner / "inner.jpg"
+    inner_image.write_bytes(b"image")
+    (deep / "deep.jpg").write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(root)], recursive=True, ignore_hidden=True)
+
+    # The explicitly configured root is scanned; hidden folders below it are not.
+    assert sorted(index.paths(snapshot.signature)) == sorted(
+        [str(top.resolve()), str(inner_image.resolve())]
+    )
+
+
+def test_nonrecursive_refresh_ignores_hidden_files(tmp_path):
+    root = tmp_path / "photos"
+    visible, hidden = _touch_images(root, ("a.jpg", ".hidden.jpg"))
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(root)], recursive=False, ignore_hidden=True)
+
+    assert index.paths(snapshot.signature) == [visible]
+
+
+def test_ensure_reuses_index_for_same_hidden_setting_and_refreshes_on_toggle(monkeypatch, tmp_path):
+    root = tmp_path / "photos"
+    deep = root / ".deep"
+    deep.mkdir(parents=True)
+    (root / "a.jpg").write_bytes(b"image")
+    (deep / "b.jpg").write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+    first = index.ensure([str(root)], recursive=True, ignore_hidden=True, now_ns=1_000_000_000)
+    assert first.image_count == 1
+
+    real_walk = os.walk
+    walk_calls = []
+
+    def spy_walk(*args, **kwargs):
+        walk_calls.append(args)
+        return real_walk(*args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", spy_walk)
+    reused = index.ensure([str(root)], recursive=True, ignore_hidden=True, now_ns=1_000_000_000 + 1)
+    assert reused == first
+    assert walk_calls == []
+
+    toggled = index.ensure([str(root)], recursive=True, ignore_hidden=False, now_ns=1_000_000_000 + 2)
+    assert toggled.image_count == 2
+    assert len(walk_calls) == 1
+
+
 def test_refresh_excludes_images_below_min_size(tmp_path):
     root = tmp_path / "photos"
     paths = _write_sized_images(root)

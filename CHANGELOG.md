@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.7] - 2026-10-24
+
+### Added
+
+- Per-profile **Ignore hidden files and folders** filter inspired by John’s Background Switcher’s hidden-file handling: pictures and folders whose names start with a dot are excluded from rotation when enabled, with the option off by default.
+- Exposed under **Settings → Sources → Folder scanning** next to the recursive and minimum-image-size options.
+- Hidden filtering is part of the scan signature, so toggling the option refreshes the library index exactly once. Explicitly configured folders and individual pictures stay in rotation even when their own names start with a dot.
+
+### Changed
+
+- Bumped the package version to `0.2.7`.
+
 ## [0.2.6] - 2026-10-23
 
 ### Added

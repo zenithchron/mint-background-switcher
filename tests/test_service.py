@@ -1742,6 +1742,67 @@ def test_min_image_size_excludes_small_pictures_from_live_indexed_rotation(monke
     assert (tmp_path / "cache" / "library-index.sqlite3").is_file()
 
 
+def test_ignore_hidden_excludes_hidden_sources_in_dry_run(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    hidden_dir = image_dir / ".hidden"
+    hidden_dir.mkdir()
+    (image_dir / ".hidden-file.png").write_bytes(b"hidden")
+    (hidden_dir / "nested.png").write_bytes(b"hidden")
+    allowed = {
+        str((image_dir / f"img{idx}.png").resolve())
+        for idx in range(4)
+    }
+    cfg = service.load_config()
+    cfg.get_profile("P").ignore_hidden = True
+    save_config(cfg)
+    original = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert set(result.images) <= allowed
+    assert load_state().to_dict() == original
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+
+def test_ignore_hidden_excludes_hidden_sources_from_live_indexed_rotation(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    hidden_dir = image_dir / ".hidden"
+    hidden_dir.mkdir()
+    (image_dir / ".hidden-file.png").write_bytes(b"hidden")
+    (hidden_dir / "nested.png").write_bytes(b"hidden")
+    allowed = {
+        str((image_dir / f"img{idx}.png").resolve())
+        for idx in range(4)
+    }
+    cfg = service.load_config()
+    cfg.get_profile("P").ignore_hidden = True
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is True
+    assert set(result.images) <= allowed
+    assert (tmp_path / "cache" / "library-index.sqlite3").is_file()
+
+
+def test_ignore_hidden_default_off_still_rotates_hidden_sources(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    (image_dir / ".hidden-file.png").write_bytes(b"hidden")
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert set(result.images) <= {
+        str(path.resolve()) for path in image_dir.iterdir() if path.is_file()
+    }
+
+
 def test_min_image_size_exhausting_pool_falls_back_to_black(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

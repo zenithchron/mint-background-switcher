@@ -48,6 +48,20 @@ def test_min_image_size_roundtrip_and_coercion():
     assert Profile.from_dict("P", {"min_image_size": 10_000_000}).min_image_size == 100_000
 
 
+def test_ignore_hidden_roundtrip_and_coercion():
+    assert Profile(name="P").ignore_hidden is False
+
+    loaded = Profile.from_dict("P", {"ignore_hidden": True})
+    assert loaded.ignore_hidden is True
+    assert loaded.to_dict()["ignore_hidden"] is True
+
+    assert Profile.from_dict("P", {}).ignore_hidden is False
+    assert Profile.from_dict("P", {"ignore_hidden": "true"}).ignore_hidden is True
+    assert Profile.from_dict("P", {"ignore_hidden": "no"}).ignore_hidden is False
+    assert Profile.from_dict("P", {"ignore_hidden": "garbage"}).ignore_hidden is False
+    assert Profile.from_dict("P", {"ignore_hidden": None}).ignore_hidden is False
+
+
 def test_stale_profile_save_preserves_newer_working_directory(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     initial = Config(active_profile="P", profiles={"P": Profile(name="P")})

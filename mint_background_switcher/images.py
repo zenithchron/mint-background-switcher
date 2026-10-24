@@ -139,7 +139,12 @@ def meets_min_image_size(path: str | Path, min_image_size: int) -> bool:
     return dimension is not None and dimension >= min_image_size
 
 
-def scan_images(folders: Iterable[str], recursive: bool = True, min_image_size: int = 0) -> list[str]:
+def scan_images(
+    folders: Iterable[str],
+    recursive: bool = True,
+    min_image_size: int = 0,
+    ignore_hidden: bool = False,
+) -> list[str]:
     images: list[str] = []
     for raw_folder in folders:
         if not raw_folder:
@@ -156,8 +161,12 @@ def scan_images(folders: Iterable[str], recursive: bool = True, min_image_size: 
         if not is_dir:
             continue
         if recursive:
-            for root, _dirs, files in os.walk(path, onerror=lambda _err: None):
+            for root, dirs, files in os.walk(path, onerror=lambda _err: None):
+                if ignore_hidden:
+                    dirs[:] = [name for name in dirs if not name.startswith(".")]
                 for filename in files:
+                    if ignore_hidden and filename.startswith("."):
+                        continue
                     item = Path(root) / filename
                     if item.suffix.lower() in SUPPORTED_EXTENSIONS:
                         if not meets_min_image_size(item, min_image_size):
@@ -172,6 +181,8 @@ def scan_images(folders: Iterable[str], recursive: bool = True, min_image_size: 
             except OSError:
                 continue
             for item in iterator:
+                if ignore_hidden and item.name.startswith("."):
+                    continue
                 try:
                     if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS:
                         if meets_min_image_size(item, min_image_size):

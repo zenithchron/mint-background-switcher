@@ -183,6 +183,43 @@ def test_scan_images_filters_by_smallest_side(tmp_path: Path):
     assert scan_images([str(small)], recursive=True, min_image_size=50) == [str(small.resolve())]
 
 
+def test_scan_images_ignores_hidden_files_and_folders(tmp_path: Path):
+    hidden = tmp_path / ".hidden"
+    hidden.mkdir()
+    visible = tmp_path / "visible.png"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(visible)
+    hidden_file = tmp_path / ".hidden-file.png"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(hidden_file)
+    hidden_nested = hidden / "nested.png"
+    Image.new("RGB", (40, 30), (2, 1, 3)).save(hidden_nested)
+
+    default = scan_images([str(tmp_path)], recursive=True)
+    assert sorted(default) == sorted(
+        [str(visible.resolve()), str(hidden_file.resolve()), str(hidden_nested.resolve())]
+    )
+
+    filtered = scan_images([str(tmp_path)], recursive=True, ignore_hidden=True)
+    assert filtered == [str(visible.resolve())]
+
+    # An explicitly configured individual picture stays in rotation even when hidden.
+    assert scan_images([str(hidden_file)], recursive=True, ignore_hidden=True) == [
+        str(hidden_file.resolve())
+    ]
+
+
+def test_scan_images_nonrecursive_ignores_hidden_files(tmp_path: Path):
+    visible = tmp_path / "visible.png"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(visible)
+    hidden = tmp_path / ".hidden.png"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(hidden)
+
+    default = scan_images([str(tmp_path)], recursive=False)
+    assert sorted(default) == sorted([str(visible.resolve()), str(hidden.resolve())])
+    assert scan_images([str(tmp_path)], recursive=False, ignore_hidden=True) == [
+        str(visible.resolve())
+    ]
+
+
 def test_is_usable_image_rejects_files_pillow_cannot_decode(tmp_path: Path):
     valid = tmp_path / "valid.png"
     broken = tmp_path / "broken.jpg"

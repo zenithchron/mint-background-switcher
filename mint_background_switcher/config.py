@@ -141,6 +141,7 @@ class Profile:
     postcard_tilt: bool = True
     postcard_background: str = "dark"
     min_image_size: int = 0
+    ignore_hidden: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -162,6 +163,7 @@ class Profile:
             mode=mode,
             recursive=bool(data.get("recursive", True)),
             min_image_size=_coerce_min_image_size(data.get("min_image_size", 0)),
+            ignore_hidden=_coerce_bool(data.get("ignore_hidden", False)),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -185,6 +187,7 @@ class Profile:
             "mode": self.mode,
             "recursive": self.recursive,
             "min_image_size": self.min_image_size,
+            "ignore_hidden": self.ignore_hidden,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,

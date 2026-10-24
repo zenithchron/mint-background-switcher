@@ -85,13 +85,24 @@ def normalized_scan_roots(folders: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(roots))
 
 
-def scan_signature(roots: Iterable[str], *, recursive: bool, min_image_size: int = 0) -> str:
+def scan_signature(
+    roots: Iterable[str],
+    *,
+    recursive: bool,
+    min_image_size: int = 0,
+    ignore_hidden: bool = False,
+) -> str:
     try:
         size = int(min_image_size)
     except (TypeError, ValueError, OverflowError):
         size = 0
     payload = json.dumps(
-        {"recursive": bool(recursive), "min_image_size": max(0, size), "roots": list(roots)},
+        {
+            "recursive": bool(recursive),
+            "min_image_size": max(0, size),
+            "ignore_hidden": bool(ignore_hidden),
+            "roots": list(roots),
+        },
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
@@ -112,6 +123,7 @@ def _iter_image_paths(
     progress: Callable[[int, str], None] | None,
     root_counts: dict[str, int] | None = None,
     min_image_size: int = 0,
+    ignore_hidden: bool = False,
 ):
     count = 0
     for raw_root in roots:
@@ -140,10 +152,14 @@ def _iter_image_paths(
         if recursive:
             for directory, directories, filenames in os.walk(root, onerror=lambda _error: None):
                 _cancel_if_requested(cancelled)
+                if ignore_hidden:
+                    directories[:] = [name for name in directories if not name.startswith(".")]
                 directories.sort()
                 filenames.sort()
                 for filename in filenames:
                     _cancel_if_requested(cancelled)
+                    if ignore_hidden and filename.startswith("."):
+                        continue
                     if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
                         continue
                     if root_counts is not None:
@@ -162,6 +178,8 @@ def _iter_image_paths(
                 continue
             for entry in entries:
                 _cancel_if_requested(cancelled)
+                if ignore_hidden and entry.name.startswith("."):
+                    continue
                 try:
                     is_image = entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS
                 except OSError:
@@ -277,12 +295,13 @@ class LibraryIndex:
         *,
         recursive: bool,
         min_image_size: int = 0,
+        ignore_hidden: bool = False,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
     ) -> IndexSnapshot:
         roots = normalized_scan_roots(folders)
-        signature = scan_signature(roots, recursive=recursive, min_image_size=min_image_size)
+        signature = scan_signature(roots, recursive=recursive, min_image_size=min_image_size, ignore_hidden=ignore_hidden)
         refreshed_ns = time.time_ns() if now_ns is None else int(now_ns)
         connection = self._open()
         try:
@@ -298,6 +317,7 @@ class LibraryIndex:
                 progress=progress,
                 root_counts=root_counts,
                 min_image_size=min_image_size,
+                ignore_hidden=ignore_hidden,
             ):
                 batch.append((path,))
                 if len(batch) >= 1000:
@@ -354,13 +374,19 @@ class LibraryIndex:
         *,
         recursive: bool,
         min_image_size: int = 0,
+        ignore_hidden: bool = False,
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
     ) -> IndexSnapshot:
         roots = normalized_scan_roots(folders)
-        signature = scan_signature(roots, recursive=recursive, min_image_size=min_image_size)
+        signature = scan_signature(
+            roots,
+            recursive=recursive,
+            min_image_size=min_image_size,
+            ignore_hidden=ignore_hidden,
+        )
         current = self.snapshot(signature)
         current_time = time.time_ns() if now_ns is None else int(now_ns)
         max_age_ns = max(0, int(max_age_seconds * 1_000_000_000))
@@ -374,6 +400,7 @@ class LibraryIndex:
             roots,
             recursive=recursive,
             min_image_size=min_image_size,
+            ignore_hidden=ignore_hidden,
             cancelled=cancelled,
             progress=progress,
             now_ns=current_time,

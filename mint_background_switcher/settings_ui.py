@@ -238,6 +238,7 @@ class SettingsApp(tk.Tk):
         self.mode_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar()
         self.min_image_size_var = tk.StringVar()
+        self.ignore_hidden_var = tk.BooleanVar()
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
@@ -416,7 +417,13 @@ class SettingsApp(tk.Tk):
             text="Scan folders recursively",
             variable=self.recursive_var,
         )
-        self.recursive_checkbutton.grid(row=0, column=0, columnspan=3, sticky="w")
+        self.recursive_checkbutton.grid(row=0, column=0, sticky="w")
+        self.ignore_hidden_checkbutton = ttk.Checkbutton(
+            source_options,
+            text="Ignore hidden files and folders",
+            variable=self.ignore_hidden_var,
+        )
+        self.ignore_hidden_checkbutton.grid(row=0, column=2, sticky="w")
         ttk.Label(source_options, text="Minimum image size:").grid(row=1, column=0, sticky="w", pady=(5, 0))
         self.min_image_size_entry = ttk.Entry(source_options, textvariable=self.min_image_size_var, width=6)
         self.min_image_size_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(5, 0))
@@ -1001,6 +1008,7 @@ class SettingsApp(tk.Tk):
         self.mode_var.set(profile.mode)
         self.recursive_var.set(profile.recursive)
         self.min_image_size_var.set(str(profile.min_image_size))
+        self.ignore_hidden_var.set(profile.ignore_hidden)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
@@ -1071,6 +1079,8 @@ class SettingsApp(tk.Tk):
                 raise ValueError(
                     "Minimum image size must be a whole number of pixels (0 means no limit)."
                 ) from None
+        ignore_hidden_var = vars(self).get("ignore_hidden_var")
+        ignore_hidden = bool(ignore_hidden_var.get()) if ignore_hidden_var is not None else False
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -1094,6 +1104,7 @@ class SettingsApp(tk.Tk):
             mode=self.mode_var.get(),
             recursive=self.recursive_var.get(),
             min_image_size=min_image_size,
+            ignore_hidden=ignore_hidden,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",
