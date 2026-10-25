@@ -7,7 +7,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Local image folders with recursive scanning plus individually selected picture files.
 - Optional per-profile minimum image size (smallest side) that keeps small pictures out of rotation.
 - Optional per-profile ignore for hidden files and folders (names starting with a dot) in rotation.
-- Random no-repeat rotation until each pool is exhausted.
+- Random no-repeat rotation until each pool is exhausted, with an optional per-profile folder-order mode that cycles pictures in folder order and restarts from the beginning.
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
@@ -30,6 +30,11 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.8 - 2026-10-25
+
+- Added a per-profile **folder-order rotation** option under **Settings → Rotation & Shortcuts → Rotation**, inspired by John’s Background Switcher’s in-order playback: when enabled, pictures cycle in folder order and restart from the beginning after the last picture instead of the random no-repeat order, and the option is off by default.
+- Folder order applies to every layout mode, dry-run previews, and live rotations, and each picture still appears exactly once per cycle; bumped the package version to `0.2.8`.
 
 ### 0.2.7 - 2026-10-24
 

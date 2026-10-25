@@ -248,6 +248,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.effect_menu, app.layout_tab)
         assert is_descendant(app.bar_color_menu, app.layout_tab)
         assert is_descendant(app.interval_entry, app.rotation_tab)
+        assert is_descendant(app.sequential_checkbutton, app.rotation_tab)
         assert is_descendant(app.hotkey_entry, app.rotation_tab)
         assert is_descendant(app.desktop_menu, app.rotation_tab)
         assert is_descendant(app.collections_download_button, app.collections_tab)
@@ -270,6 +271,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             str(app.rotation_tab): (
                 app.rotation_scope_label,
                 app.interval_entry,
+                app.sequential_checkbutton,
                 app.hotkey_entry,
                 app.desktop_menu,
             ),
@@ -1988,6 +1990,48 @@ def test_settings_ignore_hidden_checkbutton_is_visible_and_persists(monkeypatch,
 
         app._load_profile("Default")
         assert app.ignore_hidden_var.get() is True
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_sequential_checkbutton_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        assert app.sequential_var.get() is False
+        assert is_descendant(app.sequential_checkbutton, app.rotation_tab)
+        assert app.sequential_checkbutton.winfo_ismapped()
+        assert app.sequential_checkbutton.winfo_width() >= app.sequential_checkbutton.winfo_reqwidth()
+        assert app.sequential_checkbutton.cget("text") == "Rotate pictures in folder order instead of random"
+
+        app.sequential_var.set(True)
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.sequential is True
+
+        app._load_profile("Default")
+        assert app.sequential_var.get() is True
     finally:
         app.destroy()
 

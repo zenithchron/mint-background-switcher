@@ -326,6 +326,39 @@ def test_batch_draw_does_not_repeat_until_pool_exhaustion(tmp_path):
     assert len(set(third)) == 4
 
 
+def test_sequential_draw_cycles_in_folder_order_and_wraps(tmp_path):
+    root = tmp_path / "photos"
+    _touch_images(root, ("c.jpg", "a.jpg", "b.jpg"))
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+    ordered = index.paths(snapshot.signature)
+    assert ordered == sorted(ordered)
+
+    first = index.draw(snapshot.signature, "bucket", 2, sequential=True)
+    second = index.draw(snapshot.signature, "bucket", 2, sequential=True)
+    third = index.draw(snapshot.signature, "bucket", 2, sequential=True)
+
+    assert first == ordered[:2]
+    assert second == [ordered[2], ordered[0]]
+    assert third == [ordered[1], ordered[2]]
+    assert index.remaining_count(snapshot.signature, "bucket") == 0
+
+
+def test_sequential_draw_through_selection_transaction_keeps_order(tmp_path):
+    root = tmp_path / "photos"
+    _touch_images(root, ("c.jpg", "a.jpg", "b.jpg"))
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+    ordered = index.paths(snapshot.signature)
+
+    with index.selection() as selection:
+        first = selection.draw(snapshot.signature, "bucket", 2, sequential=True)
+        second = selection.draw(snapshot.signature, "bucket", 1, sequential=True)
+
+    assert first == ordered[:2]
+    assert second == [ordered[2]]
+
+
 def test_selection_transaction_rolls_back_unapplied_draw(tmp_path):
     root = tmp_path / "photos"
     _touch_images(root, tuple(f"{index}.jpg" for index in range(4)))

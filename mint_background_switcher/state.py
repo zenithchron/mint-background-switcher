@@ -108,8 +108,14 @@ def _normalized_pool(pool: list[str]) -> list[str]:
     return sorted({str(Path(p).expanduser().resolve()) for p in pool})
 
 
-def draw_one(state: RuntimeState, bucket: str, pool: list[str], rng: random.Random | None = None) -> str:
-    chosen = draw_many(state, bucket, pool, 1, rng=rng)
+def draw_one(
+    state: RuntimeState,
+    bucket: str,
+    pool: list[str],
+    rng: random.Random | None = None,
+    sequential: bool = False,
+) -> str:
+    chosen = draw_many(state, bucket, pool, 1, rng=rng, sequential=sequential)
     if not chosen:
         raise ValueError(f"No images available for bucket {bucket}")
     return chosen[0]
@@ -121,6 +127,7 @@ def draw_many(
     pool: list[str],
     count: int,
     rng: random.Random | None = None,
+    sequential: bool = False,
 ) -> list[str]:
     rng = rng or random.SystemRandom()
     pool_norm = _normalized_pool(pool)
@@ -136,8 +143,14 @@ def draw_many(
             remaining = [p for p in pool_norm if p not in selected_set]
             if not remaining:
                 remaining = list(pool_norm)
-            rng.shuffle(remaining)
-        choice = remaining.pop()
+            if sequential:
+                remaining.sort()
+            else:
+                rng.shuffle(remaining)
+        elif sequential:
+            # A pool left over from a previous (random) cycle resumes in folder order.
+            remaining.sort()
+        choice = remaining.pop(0) if sequential else remaining.pop()
         selected.append(choice)
         selected_set.add(choice)
         state.remaining[bucket] = remaining

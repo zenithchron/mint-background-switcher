@@ -37,3 +37,30 @@ def test_draw_many_uses_set_membership_for_large_existing_remaining(monkeypatch)
 
     assert len(chosen) == 4
     assert len(set(chosen)) == 4
+
+
+def test_sequential_draw_folds_pool_in_folder_order_and_wraps_without_repeats():
+    state = RuntimeState()
+    pool = ["/tmp/c.jpg", "/tmp/a.jpg", "/tmp/b.jpg"]
+    first_cycle = [draw_one(state, "bucket", pool, rng=random.Random(3), sequential=True) for _ in range(3)]
+    assert first_cycle == ["/tmp/a.jpg", "/tmp/b.jpg", "/tmp/c.jpg"]
+    assert state.remaining["bucket"] == []
+    assert draw_one(state, "bucket", pool, rng=random.Random(3), sequential=True) == "/tmp/a.jpg"
+
+
+def test_sequential_draw_restarts_leftover_random_pool_in_folder_order():
+    pool = [f"/tmp/{name}.jpg" for name in ("c", "a", "b")]
+    state = RuntimeState(remaining={"bucket": ["/tmp/c.jpg", "/tmp/b.jpg"]})
+
+    chosen = draw_many(state, "bucket", pool, 2, rng=random.Random(4), sequential=True)
+
+    assert chosen == ["/tmp/b.jpg", "/tmp/c.jpg"]
+
+
+def test_sequential_draw_many_preserves_folder_order_within_batch():
+    state = RuntimeState()
+    pool = [f"/tmp/{name}.jpg" for name in ("d", "a", "c", "b")]
+
+    chosen = draw_many(state, "bucket", pool, 4, rng=random.Random(5), sequential=True)
+
+    assert chosen == ["/tmp/a.jpg", "/tmp/b.jpg", "/tmp/c.jpg", "/tmp/d.jpg"]

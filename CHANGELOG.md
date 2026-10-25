@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.8] - 2026-10-25
+
+### Added
+
+- Per-profile **folder-order rotation** inspired by John’s Background Switcher’s in-order playback: when enabled, pictures cycle in folder order and restart from the beginning after the last picture, instead of the random no-repeat order, with the option off by default.
+- Exposed it under **Settings → Rotation & Shortcuts → Rotation** next to the interval, with the existing Save Profile success/error feedback.
+- Folder order applies to every layout mode, to dry-run previews, and to live rotations; each picture still appears exactly once per cycle.
+
+### Changed
+
+- Bumped the package version to `0.2.8`.
+
 ## [0.2.7] - 2026-10-24
 
 ### Added

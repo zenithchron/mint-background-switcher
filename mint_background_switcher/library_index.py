@@ -426,6 +426,7 @@ class LibraryIndex:
         scan_id: int,
         bucket: str,
         rng: random.Random,
+        sequential: bool = False,
     ) -> int:
         image_ids = [
             int(row["id"])
@@ -436,7 +437,8 @@ class LibraryIndex:
         ]
         if not image_ids:
             return 0
-        rng.shuffle(image_ids)
+        if not sequential:
+            rng.shuffle(image_ids)
         connection.execute(
             "DELETE FROM remaining WHERE scan_id = ? AND bucket = ?",
             (scan_id, bucket),
@@ -455,6 +457,7 @@ class LibraryIndex:
         count: int,
         *,
         rng: random.Random | None = None,
+        sequential: bool = False,
     ) -> list[str]:
         if count <= 0:
             return []
@@ -479,7 +482,7 @@ class LibraryIndex:
                 if str(row["path"]) not in selected_in_batch
             ]
             if not candidates:
-                image_count = self._refill(connection, scan_id, bucket, random_source)
+                image_count = self._refill(connection, scan_id, bucket, random_source, sequential=sequential)
                 if image_count == 0:
                     break
                 rows = connection.execute(
@@ -522,9 +525,10 @@ class LibraryIndex:
         count: int,
         *,
         rng: random.Random | None = None,
+        sequential: bool = False,
     ) -> list[str]:
         with self.selection() as selection:
-            return selection.draw(signature, bucket, count, rng=rng)
+            return selection.draw(signature, bucket, count, rng=rng, sequential=sequential)
 
     def remaining_count(self, signature: str, bucket: str) -> int:
         with self._open() as connection:
@@ -584,6 +588,7 @@ class LibrarySelection:
         count: int,
         *,
         rng: random.Random | None = None,
+        sequential: bool = False,
     ) -> list[str]:
         return self._index._draw_in_transaction(
             self._transaction(),
@@ -591,6 +596,7 @@ class LibrarySelection:
             bucket,
             count,
             rng=rng,
+            sequential=sequential,
         )
 
     def discard(self, signature: str, path: str) -> None:

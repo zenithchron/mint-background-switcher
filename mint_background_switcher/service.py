@@ -87,13 +87,14 @@ def _draw_usable_many(
     count: int,
     *,
     rng: random.Random | None,
+    sequential: bool = False,
 ) -> list[str]:
     """Draw images while discarding selected files that Pillow cannot decode."""
 
     candidates = list(pool)
     selected: list[str] = []
     while candidates and len(selected) < count:
-        batch = draw_many(state, bucket, candidates, count - len(selected), rng=rng)
+        batch = draw_many(state, bucket, candidates, count - len(selected), rng=rng, sequential=sequential)
         if not batch:
             break
         for image in batch:
@@ -155,11 +156,12 @@ def _draw_from_pool(
     *,
     rng: random.Random | None,
     require_usable: bool = False,
+    sequential: bool = False,
 ) -> list[str]:
     if pool.paths is not None:
         if require_usable:
-            return _draw_usable_many(state, bucket, pool.paths, count, rng=rng)
-        return draw_many(state, bucket, pool.paths, count, rng=rng)
+            return _draw_usable_many(state, bucket, pool.paths, count, rng=rng, sequential=sequential)
+        return draw_many(state, bucket, pool.paths, count, rng=rng, sequential=sequential)
     if pool.index is None or pool.snapshot is None:
         return []
 
@@ -171,6 +173,7 @@ def _draw_from_pool(
             bucket,
             count - len(selected),
             rng=rng,
+            sequential=sequential,
         )
         if not batch:
             break
@@ -214,8 +217,9 @@ def _draw_one_from_pool(
     bucket: str,
     *,
     rng: random.Random | None,
+    sequential: bool = False,
 ) -> str:
-    selected = _draw_from_pool(state, pool, bucket, 1, rng=rng)
+    selected = _draw_from_pool(state, pool, bucket, 1, rng=rng, sequential=sequential)
     if not selected:
         raise ValueError(f"No images available for bucket {bucket}")
     return selected[0]
@@ -393,6 +397,7 @@ def _switch_once_with_state(
                 pool,
                 _profile_bucket(profile, "span"),
                 rng=rng,
+                sequential=profile.sequential,
             )
             wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color)
             images_used = [image]
@@ -425,6 +430,7 @@ def _switch_once_with_state(
                 _profile_bucket(profile, "montage"),
                 len(monitors) * 4,
                 rng=rng,
+                sequential=profile.sequential,
             )
             montage_by_monitor = {
                 monitor.name: chosen[index * 4 : (index + 1) * 4]
@@ -465,6 +471,7 @@ def _switch_once_with_state(
                     bucket,
                     len(monitors) * 5,
                     rng=rng,
+                    sequential=profile.sequential,
                 )
                 if not chosen:
                     wallpaper = _apply_black_fallback(
@@ -537,6 +544,7 @@ def _switch_once_with_state(
                     bucket,
                     requested_count,
                     rng=rng,
+                    sequential=profile.sequential,
                 )
                 if not chosen:
                     wallpaper = _apply_black_fallback(
@@ -606,6 +614,7 @@ def _switch_once_with_state(
                     bucket,
                     requested_count,
                     rng=rng,
+                    sequential=profile.sequential,
                 )
                 if not chosen:
                     wallpaper = _apply_black_fallback(
@@ -668,6 +677,7 @@ def _switch_once_with_state(
                 pool,
                 _profile_bucket(profile, "same"),
                 rng=rng,
+                sequential=profile.sequential,
             )
             selections = {monitor.name: image for monitor in monitors}
             images_used = [image]
@@ -701,6 +711,7 @@ def _switch_once_with_state(
                 _profile_bucket(profile, "shared"),
                 len(monitors),
                 rng=rng,
+                sequential=profile.sequential,
             )
             for monitor, image in zip(monitors, chosen):
                 selections[monitor.name] = image
@@ -743,6 +754,7 @@ def _switch_once_with_state(
                     pools_by_monitor[monitor.name],
                     _profile_bucket(profile, f"monitor:{monitor.name}"),
                     rng=rng,
+                    sequential=profile.sequential,
                 )
                 selections[monitor.name] = image
                 images_used.append(image)

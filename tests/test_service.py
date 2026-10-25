@@ -592,6 +592,34 @@ def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path
     assert "profile:P:same" not in state.remaining
 
 
+def test_sequential_profile_rotates_live_in_folder_order_and_wraps(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "same"
+    profile.sequential = True
+    save_config(cfg)
+    ordered = sorted(service.scan_images([str(tmp_path / "images")], recursive=True))
+    assert len(ordered) == 4
+
+    seen = [switch_once("P", dry_run=False).images[0] for _ in range(5)]
+
+    assert seen[:4] == ordered
+    assert seen[4] == ordered[0]
+
+
+def test_random_profile_stays_unordered_with_sequential_flag_absent(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "same"
+    save_config(cfg)
+
+    assert cfg.get_profile("P").sequential is False
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+    assert result.images[0] in service.scan_images([str(tmp_path / "images")], recursive=True)
+
+
 def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()
@@ -640,9 +668,9 @@ def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng)
+        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -791,9 +819,9 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng)
+        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -837,9 +865,9 @@ def test_postcard_span_uses_configured_count_across_combined_desktop(monkeypatch
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng)
+        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -945,9 +973,9 @@ def test_polaroid_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng)
+        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -992,9 +1020,9 @@ def test_polaroid_span_uses_configured_count_across_combined_desktop(monkeypatch
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng)
+        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
