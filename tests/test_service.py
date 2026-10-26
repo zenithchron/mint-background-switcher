@@ -1831,6 +1831,66 @@ def test_ignore_hidden_default_off_still_rotates_hidden_sources(monkeypatch, tmp
     }
 
 
+def test_ignore_patterns_excludes_matched_sources_in_dry_run(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    Image.new("RGB", (90, 50), (1, 1, 1)).save(image_dir / "thumb-1.png")
+    Image.new("RGB", (90, 50), (2, 2, 2)).save(image_dir / "Banner-2.png")
+    allowed = {
+        str((image_dir / f"img{idx}.png").resolve())
+        for idx in range(4)
+    }
+    cfg = service.load_config()
+    cfg.get_profile("P").ignore_patterns = ["thumb*", "banner*.png"]
+    save_config(cfg)
+    original = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert set(result.images) <= allowed
+    assert load_state().to_dict() == original
+    assert not service.LibraryIndex(tmp_path / "cache").database_path.exists()
+
+
+def test_ignore_patterns_excludes_matched_sources_from_live_indexed_rotation(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    Image.new("RGB", (90, 50), (1, 1, 1)).save(image_dir / "thumb-1.png")
+    Image.new("RGB", (90, 50), (2, 2, 2)).save(image_dir / "Banner-2.png")
+    allowed = {
+        str((image_dir / f"img{idx}.png").resolve())
+        for idx in range(4)
+    }
+    cfg = service.load_config()
+    cfg.get_profile("P").ignore_patterns = ["thumb*", "banner*.png"]
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is True
+    assert set(result.images) <= allowed
+    assert (tmp_path / "cache" / "library-index.sqlite3").is_file()
+
+
+def test_ignore_patterns_default_off_still_rotates_matched_sources(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    # Sorted first, so a sequential draw proves the matched file stays in the pool.
+    matched = image_dir / "aaa-thumb-1.png"
+    Image.new("RGB", (90, 50), (1, 1, 1)).save(matched)
+    cfg = service.load_config()
+    cfg.get_profile("P").sequential = True
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert str(matched.resolve()) in result.images
+
+
 def test_min_image_size_exhausting_pool_falls_back_to_black(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

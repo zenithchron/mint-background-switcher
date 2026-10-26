@@ -8,7 +8,7 @@ import secrets
 import shutil
 import stat
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,9 +132,12 @@ def _load_image_pool(
     progress: Callable[[int, str], None] | None,
     min_image_size: int = 0,
     ignore_hidden: bool = False,
+    ignore_patterns: Iterable[str] = (),
 ) -> _ImagePool:
     if dry_run:
-        return _ImagePool(paths=scan_images(folders, recursive, min_image_size, ignore_hidden))
+        return _ImagePool(
+            paths=scan_images(folders, recursive, min_image_size, ignore_hidden, ignore_patterns)
+        )
     if index is None:  # pragma: no cover - guarded by switch setup
         raise RuntimeError("live wallpaper rotation requires an image index")
     snapshot = index.ensure(
@@ -142,6 +145,7 @@ def _load_image_pool(
         recursive=recursive,
         min_image_size=min_image_size,
         ignore_hidden=ignore_hidden,
+        ignore_patterns=ignore_patterns,
         cancelled=cancelled,
         progress=progress,
     )
@@ -381,6 +385,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -413,6 +418,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -450,6 +456,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -522,6 +529,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -592,6 +600,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -661,6 +670,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -694,6 +704,7 @@ def _switch_once_with_state(
             progress=progress,
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
+            ignore_patterns=profile.ignore_patterns,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -733,6 +744,7 @@ def _switch_once_with_state(
                 progress=progress,
                 min_image_size=profile.min_image_size,
                 ignore_hidden=profile.ignore_hidden,
+                ignore_patterns=profile.ignore_patterns,
             )
             if not pool.empty:
                 pools_by_monitor[monitor.name] = pool

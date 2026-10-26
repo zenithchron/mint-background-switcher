@@ -54,6 +54,8 @@ POSTCARD_BACKGROUND_CHOICES = (
     "terrazzo",
 )
 VALID_POSTCARD_BACKGROUNDS = set(POSTCARD_BACKGROUND_CHOICES)
+MAX_IGNORE_PATTERNS = 20
+MAX_IGNORE_PATTERN_LENGTH = 120
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:
@@ -108,6 +110,24 @@ def _coerce_str_list(value: Any) -> list[str]:
     return [str(p) for p in value if str(p).strip()]
 
 
+def _coerce_ignore_patterns(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    patterns: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if not text or text in patterns:
+            continue
+        # Over-long patterns are dropped rather than truncated so a saved
+        # config can never hold a silently altered user pattern.
+        if len(text) > MAX_IGNORE_PATTERN_LENGTH:
+            continue
+        patterns.append(text)
+        if len(patterns) >= MAX_IGNORE_PATTERNS:
+            break
+    return patterns
+
+
 def _coerce_monitor_folders(value: Any) -> dict[str, list[str]]:
     if not isinstance(value, dict):
         return {}
@@ -142,6 +162,7 @@ class Profile:
     postcard_background: str = "dark"
     min_image_size: int = 0
     ignore_hidden: bool = False
+    ignore_patterns: list[str] = field(default_factory=list)
     sequential: bool = False
 
     @classmethod
@@ -165,6 +186,7 @@ class Profile:
             recursive=bool(data.get("recursive", True)),
             min_image_size=_coerce_min_image_size(data.get("min_image_size", 0)),
             ignore_hidden=_coerce_bool(data.get("ignore_hidden", False)),
+            ignore_patterns=_coerce_ignore_patterns(data.get("ignore_patterns", [])),
             sequential=_coerce_bool(data.get("sequential", False)),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
@@ -190,6 +212,7 @@ class Profile:
             "recursive": self.recursive,
             "min_image_size": self.min_image_size,
             "ignore_hidden": self.ignore_hidden,
+            "ignore_patterns": list(self.ignore_patterns),
             "sequential": self.sequential,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,

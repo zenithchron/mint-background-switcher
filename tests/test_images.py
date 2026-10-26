@@ -41,6 +41,7 @@ from mint_background_switcher.images import (
     image_min_dimension,
     is_usable_image,
     meets_min_image_size,
+    name_matches_ignore_patterns,
     scan_images,
 )
 from mint_background_switcher.monitor import Monitor
@@ -216,6 +217,58 @@ def test_scan_images_nonrecursive_ignores_hidden_files(tmp_path: Path):
     default = scan_images([str(tmp_path)], recursive=False)
     assert sorted(default) == sorted([str(visible.resolve()), str(hidden.resolve())])
     assert scan_images([str(tmp_path)], recursive=False, ignore_hidden=True) == [
+        str(visible.resolve())
+    ]
+
+
+def test_name_matches_ignore_patterns():
+    assert name_matches_ignore_patterns("photo.jpg", []) is False
+    assert name_matches_ignore_patterns("thumb-1.jpg", ["thumb*.jpg"]) is True
+    # Matching is case-insensitive on both the name and the pattern.
+    assert name_matches_ignore_patterns("Thumb-1.JPG", ["thumb*.jpg"]) is True
+    assert name_matches_ignore_patterns("thumb-1.jpg", ["THUMB*.JPG"]) is True
+    assert name_matches_ignore_patterns("photo.jpg", ["banner*.png"]) is False
+    # Patterns match the file name only, never the directory portion.
+    assert name_matches_ignore_patterns("a/b/c/photo.jpg", ["c/photo.jpg"]) is False
+    assert name_matches_ignore_patterns("a/b/c/photo.jpg", ["photo.jpg"]) is True
+    # Multiple patterns: any match wins; blank patterns are ignored.
+    assert name_matches_ignore_patterns("photo.jpg", ["thumb*", "photo.jpg"]) is True
+    assert name_matches_ignore_patterns("photo.jpg", ["  ", "thumb*"]) is False
+    # Path objects and surrounding whitespace are handled.
+    assert name_matches_ignore_patterns(Path("x/Thumb-1.jpg"), ["  thumb*  "]) is True
+
+
+def test_scan_images_ignores_name_patterns(tmp_path: Path):
+    visible = tmp_path / "photo.jpg"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(visible)
+    thumb = tmp_path / "thumb-1.jpg"
+    Image.new("RGB", (40, 30), (2, 1, 3)).save(thumb)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    banner = nested / "Banner-2.png"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(banner)
+
+    default = scan_images([str(tmp_path)], recursive=True)
+    assert sorted(default) == sorted(
+        [str(visible.resolve()), str(thumb.resolve()), str(banner.resolve())]
+    )
+
+    filtered = scan_images([str(tmp_path)], recursive=True, ignore_patterns=["thumb*", "banner*.png"])
+    assert filtered == [str(visible.resolve())]
+
+    # An explicitly configured individual picture stays in rotation even when matched.
+    assert scan_images([str(thumb)], recursive=True, ignore_patterns=["thumb*"]) == [
+        str(thumb.resolve())
+    ]
+
+
+def test_scan_images_nonrecursive_ignores_name_patterns(tmp_path: Path):
+    visible = tmp_path / "photo.jpg"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(visible)
+    thumb = tmp_path / "thumb-1.jpg"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(thumb)
+
+    assert scan_images([str(tmp_path)], recursive=False, ignore_patterns=["thumb*"]) == [
         str(visible.resolve())
     ]
 

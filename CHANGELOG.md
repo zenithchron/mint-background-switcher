@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.9] - 2026-10-26
+
+### Added
+
+- Per-profile **Ignore name patterns** filter inspired by John's Background Switcher's wildcard picture ignoring: comma-separated wildcard patterns (for example `thumb*.jpg, banner*.png`) that skip matching picture file names when the library is scanned, with the option empty by default.
+- Exposed it under **Settings → Sources → Folder scanning**, with Save Profile error feedback when a pattern is longer than 120 characters or more than 20 patterns are entered.
+- Patterns are case-insensitive globs matched against picture file names only; explicitly configured individual pictures stay in rotation even when they match, and editing the patterns refreshes the library index exactly once.
+
+### Changed
+
+- Bumped the package version to `0.2.9`.
+
 ## [0.2.8] - 2026-10-25
 
 ### Added

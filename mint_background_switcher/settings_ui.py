@@ -15,6 +15,8 @@ from . import APP_NAME, __version__, public_collections, updater
 from .config import (
     BAR_COLOR_CHOICES,
     EFFECT_CHOICES,
+    MAX_IGNORE_PATTERN_LENGTH,
+    MAX_IGNORE_PATTERNS,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
@@ -239,6 +241,7 @@ class SettingsApp(tk.Tk):
         self.recursive_var = tk.BooleanVar()
         self.min_image_size_var = tk.StringVar()
         self.ignore_hidden_var = tk.BooleanVar()
+        self.ignore_patterns_var = tk.StringVar()
         self.sequential_var = tk.BooleanVar()
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
@@ -432,6 +435,17 @@ class SettingsApp(tk.Tk):
             source_options,
             text="px on the smallest side; 0 means no limit. Smaller pictures are skipped when the library is scanned.",
         ).grid(row=1, column=2, sticky="w", pady=(5, 0))
+        ttk.Label(source_options, text="Ignore name patterns:").grid(row=2, column=0, sticky="w", pady=(5, 0))
+        self.ignore_patterns_entry = ttk.Entry(
+            source_options,
+            textvariable=self.ignore_patterns_var,
+            width=24,
+        )
+        self.ignore_patterns_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(5, 0))
+        ttk.Label(
+            source_options,
+            text="wildcards, comma-separated; for example thumb*.jpg",
+        ).grid(row=2, column=2, sticky="w", pady=(5, 0))
         source_options.columnconfigure(2, weight=1)
 
         shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
@@ -1016,6 +1030,7 @@ class SettingsApp(tk.Tk):
         self.recursive_var.set(profile.recursive)
         self.min_image_size_var.set(str(profile.min_image_size))
         self.ignore_hidden_var.set(profile.ignore_hidden)
+        self.ignore_patterns_var.set(", ".join(profile.ignore_patterns))
         self.sequential_var.set(profile.sequential)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
@@ -1089,6 +1104,25 @@ class SettingsApp(tk.Tk):
                 ) from None
         ignore_hidden_var = vars(self).get("ignore_hidden_var")
         ignore_hidden = bool(ignore_hidden_var.get()) if ignore_hidden_var is not None else False
+        ignore_patterns_var = vars(self).get("ignore_patterns_var")
+        raw_patterns = str(ignore_patterns_var.get()).strip() if ignore_patterns_var is not None else ""
+        ignore_patterns: list[str] = []
+        seen_patterns: set[str] = set()
+        for raw in raw_patterns.split(","):
+            pattern = raw.strip()
+            if not pattern:
+                continue
+            if len(pattern) > MAX_IGNORE_PATTERN_LENGTH:
+                raise ValueError(
+                    f"Each ignore pattern can be at most {MAX_IGNORE_PATTERN_LENGTH} characters: {pattern!r}"
+                )
+            lowered = pattern.lower()
+            if lowered in seen_patterns:
+                continue
+            seen_patterns.add(lowered)
+            ignore_patterns.append(pattern)
+        if len(ignore_patterns) > MAX_IGNORE_PATTERNS:
+            raise ValueError(f"At most {MAX_IGNORE_PATTERNS} ignore patterns can be saved.")
         sequential_var = vars(self).get("sequential_var")
         sequential = bool(sequential_var.get()) if sequential_var is not None else False
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
@@ -1115,6 +1149,7 @@ class SettingsApp(tk.Tk):
             recursive=self.recursive_var.get(),
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
+            ignore_patterns=ignore_patterns,
             sequential=sequential,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},

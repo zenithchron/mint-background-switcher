@@ -13,7 +13,7 @@ import sqlite3
 import time
 import uuid
 
-from .images import SUPPORTED_EXTENSIONS, meets_min_image_size
+from .images import SUPPORTED_EXTENSIONS, meets_min_image_size, name_matches_ignore_patterns
 
 INDEX_FILENAME = "library-index.sqlite3"
 SCHEMA_VERSION = 2
@@ -85,12 +85,19 @@ def normalized_scan_roots(folders: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(roots))
 
 
+def normalized_ignore_patterns(patterns: Iterable[str]) -> tuple[str, ...]:
+    """Canonicalize ignore patterns so equivalent inputs share one scan signature."""
+
+    return tuple(sorted({str(p).strip().lower() for p in patterns if str(p).strip()}))
+
+
 def scan_signature(
     roots: Iterable[str],
     *,
     recursive: bool,
     min_image_size: int = 0,
     ignore_hidden: bool = False,
+    ignore_patterns: Iterable[str] = (),
 ) -> str:
     try:
         size = int(min_image_size)
@@ -101,6 +108,7 @@ def scan_signature(
             "recursive": bool(recursive),
             "min_image_size": max(0, size),
             "ignore_hidden": bool(ignore_hidden),
+            "ignore_patterns": list(normalized_ignore_patterns(ignore_patterns)),
             "roots": list(roots),
         },
         ensure_ascii=True,
@@ -124,6 +132,7 @@ def _iter_image_paths(
     root_counts: dict[str, int] | None = None,
     min_image_size: int = 0,
     ignore_hidden: bool = False,
+    ignore_patterns: tuple[str, ...] = (),
 ):
     count = 0
     for raw_root in roots:
@@ -160,6 +169,8 @@ def _iter_image_paths(
                     _cancel_if_requested(cancelled)
                     if ignore_hidden and filename.startswith("."):
                         continue
+                    if ignore_patterns and name_matches_ignore_patterns(filename, ignore_patterns):
+                        continue
                     if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
                         continue
                     if root_counts is not None:
@@ -179,6 +190,8 @@ def _iter_image_paths(
             for entry in entries:
                 _cancel_if_requested(cancelled)
                 if ignore_hidden and entry.name.startswith("."):
+                    continue
+                if ignore_patterns and name_matches_ignore_patterns(entry.name, ignore_patterns):
                     continue
                 try:
                     is_image = entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS
@@ -296,12 +309,20 @@ class LibraryIndex:
         recursive: bool,
         min_image_size: int = 0,
         ignore_hidden: bool = False,
+        ignore_patterns: Iterable[str] = (),
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
     ) -> IndexSnapshot:
         roots = normalized_scan_roots(folders)
-        signature = scan_signature(roots, recursive=recursive, min_image_size=min_image_size, ignore_hidden=ignore_hidden)
+        patterns = normalized_ignore_patterns(ignore_patterns)
+        signature = scan_signature(
+            roots,
+            recursive=recursive,
+            min_image_size=min_image_size,
+            ignore_hidden=ignore_hidden,
+            ignore_patterns=patterns,
+        )
         refreshed_ns = time.time_ns() if now_ns is None else int(now_ns)
         connection = self._open()
         try:
@@ -318,6 +339,7 @@ class LibraryIndex:
                 root_counts=root_counts,
                 min_image_size=min_image_size,
                 ignore_hidden=ignore_hidden,
+                ignore_patterns=patterns,
             ):
                 batch.append((path,))
                 if len(batch) >= 1000:
@@ -375,6 +397,7 @@ class LibraryIndex:
         recursive: bool,
         min_image_size: int = 0,
         ignore_hidden: bool = False,
+        ignore_patterns: Iterable[str] = (),
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
@@ -386,6 +409,7 @@ class LibraryIndex:
             recursive=recursive,
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
+            ignore_patterns=ignore_patterns,
         )
         current = self.snapshot(signature)
         current_time = time.time_ns() if now_ns is None else int(now_ns)
@@ -401,6 +425,7 @@ class LibraryIndex:
             recursive=recursive,
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
+            ignore_patterns=ignore_patterns,
             cancelled=cancelled,
             progress=progress,
             now_ns=current_time,

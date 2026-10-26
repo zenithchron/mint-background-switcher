@@ -1,6 +1,8 @@
 import json
 
 from mint_background_switcher.config import (
+    MAX_IGNORE_PATTERN_LENGTH,
+    MAX_IGNORE_PATTERNS,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
@@ -60,6 +62,33 @@ def test_ignore_hidden_roundtrip_and_coercion():
     assert Profile.from_dict("P", {"ignore_hidden": "no"}).ignore_hidden is False
     assert Profile.from_dict("P", {"ignore_hidden": "garbage"}).ignore_hidden is False
     assert Profile.from_dict("P", {"ignore_hidden": None}).ignore_hidden is False
+
+
+def test_ignore_patterns_roundtrip_and_coercion():
+    assert Profile(name="P").ignore_patterns == []
+
+    loaded = Profile.from_dict("P", {"ignore_patterns": ["thumb*.jpg", "banner-*.png"]})
+    assert loaded.ignore_patterns == ["thumb*.jpg", "banner-*.png"]
+    assert loaded.to_dict()["ignore_patterns"] == ["thumb*.jpg", "banner-*.png"]
+
+    assert Profile.from_dict("P", {}).ignore_patterns == []
+    # Non-list values are dropped rather than raised on.
+    assert Profile.from_dict("P", {"ignore_patterns": "thumb*"}).ignore_patterns == []
+    assert Profile.from_dict("P", {"ignore_patterns": None}).ignore_patterns == []
+
+    # Whitespace is trimmed and duplicates are removed (order-preserving).
+    assert Profile.from_dict("P", {"ignore_patterns": [" a ", "a", "b", "b "]}).ignore_patterns == [
+        "a",
+        "b",
+    ]
+    # Blank-only entries are dropped.
+    assert Profile.from_dict("P", {"ignore_patterns": ["", "   "]}).ignore_patterns == []
+    # Oversized pattern lists are capped; over-long patterns are dropped.
+    many = [f"p{i}*" for i in range(MAX_IGNORE_PATTERNS + 10)]
+    assert len(Profile.from_dict("P", {"ignore_patterns": many}).ignore_patterns) == MAX_IGNORE_PATTERNS
+    at_limit = "x" * MAX_IGNORE_PATTERN_LENGTH
+    assert Profile.from_dict("P", {"ignore_patterns": [at_limit]}).ignore_patterns == [at_limit]
+    assert Profile.from_dict("P", {"ignore_patterns": ["x" * (MAX_IGNORE_PATTERN_LENGTH + 1)]}).ignore_patterns == []
 
 
 def test_sequential_roundtrip_and_coercion():

@@ -11,6 +11,7 @@ from mint_background_switcher.library_index import (
     LibraryIndex,
     LibraryIndexError,
     LibraryScanCancelled,
+    normalized_ignore_patterns,
     normalized_scan_roots,
     scan_signature,
 )
@@ -195,6 +196,113 @@ def test_ensure_reuses_index_for_same_hidden_setting_and_refreshes_on_toggle(mon
 
     toggled = index.ensure([str(root)], recursive=True, ignore_hidden=False, now_ns=1_000_000_000 + 2)
     assert toggled.image_count == 2
+    assert len(walk_calls) == 1
+
+
+def test_normalized_ignore_patterns_canonicalize_order_case_and_blanks():
+    assert normalized_ignore_patterns([]) == ()
+    assert normalized_ignore_patterns(["  ", ""]) == ()
+    assert normalized_ignore_patterns(["b*", "A*", "b*"]) == ("a*", "b*")
+
+
+def test_scan_signature_changes_with_ignore_patterns(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    roots = normalized_scan_roots([str(root)])
+
+    assert scan_signature(roots, recursive=True) == scan_signature(
+        roots, recursive=True, ignore_patterns=()
+    )
+    assert scan_signature(roots, recursive=True) != scan_signature(
+        roots, recursive=True, ignore_patterns=["thumb*"]
+    )
+    # Equivalent inputs (case, order, duplicates, blanks) share one signature.
+    assert scan_signature(roots, recursive=True, ignore_patterns=["a*", "b*"]) == scan_signature(
+        roots, recursive=True, ignore_patterns=["B*", " A* ", "b*"]
+    )
+    assert scan_signature(roots, recursive=True, ignore_patterns=["a*"]) != scan_signature(
+        roots, recursive=True, ignore_patterns=["b*"]
+    )
+
+
+def test_refresh_ignores_name_patterns(tmp_path):
+    root = tmp_path / "photos"
+    (root / "nested").mkdir(parents=True)
+    visible = root / "photo.jpg"
+    visible.write_bytes(b"image")
+    thumb = root / "thumb-1.jpg"
+    thumb.write_bytes(b"image")
+    banner = root / "nested" / "Banner-2.png"
+    banner.write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+
+    default = index.refresh([str(root)], recursive=True)
+    assert default.image_count == 3
+
+    filtered = index.refresh([str(root)], recursive=True, ignore_patterns=["thumb*", "banner*"])
+    assert filtered.image_count == 1
+    assert index.paths(filtered.signature) == [str(visible.resolve())]
+
+
+def test_nonrecursive_refresh_ignores_name_patterns(tmp_path):
+    root = tmp_path / "photos"
+    visible, thumb = _touch_images(root, ("photo.jpg", "thumb-1.jpg"))
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(root)], recursive=False, ignore_patterns=["thumb*"])
+
+    assert index.paths(snapshot.signature) == [visible]
+
+
+def test_ignore_patterns_still_scan_explicit_matched_root(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    matched = root / "thumb-1.jpg"
+    matched.write_bytes(b"image")
+    other = root / "other.jpg"
+    other.write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+
+    # An explicitly configured individual picture matching a pattern stays in rotation.
+    snapshot = index.refresh([str(matched)], recursive=True, ignore_patterns=["thumb*"])
+    assert index.paths(snapshot.signature) == [str(matched.resolve())]
+
+    # A matching folder name does not matter: its pictures are matched by name.
+    snapshot = index.refresh([str(root)], recursive=True, ignore_patterns=["thumb*"])
+    assert index.paths(snapshot.signature) == [str(other.resolve())]
+
+
+def test_ensure_reuses_index_for_same_patterns_and_refreshes_on_change(monkeypatch, tmp_path):
+    root = tmp_path / "photos"
+    (root / "nested").mkdir(parents=True)
+    (root / "a.jpg").write_bytes(b"image")
+    (root / "nested" / "b.jpg").write_bytes(b"image")
+    (root / "thumb-1.jpg").write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+    first = index.ensure(
+        [str(root)], recursive=True, ignore_patterns=["thumb*"], now_ns=1_000_000_000
+    )
+    assert first.image_count == 2
+
+    real_walk = os.walk
+    walk_calls = []
+
+    def spy_walk(*args, **kwargs):
+        walk_calls.append(args)
+        return real_walk(*args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", spy_walk)
+    # Equivalent pattern inputs (case/whitespace/order) reuse the same index.
+    reused = index.ensure(
+        [str(root)], recursive=True, ignore_patterns=["THUMB* ", "thumb*"], now_ns=1_000_000_001
+    )
+    assert reused == first
+    assert walk_calls == []
+
+    changed = index.ensure(
+        [str(root)], recursive=True, ignore_patterns=["thumb*", "b*"], now_ns=1_000_000_002
+    )
+    assert changed.image_count == 1
     assert len(walk_calls) == 1
 
 

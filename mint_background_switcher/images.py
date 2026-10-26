@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date
+import fnmatch
 import os
 from pathlib import Path
 import random
@@ -139,11 +140,28 @@ def meets_min_image_size(path: str | Path, min_image_size: int) -> bool:
     return dimension is not None and dimension >= min_image_size
 
 
+def name_matches_ignore_patterns(filename: str | Path, patterns: Iterable[str]) -> bool:
+    """Return whether a file name matches any configured ignore pattern.
+
+    Patterns are case-insensitive wildcards matched against the file name only
+    (the directory is ignored), using glob syntax such as ``thumb*.jpg``.
+    """
+    name = os.path.basename(str(filename)).lower()
+    for raw in patterns:
+        pattern = str(raw).strip().lower()
+        if not pattern:
+            continue
+        if fnmatch.fnmatchcase(name, pattern):
+            return True
+    return False
+
+
 def scan_images(
     folders: Iterable[str],
     recursive: bool = True,
     min_image_size: int = 0,
     ignore_hidden: bool = False,
+    ignore_patterns: Iterable[str] = (),
 ) -> list[str]:
     images: list[str] = []
     for raw_folder in folders:
@@ -167,6 +185,8 @@ def scan_images(
                 for filename in files:
                     if ignore_hidden and filename.startswith("."):
                         continue
+                    if name_matches_ignore_patterns(filename, ignore_patterns):
+                        continue
                     item = Path(root) / filename
                     if item.suffix.lower() in SUPPORTED_EXTENSIONS:
                         if not meets_min_image_size(item, min_image_size):
@@ -182,6 +202,8 @@ def scan_images(
                 continue
             for item in iterator:
                 if ignore_hidden and item.name.startswith("."):
+                    continue
+                if name_matches_ignore_patterns(item.name, ignore_patterns):
                     continue
                 try:
                     if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS:
