@@ -439,7 +439,7 @@ class SettingsApp(tk.Tk):
         self.ignore_patterns_entry = ttk.Entry(
             source_options,
             textvariable=self.ignore_patterns_var,
-            width=24,
+            width=11,
         )
         self.ignore_patterns_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(5, 0))
         ttk.Label(
