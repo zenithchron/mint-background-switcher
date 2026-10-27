@@ -122,14 +122,38 @@ def _save_png_atomic(image: Image.Image, output_path: str | Path) -> Path:
     return output
 
 
-def image_min_dimension(path: str | Path) -> int | None:
-    """Return an image's smallest side in pixels from its header, or None when unreadable."""
+def _image_size(path: str | Path) -> tuple[int, int] | None:
+    """Return the image's (width, height) from its header, or None when unreadable."""
     try:
         with Image.open(path) as image:
-            width, height = image.size
+            return image.size
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
         return None
-    return min(width, height)
+
+
+def image_min_dimension(path: str | Path) -> int | None:
+    """Return an image's smallest side in pixels from its header, or None when unreadable."""
+    size = _image_size(path)
+    if size is None:
+        return None
+    return min(size)
+
+
+def image_orientation(path: str | Path) -> str:
+    """Return an image's orientation from its header.
+
+    Returns ``"landscape"``, ``"portrait"``, or ``"square"`` based on pixel
+    dimensions, or ``"unknown"`` when the header cannot be read.
+    """
+    size = _image_size(path)
+    if size is None:
+        return "unknown"
+    width, height = size
+    if width > height:
+        return "landscape"
+    if height > width:
+        return "portrait"
+    return "square"
 
 
 def meets_min_image_size(path: str | Path, min_image_size: int) -> bool:

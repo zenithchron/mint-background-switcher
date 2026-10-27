@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
@@ -13,7 +13,7 @@ import sqlite3
 import time
 import uuid
 
-from .images import SUPPORTED_EXTENSIONS, meets_min_image_size, name_matches_ignore_patterns
+from .images import SUPPORTED_EXTENSIONS, image_orientation, meets_min_image_size, name_matches_ignore_patterns
 
 INDEX_FILENAME = "library-index.sqlite3"
 SCHEMA_VERSION = 2
@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS remaining (
 );
 CREATE INDEX IF NOT EXISTS remaining_draw_order
     ON remaining (scan_id, bucket, rank, image_id);
+CREATE TABLE IF NOT EXISTS orientation_cache (
+    path TEXT PRIMARY KEY,
+    orientation TEXT NOT NULL,
+    mtime_ns INTEGER NOT NULL
+);
 """
 
 
@@ -54,6 +59,27 @@ class LibraryIndexError(RuntimeError):
 
 class LibraryScanCancelled(LibraryIndexError):
     """Raised when a caller cancels an in-progress source-folder scan."""
+
+
+def _file_mtime_ns(path: str) -> int | None:
+    try:
+        return os.lstat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
+def orientation_matches(required: str | None, actual: str) -> bool:
+    """Whether an image with ``actual`` orientation may fill a slot requiring ``required``.
+
+    A ``None`` requirement (or a square monitor) accepts any picture, and an
+    unreadable (``"unknown"``) or square picture may serve any monitor, so one
+    odd-shaped or damaged picture never blocks rotation.
+    """
+    if required is None or required == "square":
+        return True
+    if actual in ("unknown", "square"):
+        return True
+    return required == actual
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,6 +402,10 @@ class LibraryIndex:
                 "DELETE FROM images WHERE scan_id = ? AND path NOT IN (SELECT path FROM scan_stage)",
                 (scan_id,),
             )
+            # Drop orientation entries for files that left every scan.
+            connection.execute(
+                "DELETE FROM orientation_cache WHERE path NOT IN (SELECT DISTINCT path FROM images)"
+            )
             connection.execute(
                 "UPDATE scans SET roots_json = ?, recursive = ?, refreshed_ns = ?, image_count = ? "
                 "WHERE id = ?",
@@ -440,6 +470,32 @@ class LibraryIndex:
             ).fetchall()
             return [str(row["path"]) for row in rows]
 
+    def cached_orientation(self, path: str) -> str:
+        """Return a source's orientation from the index cache.
+
+        Header reads happen only on a cache miss or after the file changed.
+        Rotations resolve orientations through the queue's orientation_cache
+        join (``_queue_rows``); this is the direct single-path lookup.
+        """
+        with self._open() as connection:
+            return self._cached_orientation(connection, path)
+
+    def _cached_orientation(self, connection: sqlite3.Connection, path: str, mtime_ns: int | None = None) -> str:
+        row = connection.execute(
+            "SELECT orientation, mtime_ns FROM orientation_cache WHERE path = ?", (path,)
+        ).fetchone()
+        if mtime_ns is None:
+            mtime_ns = _file_mtime_ns(path)
+        if row is not None and row["mtime_ns"] == mtime_ns:
+            return str(row["orientation"])
+        orientation = image_orientation(path)
+        connection.execute(
+            "INSERT INTO orientation_cache(path, orientation, mtime_ns) VALUES (?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET orientation = excluded.orientation, mtime_ns = excluded.mtime_ns",
+            (path, orientation, mtime_ns if mtime_ns is not None else 0),
+        )
+        return orientation
+
     @staticmethod
     def _scan_id(connection: sqlite3.Connection, signature: str) -> int | None:
         row = connection.execute("SELECT id FROM scans WHERE signature = ?", (signature,)).fetchone()
@@ -483,9 +539,19 @@ class LibraryIndex:
         *,
         rng: random.Random | None = None,
         sequential: bool = False,
+        orientations: Sequence[str | None] | None = None,
     ) -> list[str]:
         if count <= 0:
             return []
+        if orientations is not None and len(orientations) == count:
+            return self._draw_oriented_in_transaction(
+                connection,
+                signature,
+                bucket,
+                tuple(orientations),
+                rng=rng,
+                sequential=sequential,
+            )
         random_source = rng or random.SystemRandom()
         selected: list[str] = []
         selected_in_batch: set[str] = set()
@@ -538,6 +604,94 @@ class LibraryIndex:
             selected_in_batch.update(chosen_paths)
         return selected
 
+    def _draw_oriented_in_transaction(
+        self,
+        connection: sqlite3.Connection,
+        signature: str,
+        bucket: str,
+        orientations: tuple[str | None, ...],
+        *,
+        rng: random.Random | None,
+        sequential: bool,
+    ) -> list[str]:
+        """Draw one candidate per slot, preferring each slot's monitor orientation.
+
+        Non-matching pictures stay queued for a later slot or cycle. When the
+        pool holds no matching picture at all, the slot falls back to whatever
+        remains so rotation never blocks on shape alone. When fewer pictures
+        than slots remain, the pool wraps around and reuses pictures, matching
+        the ordinary draw path.
+        """
+        random_source = rng or random.SystemRandom()
+        scan_id = self._scan_id(connection, signature)
+        if scan_id is None:
+            return []
+        selected: list[str] = []
+        for required in orientations:
+            path = self._pick_oriented_candidate(
+                connection,
+                scan_id,
+                bucket,
+                required,
+                random_source,
+                sequential,
+            )
+            if path is None:
+                break
+            selected.append(path)
+        return selected
+
+    def _queue_rows(self, connection: sqlite3.Connection, scan_id: int, bucket: str) -> list[sqlite3.Row]:
+        return connection.execute(
+            "SELECT images.id AS image_id, images.path AS path, "
+            "oc.orientation AS orientation, oc.mtime_ns AS cache_mtime "
+            "FROM remaining "
+            "JOIN images ON images.id = remaining.image_id "
+            "LEFT JOIN orientation_cache AS oc ON oc.path = images.path "
+            "WHERE remaining.scan_id = ? AND remaining.bucket = ? "
+            "ORDER BY remaining.rank, remaining.image_id",
+            (scan_id, bucket),
+        ).fetchall()
+
+    def _resolve_orientation(self, connection: sqlite3.Connection, row: sqlite3.Row) -> str:
+        mtime_ns = _file_mtime_ns(str(row["path"]))
+        if row["orientation"] is not None and row["cache_mtime"] == mtime_ns:
+            return str(row["orientation"])
+        return self._cached_orientation(connection, str(row["path"]), mtime_ns)
+
+    @staticmethod
+    def _take_candidate(connection: sqlite3.Connection, scan_id: int, bucket: str, row: sqlite3.Row) -> str:
+        connection.execute(
+            "DELETE FROM remaining WHERE scan_id = ? AND bucket = ? AND image_id = ?",
+            (scan_id, bucket, int(row["image_id"])),
+        )
+        return str(row["path"])
+
+    def _pick_oriented_candidate(
+        self,
+        connection: sqlite3.Connection,
+        scan_id: int,
+        bucket: str,
+        required: str | None,
+        random_source: random.Random,
+        sequential: bool,
+    ) -> str | None:
+        for _attempt in range(2):
+            rows = self._queue_rows(connection, scan_id, bucket)
+            if not rows:
+                if self._refill(connection, scan_id, bucket, random_source, sequential=sequential) == 0:
+                    return None
+                continue
+            fallback_row = rows[0]
+            for row in rows:
+                if orientation_matches(required, self._resolve_orientation(connection, row)):
+                    return self._take_candidate(connection, scan_id, bucket, row)
+            # No matching picture: take the queued head so rotation never
+            # blocks on shape alone (an already-used picture reappears here
+            # only after the pool wrapped around, mirroring draw_many).
+            return self._take_candidate(connection, scan_id, bucket, fallback_row)
+        return None
+
     def selection(self) -> LibrarySelection:
         """Return a lazy transaction that can span selection and wallpaper composition."""
 
@@ -551,9 +705,12 @@ class LibraryIndex:
         *,
         rng: random.Random | None = None,
         sequential: bool = False,
+        orientations: Sequence[str | None] | None = None,
     ) -> list[str]:
         with self.selection() as selection:
-            return selection.draw(signature, bucket, count, rng=rng, sequential=sequential)
+            return selection.draw(
+                signature, bucket, count, rng=rng, sequential=sequential, orientations=orientations
+            )
 
     def remaining_count(self, signature: str, bucket: str) -> int:
         with self._open() as connection:
@@ -614,6 +771,7 @@ class LibrarySelection:
         *,
         rng: random.Random | None = None,
         sequential: bool = False,
+        orientations: Sequence[str | None] | None = None,
     ) -> list[str]:
         return self._index._draw_in_transaction(
             self._transaction(),
@@ -622,6 +780,7 @@ class LibrarySelection:
             count,
             rng=rng,
             sequential=sequential,
+            orientations=orientations,
         )
 
     def discard(self, signature: str, path: str) -> None:

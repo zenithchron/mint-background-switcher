@@ -246,6 +246,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.ignore_hidden_checkbutton, app.sources_tab)
         assert is_descendant(app.min_image_size_entry, app.sources_tab)
         assert is_descendant(app.ignore_patterns_entry, app.sources_tab)
+        assert is_descendant(app.match_orientation_checkbutton, app.sources_tab)
         assert is_descendant(app.effect_menu, app.layout_tab)
         assert is_descendant(app.bar_color_menu, app.layout_tab)
         assert is_descendant(app.interval_entry, app.rotation_tab)
@@ -267,6 +268,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.ignore_hidden_checkbutton,
                 app.min_image_size_entry,
                 app.ignore_patterns_entry,
+                app.match_orientation_checkbutton,
                 app.shared_text,
             ),
             str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu),
@@ -2038,6 +2040,48 @@ def test_settings_ignore_patterns_entry_is_visible_and_persists(monkeypatch, tmp
         app.ignore_patterns_var.set("a*, A*, b*")
         assert app._save_current() is True
         assert settings_ui.load_config().get_profile("Default").ignore_patterns == ["a*", "b*"]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_match_orientation_checkbutton_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+        assert app.match_orientation_var.get() is False
+        assert is_descendant(app.match_orientation_checkbutton, app.sources_tab)
+        assert app.match_orientation_checkbutton.winfo_ismapped()
+        assert app.match_orientation_checkbutton.winfo_width() >= app.match_orientation_checkbutton.winfo_reqwidth()
+        assert app.match_orientation_checkbutton.cget("text") == "Match monitor orientation"
+
+        app.match_orientation_var.set(True)
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.match_orientation is True
+
+        app._load_profile("Default")
+        assert app.match_orientation_var.get() is True
     finally:
         app.destroy()
 

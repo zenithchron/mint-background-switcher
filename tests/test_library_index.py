@@ -13,6 +13,7 @@ from mint_background_switcher.library_index import (
     LibraryScanCancelled,
     normalized_ignore_patterns,
     normalized_scan_roots,
+    orientation_matches,
     scan_signature,
 )
 
@@ -661,3 +662,92 @@ def test_database_path_directory_is_rejected_without_fallback(tmp_path):
 
     with pytest.raises(LibraryIndexError, match="not a regular file"):
         index.snapshot("unused")
+
+
+def _save_sized_image(path: Path, width: int, height: int) -> None:
+    Image.new("RGB", (width, height), (4, 5, 6)).save(path)
+
+
+def test_orientation_matches_rules():
+    # No requirement and square monitors accept every picture.
+    assert orientation_matches(None, "portrait") is True
+    assert orientation_matches("square", "landscape") is True
+    # Unreadable or square pictures may serve any monitor.
+    assert orientation_matches("landscape", "unknown") is True
+    assert orientation_matches("landscape", "square") is True
+    assert orientation_matches("portrait", "square") is True
+    # Otherwise the orientations must be equal.
+    assert orientation_matches("landscape", "landscape") is True
+    assert orientation_matches("portrait", "portrait") is True
+    assert orientation_matches("landscape", "portrait") is False
+    assert orientation_matches("portrait", "landscape") is False
+
+
+def test_cached_orientation_reads_header_and_invalidates_on_file_change(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    picture = root / "l.png"
+    _save_sized_image(picture, 120, 80)
+    index = LibraryIndex(tmp_path / "working")
+
+    key = str(picture.absolute())
+    assert index.cached_orientation(key) == "landscape"
+    assert index.cached_orientation(key) == "landscape"
+
+    _save_sized_image(picture, 80, 120)
+    stamp = os.lstat(picture).st_mtime_ns + 10**9
+    os.utime(picture, ns=(stamp, stamp))
+    assert index.cached_orientation(key) == "portrait"
+
+
+def test_oriented_draw_prefers_matching_pictures_and_square_serves_any(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    landscape = root / "l.png"
+    _save_sized_image(landscape, 120, 80)
+    portrait = root / "p.png"
+    _save_sized_image(portrait, 80, 120)
+    square = root / "s.png"
+    _save_sized_image(square, 80, 80)
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+
+    chosen = index.draw(snapshot.signature, "bucket", 2, sequential=True, orientations=("landscape", "portrait"))
+    assert chosen == [str(landscape.absolute()), str(portrait.absolute())]
+
+    # The remaining square picture may serve any monitor orientation.
+    assert index.draw(snapshot.signature, "bucket", 1, sequential=True, orientations=("landscape",)) == [
+        str(square.absolute())
+    ]
+
+
+def test_oriented_draw_falls_back_when_pool_has_no_matching_picture(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    first = root / "a.png"
+    _save_sized_image(first, 80, 120)
+    second = root / "b.png"
+    _save_sized_image(second, 90, 150)
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+
+    chosen = index.draw(
+        snapshot.signature, "bucket", 2, sequential=True, orientations=("landscape", "landscape")
+    )
+    assert chosen == [str(first.absolute()), str(second.absolute())]
+
+
+def test_oriented_draw_reuses_pictures_when_pool_is_smaller_than_slot_count(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    only = root / "a.png"
+    _save_sized_image(only, 120, 80)
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+
+    # One picture for two landscape slots: the pool wraps around and reuses
+    # the picture instead of leaving a slot unfilled, matching draw_many.
+    chosen = index.draw(
+        snapshot.signature, "bucket", 2, sequential=True, orientations=("landscape", "landscape")
+    )
+    assert chosen == [str(only.absolute()), str(only.absolute())]

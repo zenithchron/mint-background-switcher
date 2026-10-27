@@ -64,6 +64,20 @@ def test_ignore_hidden_roundtrip_and_coercion():
     assert Profile.from_dict("P", {"ignore_hidden": None}).ignore_hidden is False
 
 
+def test_match_orientation_roundtrip_and_coercion():
+    assert Profile(name="P").match_orientation is False
+
+    loaded = Profile.from_dict("P", {"match_orientation": True})
+    assert loaded.match_orientation is True
+    assert loaded.to_dict()["match_orientation"] is True
+
+    assert Profile.from_dict("P", {}).match_orientation is False
+    assert Profile.from_dict("P", {"match_orientation": "true"}).match_orientation is True
+    assert Profile.from_dict("P", {"match_orientation": "no"}).match_orientation is False
+    assert Profile.from_dict("P", {"match_orientation": "garbage"}).match_orientation is False
+    assert Profile.from_dict("P", {"match_orientation": None}).match_orientation is False
+
+
 def test_ignore_patterns_roundtrip_and_coercion():
     assert Profile(name="P").ignore_patterns == []
 

@@ -243,6 +243,7 @@ class SettingsApp(tk.Tk):
         self.ignore_hidden_var = tk.BooleanVar()
         self.ignore_patterns_var = tk.StringVar()
         self.sequential_var = tk.BooleanVar()
+        self.match_orientation_var = tk.BooleanVar()
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
@@ -446,6 +447,16 @@ class SettingsApp(tk.Tk):
             source_options,
             text="wildcards, comma-separated; for example thumb*.jpg",
         ).grid(row=2, column=2, sticky="w", pady=(5, 0))
+        self.match_orientation_checkbutton = ttk.Checkbutton(
+            source_options,
+            text="Match monitor orientation",
+            variable=self.match_orientation_var,
+        )
+        self.match_orientation_checkbutton.grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        ttk.Label(
+            source_options,
+            text="prefer landscape pictures on landscape monitors and portrait pictures on portrait monitors",
+        ).grid(row=3, column=2, sticky="w", pady=(5, 0))
         source_options.columnconfigure(2, weight=1)
 
         shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
@@ -1032,6 +1043,7 @@ class SettingsApp(tk.Tk):
         self.ignore_hidden_var.set(profile.ignore_hidden)
         self.ignore_patterns_var.set(", ".join(profile.ignore_patterns))
         self.sequential_var.set(profile.sequential)
+        self.match_orientation_var.set(profile.match_orientation)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
@@ -1125,6 +1137,8 @@ class SettingsApp(tk.Tk):
             raise ValueError(f"At most {MAX_IGNORE_PATTERNS} ignore patterns can be saved.")
         sequential_var = vars(self).get("sequential_var")
         sequential = bool(sequential_var.get()) if sequential_var is not None else False
+        match_orientation_var = vars(self).get("match_orientation_var")
+        match_orientation = bool(match_orientation_var.get()) if match_orientation_var is not None else False
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -1151,6 +1165,7 @@ class SettingsApp(tk.Tk):
             ignore_hidden=ignore_hidden,
             ignore_patterns=ignore_patterns,
             sequential=sequential,
+            match_orientation=match_orientation,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",

@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.10] - 2026-10-27
+
+### Added
+
+- Per-profile **Match monitor orientation** option inspired by John’s Background Switcher’s monitor-orientation matching: when enabled, single-picture layouts prefer landscape pictures on landscape monitors and portrait pictures on portrait monitors, with the option off by default.
+- Exposed it under **Settings → Sources → Folder scanning** next to the other scanning filters, with the existing Save Profile success/error feedback.
+- Orientation preferences apply to the Shared, Same, Span, and Per-monitor layouts, to dry-run previews, and to live rotations; multi-picture layouts (Montage, Collage, Postcard, Polaroid) are intentionally left unfiltered. Square pictures fit any monitor, unreadable headers never block rotation, and a monitor whose pool holds no matching picture falls back to whatever remains so rotation never blocks on shape alone.
+- Orientation results are cached in the image-library index with file-change invalidation, so warm rotations resolve them from one small table lookup.
+
+### Changed
+
+- Bumped the package version to `0.2.10`.
+
 ## [0.2.9] - 2026-10-26
 
 ### Added

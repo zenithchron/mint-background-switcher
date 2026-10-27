@@ -39,6 +39,7 @@ from mint_background_switcher.images import (
     compose_span,
     fit_with_black_bars,
     image_min_dimension,
+    image_orientation,
     is_usable_image,
     meets_min_image_size,
     name_matches_ignore_patterns,
@@ -154,6 +155,28 @@ def test_image_min_dimension_returns_none_for_unreadable_sources(tmp_path: Path)
 
     assert image_min_dimension(missing) is None
     assert image_min_dimension(garbage) is None
+
+
+def test_image_orientation_classifies_by_header_dimensions(tmp_path: Path):
+    landscape = tmp_path / "landscape.png"
+    Image.new("RGB", (120, 80), (10, 20, 30)).save(landscape)
+    portrait = tmp_path / "portrait.png"
+    Image.new("RGB", (80, 120), (30, 20, 10)).save(portrait)
+    square = tmp_path / "square.png"
+    Image.new("RGB", (90, 90), (1, 1, 1)).save(square)
+
+    assert image_orientation(landscape) == "landscape"
+    assert image_orientation(portrait) == "portrait"
+    assert image_orientation(square) == "square"
+
+
+def test_image_orientation_returns_unknown_for_unreadable_sources(tmp_path: Path):
+    missing = tmp_path / "missing.png"
+    garbage = tmp_path / "garbage.png"
+    garbage.write_bytes(b"not a decodable image")
+
+    assert image_orientation(missing) == "unknown"
+    assert image_orientation(garbage) == "unknown"
 
 
 def test_meets_min_image_size_is_disabled_at_zero_and_excludes_small_pictures(tmp_path: Path):

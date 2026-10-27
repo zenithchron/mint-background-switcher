@@ -9,6 +9,7 @@ from PIL import Image, ImageEnhance, ImageOps
 from mint_background_switcher import service
 from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, save_config
 from mint_background_switcher.images import BRIGHTNESS_FACTOR, CONTRAST_FACTOR, DARKEN_FACTOR
+from mint_background_switcher.monitor import Monitor
 from mint_background_switcher.service import (
     black_screen,
     current_source_images,
@@ -668,9 +669,17 @@ def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False, orientations=None):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
+        return original_draw(
+            selection,
+            signature,
+            bucket,
+            count,
+            rng=rng,
+            sequential=sequential,
+            orientations=orientations,
+        )
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -819,9 +828,17 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False, orientations=None):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
+        return original_draw(
+            selection,
+            signature,
+            bucket,
+            count,
+            rng=rng,
+            sequential=sequential,
+            orientations=orientations,
+        )
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -865,9 +882,17 @@ def test_postcard_span_uses_configured_count_across_combined_desktop(monkeypatch
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False, orientations=None):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
+        return original_draw(
+            selection,
+            signature,
+            bucket,
+            count,
+            rng=rng,
+            sequential=sequential,
+            orientations=orientations,
+        )
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -973,9 +998,17 @@ def test_polaroid_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False, orientations=None):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
+        return original_draw(
+            selection,
+            signature,
+            bucket,
+            count,
+            rng=rng,
+            sequential=sequential,
+            orientations=orientations,
+        )
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -1020,9 +1053,17 @@ def test_polaroid_span_uses_configured_count_across_combined_desktop(monkeypatch
     draw_counts = []
     original_draw = service.LibrarySelection.draw
 
-    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False):
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False, orientations=None):
         draw_counts.append((bucket, count))
-        return original_draw(selection, signature, bucket, count, rng=rng, sequential=sequential)
+        return original_draw(
+            selection,
+            signature,
+            bucket,
+            count,
+            rng=rng,
+            sequential=sequential,
+            orientations=orientations,
+        )
 
     monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
 
@@ -1904,3 +1945,125 @@ def test_min_image_size_exhausting_pool_falls_back_to_black(monkeypatch, tmp_pat
     assert result.applied is False
     assert result.wallpaper.exists()
     assert load_state().to_dict() == original
+
+
+def test_orientation_requirements_gating():
+    landscape = Monitor(name="A", width=200, height=100, x=0, y=0)
+    landscape_b = Monitor(name="B", width=120, height=80, x=200, y=0)
+    portrait = Monitor(name="C", width=100, height=200, x=0, y=200)
+    square = Monitor(name="D", width=100, height=100, x=100, y=200)
+    off = Profile(name="P")
+    on = Profile(name="P", match_orientation=True)
+
+    # Disabled profiles never get orientation requirements.
+    assert service._orientation_requirements(off, [landscape, portrait], "shared") is None
+
+    # Multi-picture layouts stay unfiltered even when enabled.
+    for mode in ("montage", "collage", "postcard", "polaroid"):
+        assert service._orientation_requirements(on, [landscape, portrait], mode) is None
+
+    # One-picture-per-slot layouts get one requirement per monitor.
+    assert service._orientation_requirements(on, [landscape, portrait], "shared") == ("landscape", "portrait")
+    assert service._orientation_requirements(on, [landscape, portrait], "per-monitor") == ("landscape", "portrait")
+
+    # A single shared picture only carries a requirement when every monitor
+    # shares one non-square orientation.
+    assert service._orientation_requirements(on, [landscape, landscape_b], "span") == ("landscape",)
+    assert service._orientation_requirements(on, [portrait, portrait], "same") == ("portrait",)
+    assert service._orientation_requirements(on, [landscape, portrait], "span") is None
+    assert service._orientation_requirements(on, [landscape, square], "same") is None
+    assert service._orientation_requirements(on, [square, square], "span") is None
+
+
+def _setup_orientation_profile(
+    monkeypatch, tmp_path: Path, image_dir: Path, monitors: str = "A:200x100+0+0,B:100x200+200+0"
+) -> None:
+    class _FakeDesktopSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def apply(self, *_args, **_kwargs):
+            return ["fake"]
+
+        def apply_black(self, *_args, **_kwargs):
+            return ["fake-black"]
+
+        def supports_solid_black(self, *_args, **_kwargs):
+            return False
+
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_TEST_MONITORS", monitors)
+    monkeypatch.setattr("mint_background_switcher.service.DesktopSetter", _FakeDesktopSetter)
+    save_config(
+        Config(
+            active_profile="P",
+            profiles={
+                "P": Profile(
+                    name="P",
+                    shared_folders=[str(image_dir)],
+                    desktop="unknown",
+                    match_orientation=True,
+                )
+            },
+        )
+    )
+
+
+def test_shared_mode_prefers_matching_monitor_orientations(monkeypatch, tmp_path: Path):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    landscape = image_dir / "landscape.png"
+    Image.new("RGB", (200, 100), (10, 20, 30)).save(landscape)
+    portrait = image_dir / "portrait.png"
+    Image.new("RGB", (100, 200), (30, 20, 10)).save(portrait)
+    _setup_orientation_profile(monkeypatch, tmp_path, image_dir)
+
+    preview = switch_once("P", dry_run=True, rng=random.Random(3))
+    live = switch_once("P", dry_run=False, rng=random.Random(3))
+
+    expected = [str(landscape.resolve()), str(portrait.resolve())]
+    assert preview.action == live.action == "next"
+    assert preview.images == expected
+    assert live.images == expected
+    assert preview.applied is False
+    assert live.applied is True
+
+
+def test_shared_mode_falls_back_when_pool_has_no_matching_orientation(monkeypatch, tmp_path: Path):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    # Only portrait pictures for one landscape monitor: rotation must not block.
+    first = image_dir / "portrait1.png"
+    Image.new("RGB", (100, 200), (10, 20, 30)).save(first)
+    second = image_dir / "portrait2.png"
+    Image.new("RGB", (120, 240), (30, 20, 10)).save(second)
+    _setup_orientation_profile(monkeypatch, tmp_path, image_dir)
+
+    result = switch_once("P", dry_run=True, rng=random.Random(5))
+
+    assert result.action == "next"
+    assert sorted(result.images) == sorted([str(first.resolve()), str(second.resolve())])
+
+
+def test_shared_mode_reuses_pictures_when_pool_is_smaller_than_monitor_count(monkeypatch, tmp_path: Path):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    only = image_dir / "landscape.png"
+    Image.new("RGB", (200, 100), (10, 20, 30)).save(only)
+    # Two landscape monitors, one picture: both previews must wrap around and
+    # reuse the picture instead of leaving a monitor without a wallpaper.
+    _setup_orientation_profile(monkeypatch, tmp_path, image_dir, monitors="A:200x100+0+0,B:120x80+200+0")
+
+    original = load_state().to_dict()
+    preview = switch_once("P", dry_run=True, rng=random.Random(7))
+    # The dry-run must not touch durable state.
+    assert load_state().to_dict() == original
+    live = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    expected = [str(only.resolve()), str(only.resolve())]
+    assert preview.action == live.action == "next"
+    assert preview.images == expected
+    assert live.images == expected
+    assert preview.applied is False
+    assert live.applied is True

@@ -64,6 +64,20 @@ def _nearest_supported_scale(value: float) -> float | None:
     return None
 
 
+def monitor_orientation(monitor: Monitor) -> str:
+    """Return a monitor's orientation for wallpaper selection.
+
+    Orientation comes from the physical display geometry because wallpapers are
+    composed at physical resolution: ``"landscape"``, ``"portrait"``, or
+    ``"square"``.
+    """
+    if monitor.width > monitor.height:
+        return "landscape"
+    if monitor.height > monitor.width:
+        return "portrait"
+    return "square"
+
+
 def _active_mode_after(lines: list[str], start_index: int) -> tuple[int, int] | None:
     for line in lines[start_index + 1 :]:
         # The next non-indented output line starts another connector; stop before

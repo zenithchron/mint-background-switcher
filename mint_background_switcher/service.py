@@ -8,7 +8,7 @@ import secrets
 import shutil
 import stat
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,11 +24,12 @@ from .images import (
     compose_polaroid,
     compose_postcard,
     compose_span,
+    image_orientation,
     is_usable_image,
     scan_images,
 )
-from .library_index import IndexSnapshot, LibraryIndex, LibrarySelection
-from .monitor import Monitor, detect_monitors
+from .library_index import IndexSnapshot, LibraryIndex, LibrarySelection, orientation_matches
+from .monitor import Monitor, detect_monitors, monitor_orientation
 from .paths import generated_wallpaper_path
 from .state import RuntimeState, draw_many, load_state, state_transaction
 from .working_storage import ensure_configured_working_directory
@@ -78,6 +79,32 @@ def _cancel_if_requested(cancelled: Callable[[], bool] | None) -> None:
 
 def _profile_bucket(profile: Profile, suffix: str) -> str:
     return f"profile:{profile.name}:{suffix}"
+
+
+def _orientation_requirements(
+    profile: Profile,
+    monitors: list[Monitor],
+    mode: str,
+) -> tuple[str | None, ...] | None:
+    """Per-slot monitor orientations for one rotation, or None when matching does not apply.
+
+    Orientation matching only shapes layouts where one picture fills each
+    wallpaper slot (shared, same, span, per-monitor); multi-picture layouts
+    (montage, collage, postcard, polaroid) stay unfiltered. For a single shared
+    picture it applies only when every monitor shares one non-square
+    orientation.
+    """
+    if not profile.match_orientation:
+        return None
+    if mode in ("montage", "collage", "postcard", "polaroid"):
+        return None
+    if mode in ("shared", "per-monitor"):
+        return tuple(monitor_orientation(monitor) for monitor in monitors)
+    if mode in ("same", "span"):
+        orientations = {monitor_orientation(monitor) for monitor in monitors}
+        if orientations in ({"landscape"}, {"portrait"}):
+            return (orientations.pop(),)
+    return None
 
 
 def _draw_usable_many(
@@ -152,6 +179,73 @@ def _load_image_pool(
     return _ImagePool(index=index, snapshot=snapshot, selection=selection)
 
 
+def _draw_oriented_from_list(
+    state: RuntimeState,
+    bucket: str,
+    paths: list[str],
+    orientations: Sequence[str | None],
+    *,
+    rng: random.Random | None,
+    sequential: bool = False,
+) -> list[str]:
+    """Dry-run selection that prefers each slot's monitor orientation.
+
+    Mirrors the no-repeat pool order of ``draw_many`` (sequential folder order or a
+    random shuffle) so the preview matches the live rotation, but within that order
+    it prefers a picture whose orientation matches the slot's monitor orientation.
+    A monitor with no matching picture available falls back to whatever remains, so
+    rotation never blocks on shape alone.
+    """
+    random_source = rng or random.SystemRandom()
+    pool_set = {str(Path(p).expanduser().resolve()) for p in paths}
+    available = [p for p in state.remaining.get(bucket, []) if p in pool_set]
+    fresh = not available
+    if fresh:
+        available = sorted(pool_set)
+    if sequential:
+        available.sort()
+    elif fresh:
+        random_source.shuffle(available)
+
+    orientation_by_path: dict[str, str] = {}
+
+    def orientation_of(path: str) -> str:
+        orientation = orientation_by_path.get(path)
+        if orientation is None:
+            orientation = image_orientation(path)
+            orientation_by_path[path] = orientation
+        return orientation
+
+    if not pool_set or not orientations:
+        return []
+    selected: list[str] = []
+    selected_set: set[str] = set()
+    for required in orientations:
+        if not available:
+            # Cycle wrap: when fewer pictures than slots remain, reuse pictures
+            # exactly like draw_many, so rotation never stops on pool size.
+            pool_full = [p for p in pool_set if p not in selected_set] or list(pool_set)
+            if sequential:
+                pool_full.sort()
+            else:
+                random_source.shuffle(pool_full)
+            available = pool_full
+        chosen = None
+        for path in available:
+            if orientation_matches(required, orientation_of(path)):
+                chosen = path
+                break
+        if chosen is None:
+            # No matching picture: consume the same position draw_many would so
+            # leftovers stay interchangeable with ordinary draws.
+            chosen = available[0] if sequential else available[-1]
+        available.remove(chosen)
+        selected.append(chosen)
+        selected_set.add(chosen)
+    state.remaining[bucket] = available
+    return selected
+
+
 def _draw_from_pool(
     state: RuntimeState,
     pool: _ImagePool,
@@ -161,8 +255,23 @@ def _draw_from_pool(
     rng: random.Random | None,
     require_usable: bool = False,
     sequential: bool = False,
+    orientations: Sequence[str | None] | None = None,
 ) -> list[str]:
+    oriented: tuple[str | None, ...] | None
+    if orientations is not None and len(orientations) == count:
+        oriented = tuple(orientations)
+    else:
+        oriented = None
     if pool.paths is not None:
+        if oriented is not None:
+            return _draw_oriented_from_list(
+                state,
+                bucket,
+                pool.paths,
+                orientations,
+                rng=rng,
+                sequential=sequential,
+            )
         if require_usable:
             return _draw_usable_many(state, bucket, pool.paths, count, rng=rng, sequential=sequential)
         return draw_many(state, bucket, pool.paths, count, rng=rng, sequential=sequential)
@@ -178,6 +287,7 @@ def _draw_from_pool(
             count - len(selected),
             rng=rng,
             sequential=sequential,
+            orientations=oriented[len(selected) :] if oriented is not None else None,
         )
         if not batch:
             break
@@ -222,8 +332,17 @@ def _draw_one_from_pool(
     *,
     rng: random.Random | None,
     sequential: bool = False,
+    orientation: str | None = None,
 ) -> str:
-    selected = _draw_from_pool(state, pool, bucket, 1, rng=rng, sequential=sequential)
+    selected = _draw_from_pool(
+        state,
+        pool,
+        bucket,
+        1,
+        rng=rng,
+        sequential=sequential,
+        orientations=(orientation,) if orientation is not None else None,
+    )
     if not selected:
         raise ValueError(f"No images available for bucket {bucket}")
     return selected[0]
@@ -364,6 +483,8 @@ def _switch_once_with_state(
     selection = selection_scope.begin(index)
     monitors = detect_monitors()
     state.active_profile = profile.name
+    orientation_requirements = _orientation_requirements(profile, monitors, profile.mode)
+    single_orientation = orientation_requirements[0] if orientation_requirements else None
     wallpaper_path, next_slot = _next_wallpaper_path(
         profile,
         state,
@@ -403,6 +524,7 @@ def _switch_once_with_state(
                 _profile_bucket(profile, "span"),
                 rng=rng,
                 sequential=profile.sequential,
+                orientation=single_orientation,
             )
             wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color)
             images_used = [image]
@@ -688,6 +810,7 @@ def _switch_once_with_state(
                 _profile_bucket(profile, "same"),
                 rng=rng,
                 sequential=profile.sequential,
+                orientation=single_orientation,
             )
             selections = {monitor.name: image for monitor in monitors}
             images_used = [image]
@@ -723,6 +846,7 @@ def _switch_once_with_state(
                 len(monitors),
                 rng=rng,
                 sequential=profile.sequential,
+                orientations=orientation_requirements,
             )
             for monitor, image in zip(monitors, chosen):
                 selections[monitor.name] = image
@@ -760,13 +884,14 @@ def _switch_once_with_state(
             )
             action = "black-fallback"
         else:
-            for monitor in monitors:
+            for position, monitor in enumerate(monitors):
                 image = _draw_one_from_pool(
                     state,
                     pools_by_monitor[monitor.name],
                     _profile_bucket(profile, f"monitor:{monitor.name}"),
                     rng=rng,
                     sequential=profile.sequential,
+                    orientation=orientation_requirements[position] if orientation_requirements else None,
                 )
                 selections[monitor.name] = image
                 images_used.append(image)
