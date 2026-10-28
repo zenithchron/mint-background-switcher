@@ -594,12 +594,80 @@ def compose_collage(
     return _save_png_atomic(combined, output_path)
 
 
+def _caption_text(image_path: str) -> str:
+    """Return the picture's file name without its extension, or the full name."""
+
+    stem = Path(image_path).stem
+    return stem or Path(image_path).name
+
+
+def _caption_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size=max(8, int(size)))
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _fitted_caption_font(text: str, max_width: int, preferred_size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Shrink the caption font until the text fits the available width."""
+
+    probe_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    size = max(8, min(int(preferred_size), 40))
+    font = _caption_font(size)
+    while size > 8:
+        left, _top, right, _bottom = probe_draw.textbbox((0, 0), text, font=font)
+        if right - left <= max_width:
+            return font
+        size -= 1
+        font = _caption_font(size)
+    return font
+
+
+def _draw_photo_caption(
+    tile: Image.Image,
+    image_path: str,
+    *,
+    area: tuple[int, int, int, int],
+    fill: tuple[int, int, int, int],
+    stroke_fill: tuple[int, int, int, int] | None = None,
+) -> None:
+    """Draw a centered, contrasted filename caption inside the given tile area."""
+
+    left, top, right, bottom = (max(0, value) for value in area)
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    text = _caption_text(image_path)
+    if not text:
+        return
+    max_chars = max(3, width // 5)
+    if len(text) > max_chars:
+        text = text[: max_chars - 1] + "…"
+    font = _fitted_caption_font(text, width, min(40, max(8, round(height * 0.7))))
+    draw = ImageDraw.Draw(tile)
+    text_left, text_top, text_right, text_bottom = draw.textbbox((0, 0), text, font=font)
+    text_width = text_right - text_left
+    text_height = text_bottom - text_top
+    if text_width <= 0 or text_height <= 0:
+        return
+    x = (left + right - text_width) // 2 - text_left
+    y = (top + bottom - text_height) // 2 - text_top
+    draw.text(
+        (x, y),
+        text,
+        font=font,
+        fill=fill,
+        stroke_width=1 if stroke_fill is not None else 0,
+        stroke_fill=stroke_fill,
+    )
+
+
 def _postcard_tile(
     image_path: str,
     cell_size: tuple[int, int],
     angle: float,
     *,
     bar_color: str,
+    caption: bool = False,
 ) -> Image.Image:
     """Return one bare, uncropped native-aspect photo with no frame or pin."""
 
@@ -613,6 +681,15 @@ def _postcard_tile(
     photo_width = max(1, round(source.width * scale))
     photo_height = max(1, round(source.height * scale))
     photo = source.resize((photo_width, photo_height), Image.Resampling.LANCZOS).convert("RGBA")
+    if caption:
+        band_height = max(10, round(photo_height * 0.14))
+        _draw_photo_caption(
+            photo,
+            image_path,
+            area=(4, photo_height - band_height, photo_width - 4, max(0, photo_height - 2)),
+            fill=(255, 255, 255, 235),
+            stroke_fill=(0, 0, 0, 210),
+        )
     rotated = photo.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
     rotated.thumbnail((max(1, cell_width), max(1, cell_height)), Image.Resampling.LANCZOS)
     return rotated
@@ -1098,6 +1175,7 @@ def compose_postcard(
     span: bool = False,
     tilt: bool = True,
     background: str = "dark",
+    captions: bool = False,
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random bare photos using the same layout behavior as Polaroid."""
@@ -1118,6 +1196,7 @@ def compose_postcard(
         size=size,
         span=span,
         tilt=tilt,
+        caption=captions,
         rng=rng,
     )
 
@@ -1128,6 +1207,7 @@ def _polaroid_tile(
     angle: float,
     *,
     bar_color: str,
+    caption: bool = False,
 ) -> Image.Image:
     """Return one uncropped native-aspect photo in a snug bottom-heavy frame."""
 
@@ -1151,6 +1231,18 @@ def _polaroid_tile(
         POLAROID_FRAME_COLOR,
     )
     card.paste(fitted, (border, border))
+    if caption:
+        _draw_photo_caption(
+            card,
+            image_path,
+            area=(
+                border + 2,
+                photo_height + border,
+                card.width - border - 2,
+                max(0, card.height - 2),
+            ),
+            fill=(52, 52, 52, 255),
+        )
     rotated = card.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
     rotated.thumbnail((max(1, cell_width), max(1, cell_height)), Image.Resampling.LANCZOS)
     return rotated
@@ -1198,6 +1290,7 @@ def _compose_scattered_photos(
     size: float = 0.5,
     span: bool = False,
     tilt: bool = True,
+    caption: bool = False,
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random framed or bare photos per monitor or across the virtual desktop."""
@@ -1234,7 +1327,13 @@ def _compose_scattered_photos(
         for index, (image_path, angle) in enumerate(card_specs):
             if index and index % len(anchors) == 0:
                 rng.shuffle(anchors)
-            card = tile_factory(image_path, max_card_size, angle, bar_color=bar_color)
+            card = tile_factory(
+                image_path,
+                max_card_size,
+                angle,
+                bar_color=bar_color,
+                caption=caption,
+            )
             anchor = anchors[index % len(anchors)]
             anchor_x, anchor_y = normalized_position(anchor, min_x, min_y)
             x, y = _random_spanning_card_position(
@@ -1273,6 +1372,7 @@ def _compose_scattered_photos(
                 max_card_size,
                 angle,
                 bar_color=bar_color,
+                caption=caption,
             )
             x, y = _random_card_position((monitor.width, monitor.height), card.size, rng)
             panel.paste(card, (x, y), card)
@@ -1289,6 +1389,7 @@ def compose_polaroid(
     size: float = 0.5,
     span: bool = False,
     tilt: bool = True,
+    captions: bool = False,
     rng: random.Random | None = None,
 ) -> Path:
     """Compose random framed Polaroid prints per monitor or across the virtual desktop."""
@@ -1303,6 +1404,7 @@ def compose_polaroid(
         size=size,
         span=span,
         tilt=tilt,
+        caption=captions,
         rng=rng,
     )
 

@@ -208,6 +208,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                         app.postcard_size_scale,
                         app.postcard_span_checkbutton,
                         app.postcard_tilt_checkbutton,
+                        app.postcard_captions_checkbutton,
                         app.postcard_background_menu,
                     )
                 )
@@ -218,6 +219,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                         app.polaroid_size_scale,
                         app.polaroid_span_checkbutton,
                         app.polaroid_tilt_checkbutton,
+                        app.polaroid_captions_checkbutton,
                     )
                 )
             elif layout == "per-monitor":
@@ -327,6 +329,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                             app.postcard_size_scale,
                             app.postcard_span_checkbutton,
                             app.postcard_tilt_checkbutton,
+                            app.postcard_captions_checkbutton,
                             app.postcard_background_menu,
                         )
                     )
@@ -337,6 +340,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                             app.polaroid_size_scale,
                             app.polaroid_span_checkbutton,
                             app.polaroid_tilt_checkbutton,
+                            app.polaroid_captions_checkbutton,
                         )
                     )
                 elif layout == "per-monitor":
@@ -1861,6 +1865,71 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
             (7, 0.8, True, False),
         ]
         assert errors == [("Apply failed", "polaroid preview failed")]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_caption_checkbuttons_follow_mode_and_profile_fields(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.mode_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+
+        menu.invoke(labels.index("postcard"))
+        app.update_idletasks()
+        assert app.postcard_captions_checkbutton.winfo_ismapped()
+        assert app.postcard_captions_checkbutton.cget("text") == "Show photo captions"
+        assert app.postcard_captions_var.get() is False
+        assert (
+            app.postcard_captions_checkbutton.winfo_rootx() + app.postcard_captions_checkbutton.winfo_width()
+            <= app.postcard_options.winfo_rootx() + app.postcard_options.winfo_width()
+        )
+        app.postcard_captions_var.set(True)
+        profile = app._profile_from_fields("Default")
+        assert profile.postcard_captions is True
+        assert profile.polaroid_captions is False
+
+        menu.invoke(labels.index("polaroid"))
+        app.update_idletasks()
+        assert app.polaroid_captions_checkbutton.winfo_ismapped()
+        assert app.polaroid_captions_checkbutton.cget("text") == "Show photo captions"
+        assert app.polaroid_captions_var.get() is False
+        app.polaroid_captions_var.set(True)
+        profile = app._profile_from_fields("Default")
+        assert profile.polaroid_captions is True
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_loads_caption_flags_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={
+            "Default": settings_ui.Profile(
+                name="Default",
+                mode="postcard",
+                postcard_captions=True,
+                polaroid_captions=True,
+            )
+        },
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.postcard_captions_var.get() is True
+        assert app.polaroid_captions_var.get() is True
     finally:
         app.destroy()
 

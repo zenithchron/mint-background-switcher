@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.11] - 2026-10-28
+
+### Added
+
+- Per-profile **Show photo captions** options for the Postcard and Polaroid layouts, inspired by John's Background Switcher's captions-on-postcards feature: Postcard photos display their file name (without extension) inside the bottom of the picture, and Polaroid prints display their file name on the bottom border of the frame. Both options default to off, so existing layouts are unchanged.
+- Caption text scales to the photo width, very long file names are shortened with an ellipsis, and the text is drawn with a soft outline for readability over any picture. Captions never change placement, stacking, tilt, or the random rotation sequence.
+- Exposed both options as checkbuttons under **Settings → Layout & Appearance** next to the existing Postcard and Polaroid tilt controls, with the existing Save Profile success/error feedback.
+
+### Changed
+
+- Bumped the package version to `0.2.11`.
+
 ## [0.2.10] - 2026-10-27
 
 ### Added

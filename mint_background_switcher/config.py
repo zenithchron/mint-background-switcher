@@ -165,6 +165,8 @@ class Profile:
     ignore_patterns: list[str] = field(default_factory=list)
     sequential: bool = False
     match_orientation: bool = False
+    postcard_captions: bool = False
+    polaroid_captions: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -190,6 +192,8 @@ class Profile:
             ignore_patterns=_coerce_ignore_patterns(data.get("ignore_patterns", [])),
             sequential=_coerce_bool(data.get("sequential", False)),
             match_orientation=_coerce_bool(data.get("match_orientation", False)),
+            postcard_captions=_coerce_bool(data.get("postcard_captions", False)),
+            polaroid_captions=_coerce_bool(data.get("polaroid_captions", False)),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -217,6 +221,8 @@ class Profile:
             "ignore_patterns": list(self.ignore_patterns),
             "sequential": self.sequential,
             "match_orientation": self.match_orientation,
+            "postcard_captions": self.postcard_captions,
+            "polaroid_captions": self.polaroid_captions,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,

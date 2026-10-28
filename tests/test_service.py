@@ -810,6 +810,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
         span=False,
         tilt=True,
         background="dark",
+        captions=False,
         rng=None,
     ):
         captured["monitors"] = [monitor.name for monitor in monitors]
@@ -819,6 +820,7 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
         captured["span"] = span
         captured["tilt"] = tilt
         captured["background"] = background
+        captured["captions"] = captions
         captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"postcard")
@@ -858,6 +860,29 @@ def test_postcard_mode_uses_configured_images_per_monitor_size_tilt_and_backgrou
     assert isinstance(captured["rng"], random.Random)
     assert "profile:P:postcard" not in state.remaining
     assert draw_counts == [("profile:P:postcard", 14)]
+
+
+def test_postcard_captions_flag_is_passed_to_composer(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "postcard"
+    profile.postcard_captions = True
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_postcard(monitors, images_by_monitor, output_path, **kwargs):
+        captured.update(kwargs)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"postcard")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_postcard", fake_compose_postcard)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert captured["captions"] is True
 
 
 def test_postcard_span_uses_configured_count_across_combined_desktop(monkeypatch, tmp_path: Path):
@@ -981,6 +1006,7 @@ def test_polaroid_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
         size=0.5,
         span=False,
         tilt=True,
+        captions=False,
         rng=None,
     ):
         captured["monitors"] = [monitor.name for monitor in monitors]
@@ -989,6 +1015,7 @@ def test_polaroid_mode_uses_configured_images_per_monitor_size_and_tilt(monkeypa
         captured["size"] = size
         captured["span"] = span
         captured["tilt"] = tilt
+        captured["captions"] = captions
         captured["rng"] = rng
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"polaroid")
@@ -1176,6 +1203,7 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
         size=0.5,
         span=False,
         tilt=True,
+        captions=False,
         rng=None,
     ):
         attempts.append({name: list(paths) for name, paths in images_by_monitor.items()})
@@ -1191,6 +1219,7 @@ def test_polaroid_live_redraws_when_a_selected_source_disappears(monkeypatch, tm
             size=size,
             span=span,
             tilt=tilt,
+            captions=captions,
             rng=rng,
         )
 

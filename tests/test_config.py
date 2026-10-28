@@ -264,6 +264,27 @@ def test_all_postcard_background_choices_roundtrip_through_file(tmp_path):
     }
 
 
+def test_postcard_and_polaroid_captions_roundtrip():
+    for enabled in (False, True):
+        profile = Profile(name="P", postcard_captions=enabled, polaroid_captions=enabled)
+        assert profile.to_dict()["postcard_captions"] is enabled
+        assert profile.to_dict()["polaroid_captions"] is enabled
+        loaded = Profile.from_dict("P", profile.to_dict())
+        assert (loaded.postcard_captions, loaded.polaroid_captions) == (enabled, enabled)
+
+
+def test_caption_flags_default_off_and_coerce_non_booleans():
+    profile = Profile(name="P")
+    assert profile.postcard_captions is False
+    assert profile.polaroid_captions is False
+    loaded = Profile.from_dict("P", {"postcard_captions": "yes", "polaroid_captions": 1})
+    assert loaded.postcard_captions is True
+    assert loaded.polaroid_captions is True
+    empty = Profile.from_dict("P", {})
+    assert empty.postcard_captions is False
+    assert empty.polaroid_captions is False
+
+
 def test_postcard_background_preserves_legacy_profile_positional_arguments():
     profile = Profile(
         "P",

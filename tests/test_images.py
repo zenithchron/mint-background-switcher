@@ -998,8 +998,9 @@ def test_postcard_textures_do_not_consume_photo_rng_or_change_geometry(
 ):
     colors = {"a": (244, 21, 37, 255), "b": (18, 67, 241, 255)}
 
-    def fake_postcard_tile(image_path, _cell_size, _angle, *, bar_color):
+    def fake_postcard_tile(image_path, _cell_size, _angle, *, bar_color, caption):
         assert bar_color == "black"
+        assert caption is False
         return Image.new("RGBA", (23, 17), colors[image_path])
 
     monkeypatch.setattr(images_module, "_postcard_tile", fake_postcard_tile)
@@ -1124,9 +1125,10 @@ def test_postcard_tilt_can_be_disabled_for_straight_photos(monkeypatch, tmp_path
             self.position_draws += 1
             return super().randint(a, b)
 
-    def fake_postcard_tile(image_path, _cell_size, angle, *, bar_color):
+    def fake_postcard_tile(image_path, _cell_size, angle, *, bar_color, caption):
         assert image_path in {"a", "b", "c", "d"}
         assert bar_color == "black"
+        assert caption is False
         angles.append(angle)
         return Image.new("RGBA", (20, 20), (60, 90, 220, 255))
 
@@ -1202,9 +1204,10 @@ def test_polaroid_tilt_can_be_disabled_for_straight_prints(monkeypatch, tmp_path
             self.position_draws += 1
             return super().randint(a, b)
 
-    def fake_polaroid_tile(image_path, _cell_size, angle, *, bar_color):
+    def fake_polaroid_tile(image_path, _cell_size, angle, *, bar_color, caption):
         assert image_path in {"a", "b", "c", "d"}
         assert bar_color == "black"
+        assert caption is False
         angles.append(angle)
         return Image.new("RGBA", (20, 20), (248, 246, 238, 255))
 
@@ -1383,3 +1386,135 @@ def test_compose_per_monitor_and_black(tmp_path: Path):
     black_img = Image.open(black)
     assert black_img.size == (300, 200)
     assert black_img.getpixel((299, 199)) == (0, 0, 0)
+
+
+def _caption_band_colors(image: Image.Image, bottom: int, height: int) -> set:
+    band = image.crop((0, height - bottom, image.width, height))
+    return {color for _count, color in band.getcolors(maxcolors=band.width * band.height) or []}
+
+
+def test_postcard_tile_caption_draws_filename_inside_photo(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (90, 90, 90))
+    path = tmp_path / "sunset photo.png"
+    source.save(path)
+
+    bare = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black")
+    captioned = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black", caption=True)
+
+    assert captioned.size == bare.size == (240, 160)
+    assert bare.tobytes() != captioned.tobytes()
+    # The photo body above the caption band is untouched.
+    assert bare.crop((0, 0, 240, 136)).tobytes() == captioned.crop((0, 0, 240, 136)).tobytes()
+    colors = _caption_band_colors(captioned, 24, 160)
+    assert any(color[:3] == (255, 255, 255) and color[3] >= 200 for color in colors)
+    assert any(color[:3] == (0, 0, 0) and 120 <= color[3] <= 255 for color in colors)
+
+
+def test_postcard_tile_caption_omitted_when_disabled(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (90, 90, 90))
+    path = tmp_path / "sunset photo.png"
+    source.save(path)
+
+    bare = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black")
+    captioned_off = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black", caption=False)
+
+    assert bare.tobytes() == captioned_off.tobytes()
+
+
+def test_postcard_tile_caption_fits_very_long_file_names(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (90, 90, 90))
+    path = tmp_path / ("a" * 120 + ".png")
+    source.save(path)
+
+    captioned = _postcard_tile(str(path), (240, 160), 0.0, bar_color="black", caption=True)
+
+    assert captioned.size == (240, 160)
+    colors = _caption_band_colors(captioned, 24, 160)
+    assert any(color[:3] == (255, 255, 255) and color[3] >= 200 for color in colors)
+    # An untruncated 120-character name would overflow both tile edges.
+    for x in (0, 1, 2, 3, 236, 237, 238, 239):
+        edge_colors = _caption_band_colors(captioned.crop((x, 136, x + 1, 160)), 24, 24)
+        assert not any(color[:3] == (255, 255, 255) and color[3] >= 200 for color in edge_colors)
+
+
+def test_polaroid_tile_caption_omitted_when_disabled(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (200, 30, 30))
+    path = tmp_path / "beach.png"
+    source.save(path)
+
+    bare = _polaroid_tile(str(path), (240, 260), 0.0, bar_color="black")
+    captioned_off = _polaroid_tile(str(path), (240, 260), 0.0, bar_color="black", caption=False)
+
+    assert bare.tobytes() == captioned_off.tobytes()
+
+
+def test_polaroid_tile_caption_draws_filename_on_bottom_border(tmp_path: Path):
+    source = Image.new("RGB", (120, 80), (200, 30, 30))
+    path = tmp_path / "beach.png"
+    source.save(path)
+
+    bare = _polaroid_tile(str(path), (240, 260), 0.0, bar_color="black")
+    captioned = _polaroid_tile(str(path), (240, 260), 0.0, bar_color="black", caption=True)
+
+    assert captioned.size == bare.size
+    assert bare.tobytes() != captioned.tobytes()
+    width, height = captioned.size
+    bare_band = bare.crop((0, height - 30, width, height))
+    bare_colors = {color for _count, color in bare_band.getcolors(maxcolors=bare_band.width * bare_band.height) or []}
+    assert all(color == POLAROID_FRAME_COLOR for color in bare_colors)
+    caption_colors = _caption_band_colors(captioned, 30, height)
+    assert any(color[:3] == (52, 52, 52) and color[3] >= 250 for color in caption_colors)
+
+
+@pytest.mark.parametrize("span", [False, True])
+def test_postcard_captions_do_not_consume_photo_rng_or_change_geometry(monkeypatch, tmp_path: Path, span: bool):
+    colors = {"a": (244, 21, 37, 255), "b": (18, 67, 241, 255)}
+    seen_captions = []
+
+    def fake_postcard_tile(image_path, _cell_size, _angle, *, bar_color, caption):
+        assert bar_color == "black"
+        seen_captions.append(caption)
+        return Image.new("RGBA", (23, 17), colors[image_path])
+
+    monkeypatch.setattr(images_module, "_postcard_tile", fake_postcard_tile)
+    monitors = [Monitor("A", 120, 80, 0, 0), Monitor("B", 100, 80, 120, 0)]
+    image_map = {"A": ["a", "b"], "B": ["a", "b"]}
+    outputs = {}
+    final_states = {}
+    for captions in (False, True):
+        seen_captions.clear()
+        rng = random.Random(47)
+        output = compose_postcard(
+            monitors,
+            image_map,
+            tmp_path / f"caption-geometry-{captions}-{span}.png",
+            span=span,
+            captions=captions,
+            rng=rng,
+        )
+        outputs[captions] = output
+        final_states[captions] = rng.getstate()
+    assert seen_captions == [True] * 4
+    assert final_states[False] == final_states[True]
+    with Image.open(outputs[False]) as off, Image.open(outputs[True]) as on:
+        assert off.size == on.size
+        for color in colors.values():
+            off_mask = {(x, y) for y in range(off.height) for x in range(off.width) if off.getpixel((x, y)) == color[:3]}
+            on_mask = {(x, y) for y in range(on.height) for x in range(on.width) if on.getpixel((x, y)) == color[:3]}
+            assert on_mask == off_mask
+
+
+@pytest.mark.parametrize("framed", [False, True], ids=["postcard", "polaroid"])
+@pytest.mark.parametrize("span", [False, True])
+def test_compose_scattered_photos_with_captions_is_reproducible(tmp_path: Path, framed: bool, span: bool):
+    paths = []
+    for index, color in enumerate(((210, 50, 60), (50, 190, 90), (60, 90, 220), (220, 180, 40))):
+        path = tmp_path / f"pic-{index}.png"
+        Image.new("RGB", (120, 80), color).save(path)
+        paths.append(str(path))
+    monitors = [Monitor("A", 240, 160, 0, 0)]
+    compose = compose_polaroid if framed else compose_postcard
+    first = compose(monitors, {"A": paths}, tmp_path / "captions-1.png", span=span, captions=True, rng=random.Random(5))
+    second = compose(monitors, {"A": paths}, tmp_path / "captions-2.png", span=span, captions=True, rng=random.Random(5))
+
+    assert first.read_bytes() == second.read_bytes()

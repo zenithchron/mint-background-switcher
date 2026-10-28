@@ -703,6 +703,7 @@ def _switch_once_with_state(
                         span=profile.postcard_span,
                         tilt=profile.postcard_tilt,
                         background=profile.postcard_background,
+                        captions=profile.postcard_captions,
                         rng=rng,
                     )
                 except ImageDecodeError as exc:
@@ -773,6 +774,7 @@ def _switch_once_with_state(
                         size=profile.polaroid_size,
                         span=profile.polaroid_span,
                         tilt=profile.polaroid_tilt,
+                        captions=profile.polaroid_captions,
                         rng=rng,
                     )
                 except ImageDecodeError as exc:

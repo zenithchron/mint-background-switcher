@@ -253,10 +253,12 @@ class SettingsApp(tk.Tk):
         self.postcard_size_var = tk.DoubleVar(value=0.5)
         self.postcard_span_var = tk.BooleanVar(value=False)
         self.postcard_tilt_var = tk.BooleanVar(value=True)
+        self.postcard_captions_var = tk.BooleanVar(value=False)
         self.polaroid_count_var = tk.IntVar(value=4)
         self.polaroid_size_var = tk.DoubleVar(value=0.5)
         self.polaroid_span_var = tk.BooleanVar(value=False)
         self.polaroid_tilt_var = tk.BooleanVar(value=True)
+        self.polaroid_captions_var = tk.BooleanVar(value=False)
         self.monitor_folder_var = tk.StringVar()
         self.update_status_var = tk.StringVar()
         first_collection = public_collections.PUBLIC_COLLECTIONS[0]
@@ -596,6 +598,12 @@ class SettingsApp(tk.Tk):
             variable=self.postcard_tilt_var,
         )
         self.postcard_tilt_checkbutton.pack(side=tk.LEFT)
+        self.postcard_captions_checkbutton = ttk.Checkbutton(
+            postcard_style_options,
+            text="Show photo captions",
+            variable=self.postcard_captions_var,
+        )
+        self.postcard_captions_checkbutton.pack(side=tk.LEFT, padx=(24, 0))
         ttk.Label(postcard_style_options, text="Background:").pack(side=tk.LEFT, padx=(24, 5))
         self.postcard_background_menu = ttk.OptionMenu(
             postcard_style_options,
@@ -646,12 +654,20 @@ class SettingsApp(tk.Tk):
             variable=self.polaroid_span_var,
         )
         self.polaroid_span_checkbutton.pack(side=tk.LEFT, padx=(18, 0))
+        polaroid_style_options = ttk.Frame(self.polaroid_options)
+        polaroid_style_options.pack(fill=tk.X, pady=(8, 0))
         self.polaroid_tilt_checkbutton = ttk.Checkbutton(
-            self.polaroid_options,
+            polaroid_style_options,
             text="Randomly tilt prints",
             variable=self.polaroid_tilt_var,
         )
-        self.polaroid_tilt_checkbutton.pack(anchor="w", pady=(8, 0))
+        self.polaroid_tilt_checkbutton.pack(side=tk.LEFT)
+        self.polaroid_captions_checkbutton = ttk.Checkbutton(
+            polaroid_style_options,
+            text="Show photo captions",
+            variable=self.polaroid_captions_var,
+        )
+        self.polaroid_captions_checkbutton.pack(side=tk.LEFT, padx=(24, 0))
 
         monitor_frame = ttk.LabelFrame(self.layout_panels["per-monitor"], text="Per-monitor folders", padding=8)
         monitor_frame.pack(fill=tk.BOTH, expand=True)
@@ -1053,10 +1069,12 @@ class SettingsApp(tk.Tk):
         self.postcard_size_var.set(profile.postcard_size)
         self.postcard_span_var.set(profile.postcard_span)
         self.postcard_tilt_var.set(profile.postcard_tilt)
+        self.postcard_captions_var.set(profile.postcard_captions)
         self.polaroid_count_var.set(profile.polaroid_count)
         self.polaroid_size_var.set(profile.polaroid_size)
         self.polaroid_span_var.set(profile.polaroid_span)
         self.polaroid_tilt_var.set(profile.polaroid_tilt)
+        self.polaroid_captions_var.set(profile.polaroid_captions)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
@@ -1145,6 +1163,8 @@ class SettingsApp(tk.Tk):
         )
         postcard_span = bool(postcard_span_var.get()) if postcard_span_var is not None else False
         postcard_tilt = bool(postcard_tilt_var.get()) if postcard_tilt_var is not None else True
+        postcard_captions_var = vars(self).get("postcard_captions_var")
+        postcard_captions = bool(postcard_captions_var.get()) if postcard_captions_var is not None else False
         postcard_background = (
             str(postcard_background_var.get()).strip().lower()
             if postcard_background_var is not None
@@ -1156,6 +1176,8 @@ class SettingsApp(tk.Tk):
         polaroid_size = max(0.0, min(1.0, float(size_var.get()))) if size_var is not None else 0.5
         polaroid_span = bool(span_var.get()) if span_var is not None else False
         polaroid_tilt = bool(tilt_var.get()) if tilt_var is not None else True
+        polaroid_captions_var = vars(self).get("polaroid_captions_var")
+        polaroid_captions = bool(polaroid_captions_var.get()) if polaroid_captions_var is not None else False
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -1166,6 +1188,8 @@ class SettingsApp(tk.Tk):
             ignore_patterns=ignore_patterns,
             sequential=sequential,
             match_orientation=match_orientation,
+            postcard_captions=postcard_captions,
+            polaroid_captions=polaroid_captions,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",
