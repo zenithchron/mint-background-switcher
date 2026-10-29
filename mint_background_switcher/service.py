@@ -1063,6 +1063,7 @@ def run_loop(
     dry_run: bool = False,
     defer_first: bool = False,
     first_delay_min_seconds: float = 0.0,
+    skip_first: bool = False,
 ) -> None:
     cfg: Config = load_config()
     profile = cfg.get_profile(profile_name)
@@ -1079,9 +1080,16 @@ def run_loop(
             time.sleep(min(max(profile.interval_minutes * 60.0, 5.0), 60.0))
             continue
         if not state.paused:
-            try:
-                result = switch_once(profile.name, dry_run=dry_run)
-                print(f"Generated {result.wallpaper} for {len(result.monitors)} monitor(s)", flush=True)
-            except Exception as exc:
-                print(f"Mint Background Switcher error: {exc}", flush=True)
+            if skip_first:
+                # Rotate-at-startup is off: keep the current background and let
+                # the normal interval take over. Black-screen/pause cycles do not
+                # consume the skip, so resuming from either still switches on time.
+                skip_first = False
+                print("Rotate at startup is off; keeping the current background until the next interval", flush=True)
+            else:
+                try:
+                    result = switch_once(profile.name, dry_run=dry_run)
+                    print(f"Generated {result.wallpaper} for {len(result.monitors)} monitor(s)", flush=True)
+                except Exception as exc:
+                    print(f"Mint Background Switcher error: {exc}", flush=True)
         time.sleep(max(profile.interval_minutes * 60.0, 5.0))

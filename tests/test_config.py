@@ -119,6 +119,20 @@ def test_sequential_roundtrip_and_coercion():
     assert Profile.from_dict("P", {"sequential": None}).sequential is False
 
 
+def test_rotate_on_startup_roundtrip_and_coercion():
+    assert Profile(name="P").rotate_on_startup is True
+
+    loaded = Profile.from_dict("P", {"rotate_on_startup": False})
+    assert loaded.rotate_on_startup is False
+    assert loaded.to_dict()["rotate_on_startup"] is False
+
+    assert Profile.from_dict("P", {}).rotate_on_startup is True
+    assert Profile.from_dict("P", {"rotate_on_startup": "false"}).rotate_on_startup is False
+    assert Profile.from_dict("P", {"rotate_on_startup": "off"}).rotate_on_startup is False
+    assert Profile.from_dict("P", {"rotate_on_startup": "garbage"}).rotate_on_startup is True
+    assert Profile.from_dict("P", {"rotate_on_startup": None}).rotate_on_startup is True
+
+
 def test_stale_profile_save_preserves_newer_working_directory(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     initial = Config(active_profile="P", profiles={"P": Profile(name="P")})

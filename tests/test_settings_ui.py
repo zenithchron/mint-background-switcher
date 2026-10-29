@@ -278,6 +278,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.rotation_scope_label,
                 app.interval_entry,
                 app.sequential_checkbutton,
+                app.rotate_on_startup_checkbutton,
                 app.hotkey_entry,
                 app.desktop_menu,
             ),
@@ -2222,6 +2223,68 @@ def test_settings_sequential_checkbutton_is_visible_and_persists(monkeypatch, tm
 
         app._load_profile("Default")
         assert app.sequential_var.get() is True
+    finally:
+        app.destroy()
+
+
+def test_settings_rotate_on_startup_checkbutton_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        assert app.rotate_on_startup_var.get() is True
+        assert is_descendant(app.rotate_on_startup_checkbutton, app.rotation_tab)
+        assert app.rotate_on_startup_checkbutton.winfo_ismapped()
+        assert app.rotate_on_startup_checkbutton.winfo_width() >= app.rotate_on_startup_checkbutton.winfo_reqwidth()
+        assert (
+            app.rotate_on_startup_checkbutton.cget("text")
+            == "Rotate at startup (off keeps the current background after login)"
+        )
+
+        app.rotate_on_startup_var.set(False)
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.rotate_on_startup is False
+
+        app._load_profile("Default")
+        assert app.rotate_on_startup_var.get() is False
+    finally:
+        app.destroy()
+
+
+def test_settings_loads_rotate_on_startup_flag_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={"Default": settings_ui.Profile(name="Default", rotate_on_startup=False)},
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.rotate_on_startup_var.get() is False
     finally:
         app.destroy()
 

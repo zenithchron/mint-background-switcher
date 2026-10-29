@@ -10,6 +10,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Optional per-profile ignore name patterns (case-insensitive wildcards such as `thumb*.jpg`) that keep matching picture file names out of rotation.
 - Optional per-profile monitor-orientation matching that prefers landscape pictures on landscape monitors and portrait pictures on portrait monitors.
 - Random no-repeat rotation until each pool is exhausted, with an optional per-profile folder-order mode that cycles pictures in folder order and restarts from the beginning.
+- Optional per-profile **Rotate at startup** toggle that keeps the current background after login instead of rotating right away; the normal interval takes over from there.
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
@@ -32,6 +33,11 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.12 - 2026-10-29
+
+- Added a per-profile **Rotate at startup** option under **Settings → Rotation & Shortcuts → Rotation**, inspired by John's Background Switcher's switch-at-startup option: when unchecked, the safe login start-up keeps the current background instead of rotating right after Cinnamon becomes ready, and the normal interval takes over from there.
+- Black-screen and pause cycles never consume the skipped first rotation, resuming from privacy mode or an earlier pause still switches on the next cycle, and manual commands such as `next`, `resume`, and **Save & Apply Now** are unaffected; the option is on by default, so existing profiles behave exactly as before; bumped the package version to `0.2.12`.
 
 ### 0.2.11 - 2026-10-28
 

@@ -58,8 +58,38 @@ def test_safe_start_starts_deferred_loop_after_readiness(monkeypatch, tmp_path: 
     )
 
     assert rc == 0
-    assert loop_calls == [(('P',), {"dry_run": True, "defer_first": True, "first_delay_min_seconds": 0.0})]
+    assert loop_calls == [
+        (("P",), {"dry_run": True, "defer_first": True, "first_delay_min_seconds": 0.0, "skip_first": False})
+    ]
     assert loop_calls[0][1]["defer_first"] is True
+    assert loop_calls[0][1]["skip_first"] is False
+
+
+def test_safe_start_defers_first_rotation_when_rotate_on_startup_is_off(monkeypatch, tmp_path: Path):
+    _ready_environment(monkeypatch, tmp_path)
+    from mint_background_switcher.config import Config, Profile, save_config
+
+    save_config(
+        Config(
+            active_profile="P",
+            profiles={"P": Profile(name="P", rotate_on_startup=False)},
+        )
+    )
+    loop_calls = []
+
+    rc = startup.safe_start(
+        "P",
+        delay_seconds=0,
+        readiness_timeout_seconds=0,
+        sleep=lambda _seconds: None,
+        loop=lambda *args, **kwargs: loop_calls.append((args, kwargs)),
+    )
+
+    assert rc == 0
+    assert loop_calls == [
+        (("P",), {"dry_run": False, "defer_first": True, "first_delay_min_seconds": 0.0, "skip_first": True})
+    ]
+    assert "rotate at startup is off" in startup_log_file().read_text(encoding="utf-8")
 
 
 def test_safe_start_previous_incomplete_disables_autostart(monkeypatch, tmp_path: Path):

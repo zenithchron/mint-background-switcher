@@ -2,6 +2,7 @@ import os
 import random
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageEnhance, ImageOps
@@ -2096,3 +2097,115 @@ def test_shared_mode_reuses_pictures_when_pool_is_smaller_than_monitor_count(mon
     assert live.images == expected
     assert preview.applied is False
     assert live.applied is True
+
+
+class _StopLoop(Exception):
+    pass
+
+
+def _run_loop_cycles(monkeypatch, tmp_path: Path, *, stop_after_sleeps: int, **run_kwargs) -> list:
+    """Run run_loop until it has slept ``stop_after_sleeps`` times; return switch calls."""
+    calls: list = []
+
+    class FakeResult:
+        wallpaper = str(tmp_path / "generated.png")
+        monitors = ["monitor-a"]
+
+    monkeypatch.setattr(
+        service, "switch_once", lambda *args, **kwargs: calls.append((args, kwargs)) or FakeResult()
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= stop_after_sleeps:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", **run_kwargs)
+    except _StopLoop:
+        pass
+    return calls
+
+
+def test_run_loop_rotates_on_first_cycle_by_default(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    calls = _run_loop_cycles(monkeypatch, tmp_path, stop_after_sleeps=2)
+
+    # Two full cycles before the sentinel: both switch.
+    assert len(calls) == 2
+
+
+def test_run_loop_skip_first_keeps_current_background_until_next_interval(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    calls = _run_loop_cycles(monkeypatch, tmp_path, stop_after_sleeps=2, skip_first=True)
+
+    # The first eligible cycle is skipped; the second one rotates normally.
+    assert len(calls) == 1
+
+
+def test_run_loop_skip_first_is_not_consumed_while_black(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    save_state(RuntimeState(black_screen=True))
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            state = load_state()
+            state.black_screen = False
+            save_state(state)
+        if len(sleeps) >= 3:
+            raise _StopLoop
+
+    calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", skip_first=True)
+    except _StopLoop:
+        pass
+
+    # Cycle 1 is black (skip not consumed), cycle 2 skips, cycle 3 rotates.
+    assert len(calls) == 1
+    assert len(sleeps) == 3
+
+
+def test_run_loop_skip_first_is_not_consumed_while_paused(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    save_state(RuntimeState(paused=True))
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            state = load_state()
+            state.paused = False
+            save_state(state)
+        if len(sleeps) >= 3:
+            raise _StopLoop
+
+    calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", skip_first=True)
+    except _StopLoop:
+        pass
+
+    # Cycle 1 is paused (skip not consumed), cycle 2 skips, cycle 3 rotates.
+    assert len(calls) == 1
+    assert len(sleeps) == 3

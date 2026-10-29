@@ -167,6 +167,7 @@ class Profile:
     match_orientation: bool = False
     postcard_captions: bool = False
     polaroid_captions: bool = False
+    rotate_on_startup: bool = True
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -194,6 +195,7 @@ class Profile:
             match_orientation=_coerce_bool(data.get("match_orientation", False)),
             postcard_captions=_coerce_bool(data.get("postcard_captions", False)),
             polaroid_captions=_coerce_bool(data.get("polaroid_captions", False)),
+            rotate_on_startup=_coerce_bool(data.get("rotate_on_startup"), default=True),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -223,6 +225,7 @@ class Profile:
             "match_orientation": self.match_orientation,
             "postcard_captions": self.postcard_captions,
             "polaroid_captions": self.polaroid_captions,
+            "rotate_on_startup": self.rotate_on_startup,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,

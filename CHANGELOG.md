@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.12] - 2026-10-29
+
+### Added
+
+- Per-profile **Rotate at startup** option under **Settings → Rotation & Shortcuts → Rotation**, inspired by John's Background Switcher's switch-at-startup option: when unchecked, the safe login start-up keeps the current background instead of rotating right after Cinnamon becomes ready, and the normal interval takes over from there. The option is on by default, so existing profiles behave exactly as before.
+- Black-screen and pause cycles never consume the skipped first rotation: resuming from privacy mode or an earlier pause still switches on the next cycle, and manual commands (`next`, `resume`, `Save & Apply Now`) are unaffected by the option.
+- Added config round-trip, loop-skip, safe-start wiring, and 944×668 Xvfb Settings coverage for the new control.
+
+### Changed
+
+- Bumped the package version to `0.2.12`.
+
 ## [0.2.11] - 2026-10-28
 
 ### Added

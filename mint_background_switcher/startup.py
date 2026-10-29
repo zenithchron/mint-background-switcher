@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable
 
 from .autostart import disable_autostart
+from .config import load_config
 from .desktop import detect_desktop
 from .monitor import detect_monitors
 from .paths import startup_guard_file, startup_log_file, xdg_cache_dir, xdg_config_dir
@@ -185,6 +186,20 @@ def wait_until_ready(
         sleep(min(max(poll_seconds, 0.1), remaining))
 
 
+def _read_rotate_on_startup(profile_name: str | None) -> bool:
+    """Read the profile's rotate-at-startup flag without creating a config.
+
+    Any read failure falls back to the historic behavior (rotate at startup)
+    so a broken or missing config can never block login startup.
+    """
+    try:
+        cfg = load_config(create=False)
+        profile = cfg.get_profile(profile_name)
+        return profile.rotate_on_startup
+    except Exception:
+        return True
+
+
 def safe_start(
     profile_name: str | None = None,
     *,
@@ -242,8 +257,17 @@ def safe_start(
         return 0
 
     append_startup_log("starting deferred background loop")
+    rotate_on_startup = _read_rotate_on_startup(profile_name)
+    if not rotate_on_startup:
+        append_startup_log("rotate at startup is off; keeping the current background until the next interval")
     try:
-        loop(profile_name, dry_run=dry_run, defer_first=True, first_delay_min_seconds=delay)
+        loop(
+            profile_name,
+            dry_run=dry_run,
+            defer_first=True,
+            first_delay_min_seconds=delay,
+            skip_first=not rotate_on_startup,
+        )
     except Exception as exc:
         detail = f"background loop exited unexpectedly: {exc}"
         append_startup_log(detail)
