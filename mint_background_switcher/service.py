@@ -10,9 +10,10 @@ import stat
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-from .config import Config, Profile, load_config
+from .config import Config, Profile, in_night_window, load_config
 from .desktop import DesktopSetter
 from .images import (
     ImageDecodeError,
@@ -416,6 +417,31 @@ class _SelectionScope:
             selection = self.selection
             self.selection = None
             selection.__exit__(type(error) if error is not None else None, error, error.__traceback__ if error else None)
+
+
+def night_schedule_action(profile: Profile, state: RuntimeState, now: datetime) -> str:
+    """Decide the per-tick night-schedule step for the background loop.
+
+    Returns one of:
+
+    - ``"enter"``: the night window is active and the desktop is not black yet,
+      so the loop should apply the black-screen action.
+    - ``"exit"``: the night window has ended and the current black screen was
+      caused by the schedule, so the loop should resume rotation automatically.
+    - ``"black"``: keep the current black screen (night still active, or a
+      manual black screen the schedule must not touch) and skip rotation.
+    - ``"off"``: no night-schedule action; the loop runs its ordinary tick.
+    """
+    if not profile.night_black_screen:
+        return "off"
+    night_active = in_night_window(profile.night_start, profile.night_end, now)
+    if night_active:
+        return "enter" if not state.black_screen else "black"
+    if state.black_screen and state.black_reason == "night":
+        return "exit"
+    if state.black_screen:
+        return "black"
+    return "off"
 
 
 def switch_once(
@@ -904,6 +930,7 @@ def _switch_once_with_state(
         state.wallpaper_slot = next_slot
     if clear_black:
         state.black_screen = False
+        state.black_reason = ""
         state.paused = False
     state.last_wallpaper = str(wallpaper)
     state.last_images = images_used
@@ -915,7 +942,16 @@ def black_screen(
     *,
     dry_run: bool = False,
     cancelled: Callable[[], bool] | None = None,
+    reason: str = "manual",
 ) -> SwitchResult:
+    """Turn every monitor black and stay black until resumed.
+
+    ``reason`` records why the black screen is active: ``"night"`` marks
+    schedule-driven black screens so the loop can resume automatically when
+    the night window ends, while any other value (including ``"manual"``)
+    keeps the classic sticky behavior where only an explicit resume or
+    rotation clears it.
+    """
     _cancel_if_requested(cancelled)
     cfg = load_config()
     profile = cfg.get_profile(profile_name)
@@ -961,6 +997,7 @@ def black_screen(
 
         state.active_profile = profile.name
         state.black_screen = True
+        state.black_reason = "night" if reason == "night" else "manual"
         state.paused = True
         state.last_wallpaper = str(wallpaper)
         state.last_images = []
@@ -1076,8 +1113,33 @@ def run_loop(
         state = load_state()
         cfg = load_config()
         profile = cfg.get_profile(profile_name)
+        # Dry-run previews keep their historic behavior and never trigger the
+        # scheduled black screen or its automatic resume.
+        night_action = "off" if dry_run else night_schedule_action(profile, state, datetime.now())
+        rotated_this_tick = False
+        if night_action == "enter":
+            try:
+                black_screen(profile.name, reason="night")
+                state = load_state()
+                print(
+                    f"Night schedule active; keeping the desktop black until {profile.night_end} local time",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"Mint Background Switcher error: {exc}", flush=True)
+        elif night_action == "exit":
+            try:
+                switch_once(profile.name)
+                state = load_state()
+                rotated_this_tick = True
+                print("Night schedule ended; resuming rotation", flush=True)
+            except Exception as exc:
+                print(f"Mint Background Switcher error: {exc}", flush=True)
         if state.black_screen:
             time.sleep(min(max(profile.interval_minutes * 60.0, 5.0), 60.0))
+            continue
+        if rotated_this_tick:
+            time.sleep(max(profile.interval_minutes * 60.0, 5.0))
             continue
         if not state.paused:
             if skip_first:

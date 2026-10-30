@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from mint_background_switcher.config import (
     MAX_IGNORE_PATTERN_LENGTH,
@@ -6,7 +7,9 @@ from mint_background_switcher.config import (
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
+    in_night_window,
     load_config,
+    parse_night_time,
     replace_working_directory,
     save_config,
 )
@@ -480,3 +483,75 @@ def test_bad_profile_types_fall_back_safely():
     assert profile.interval_minutes == 10.0
     assert profile.shared_folders == []
     assert profile.monitor_folders == {}
+
+
+def test_parse_night_time_accepts_canonical_hh_mm_only():
+    assert parse_night_time("22:00") == (22, 0)
+    assert parse_night_time("06:05") == (6, 5)
+    assert parse_night_time(" 00:00 ") == (0, 0)
+    assert parse_night_time("23:59") == (23, 59)
+    assert parse_night_time("9:05") is None
+    assert parse_night_time("22:0") is None
+    assert parse_night_time("24:00") is None
+    assert parse_night_time("22:60") is None
+    assert parse_night_time("2200") is None
+    assert parse_night_time("22:00:00") is None
+    assert parse_night_time("٢٢:٠٠") is None
+    assert parse_night_time("") is None
+    assert parse_night_time("garbage") is None
+    assert parse_night_time(None) is None
+    assert parse_night_time(2200) is None
+
+
+def test_night_window_boundaries_and_midnight_wrap():
+    # Non-wrapping window: start inclusive, end exclusive.
+    assert in_night_window("06:00", "22:00", datetime(2026, 10, 30, 6, 0)) is True
+    assert in_night_window("06:00", "22:00", datetime(2026, 10, 30, 12, 30)) is True
+    assert in_night_window("06:00", "22:00", datetime(2026, 10, 30, 21, 59)) is True
+    assert in_night_window("06:00", "22:00", datetime(2026, 10, 30, 22, 0)) is False
+    assert in_night_window("06:00", "22:00", datetime(2026, 10, 30, 5, 59)) is False
+    # Wrapping window across midnight.
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 30, 22, 0)) is True
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 30, 23, 30)) is True
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 31, 0, 0)) is True
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 31, 5, 59)) is True
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 31, 6, 0)) is False
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 30, 12, 0)) is False
+    assert in_night_window("22:00", "06:00", datetime(2026, 10, 30, 21, 59)) is False
+
+
+def test_night_window_invalid_or_equal_times_disable_the_window():
+    assert in_night_window("22:00", "22:00", datetime(2026, 10, 30, 23, 0)) is False
+    assert in_night_window("06:00", "06:00", datetime(2026, 10, 30, 6, 0)) is False
+    assert in_night_window("25:00", "06:00", datetime(2026, 10, 30, 23, 0)) is False
+    assert in_night_window("22:00", "not-a-time", datetime(2026, 10, 30, 23, 0)) is False
+    assert in_night_window(None, "06:00", datetime(2026, 10, 30, 23, 0)) is False
+
+
+def test_night_black_screen_roundtrip_and_coercion():
+    profile = Profile(name="P")
+    assert profile.night_black_screen is False
+    assert profile.night_start == "22:00"
+    assert profile.night_end == "06:00"
+
+    loaded = Profile.from_dict(
+        "P", {"night_black_screen": True, "night_start": "21:30", "night_end": "07:15"}
+    )
+    assert loaded.night_black_screen is True
+    assert loaded.night_start == "21:30"
+    assert loaded.night_end == "07:15"
+    dumped = loaded.to_dict()
+    assert dumped["night_black_screen"] is True
+    assert dumped["night_start"] == "21:30"
+    assert dumped["night_end"] == "07:15"
+    assert Profile.from_dict("P", dumped).night_start == "21:30"
+
+    assert Profile.from_dict("P", {}).night_black_screen is False
+    assert Profile.from_dict("P", {"night_black_screen": "on"}).night_black_screen is True
+    assert Profile.from_dict("P", {"night_black_screen": "garbage"}).night_black_screen is False
+    bad_times = Profile.from_dict("P", {"night_black_screen": True, "night_start": "9:5", "night_end": 123})
+    assert bad_times.night_start == "22:00"
+    assert bad_times.night_end == "06:00"
+    # Coerced defaults are valid times, so the window behaves like the default window.
+    assert in_night_window(bad_times.night_start, bad_times.night_end, datetime(2026, 10, 30, 23, 0)) is True
+    assert in_night_window(bad_times.night_start, bad_times.night_end, datetime(2026, 10, 30, 12, 0)) is False

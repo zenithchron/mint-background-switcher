@@ -279,6 +279,9 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.interval_entry,
                 app.sequential_checkbutton,
                 app.rotate_on_startup_checkbutton,
+                app.night_black_screen_checkbutton,
+                app.night_start_entry,
+                app.night_end_entry,
                 app.hotkey_entry,
                 app.desktop_menu,
             ),
@@ -2285,6 +2288,117 @@ def test_settings_loads_rotate_on_startup_flag_from_saved_profile(monkeypatch, t
         app.update_idletasks()
         app.update()
         assert app.rotate_on_startup_var.get() is False
+    finally:
+        app.destroy()
+
+
+def test_settings_night_schedule_controls_are_visible_and_persist(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        # Disabled by default, with the standard 22:00-06:00 window and
+        # the time fields greyed out while the schedule is off.
+        assert app.night_black_screen_var.get() is False
+        assert app.night_start_var.get() == "22:00"
+        assert app.night_end_var.get() == "06:00"
+        assert is_descendant(app.night_black_screen_checkbutton, app.rotation_tab)
+        assert is_descendant(app.night_start_entry, app.rotation_tab)
+        assert is_descendant(app.night_end_entry, app.rotation_tab)
+        assert app.night_black_screen_checkbutton.winfo_ismapped()
+        assert app.night_start_entry.winfo_ismapped()
+        assert app.night_end_entry.winfo_ismapped()
+        assert app.night_start_entry.winfo_width() >= app.night_start_entry.winfo_reqwidth()
+        assert app.night_end_entry.winfo_width() >= app.night_end_entry.winfo_reqwidth()
+        assert str(app.night_start_entry.cget("state")) == "disabled"
+
+        app.night_black_screen_var.set(True)
+        app.update()
+        assert str(app.night_start_entry.cget("state")) == "normal"
+
+        app.night_start_var.set("21:30")
+        app.night_end_var.set("07:15")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.night_black_screen is True
+        assert saved.night_start == "21:30"
+        assert saved.night_end == "07:15"
+
+        app._load_profile("Default")
+        assert app.night_black_screen_var.get() is True
+        assert app.night_start_var.get() == "21:30"
+        assert app.night_end_var.get() == "07:15"
+        assert str(app.night_start_entry.cget("state")) == "normal"
+    finally:
+        app.destroy()
+
+
+def test_settings_night_window_rejects_invalid_time_on_save(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    errors: list = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda *_args: errors.append(_args))
+    app = settings_ui.SettingsApp()
+    try:
+        app.night_black_screen_var.set(True)
+        app.night_start_var.set("9:5")
+        assert app._save_current() is False
+        assert errors and "HH:MM" in str(errors[-1])
+
+        app.night_start_var.set("22:00")
+        app.night_end_var.set("22:00")
+        assert app._save_current() is False
+        assert errors and "differ" in str(errors[-1])
+
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.night_black_screen is False
+    finally:
+        app.destroy()
+
+
+def test_settings_loads_night_schedule_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={
+            "Default": settings_ui.Profile(
+                name="Default",
+                night_black_screen=True,
+                night_start="23:00",
+                night_end="05:45",
+            )
+        },
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.night_black_screen_var.get() is True
+        assert app.night_start_var.get() == "23:00"
+        assert app.night_end_var.get() == "05:45"
     finally:
         app.destroy()
 

@@ -64,3 +64,13 @@ def test_sequential_draw_many_preserves_folder_order_within_batch():
     chosen = draw_many(state, "bucket", pool, 4, rng=random.Random(5), sequential=True)
 
     assert chosen == ["/tmp/a.jpg", "/tmp/b.jpg", "/tmp/c.jpg", "/tmp/d.jpg"]
+
+
+def test_black_reason_roundtrips_and_defaults_to_empty():
+    state = RuntimeState(black_screen=True, black_reason="night")
+    assert state.to_dict()["black_reason"] == "night"
+    assert RuntimeState.from_dict(state.to_dict()).black_reason == "night"
+
+    assert RuntimeState().black_reason == ""
+    assert RuntimeState.from_dict({"black_screen": True}).black_reason == ""
+    assert RuntimeState.from_dict({"black_reason": None}).black_reason == ""

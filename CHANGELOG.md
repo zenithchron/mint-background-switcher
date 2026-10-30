@@ -4,6 +4,20 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.13] - 2026-10-30
+
+### Added
+
+- Per-profile **night schedule** under **Settings → Rotation & Shortcuts → Rotation**, inspired by John's Background Switcher's time-of-day switching: enable "Keep the desktop black during a nightly window", pick a start and end time (zero-padded `HH:MM`, for example `22:00` to `06:00`), and the background loop turns every monitor black when the window opens and restores rotation by itself when it ends. Windows may cross midnight, the start minute is included, and the end minute is not.
+- Scheduled black screens are tracked separately from the manual black screen: when the night window ends the app resumes on its own, while a manually triggered black screen stays sticky until you resume it (hotkey, `mint-background-switcher resume`, or **Save & Apply Now**).
+- The Settings window validates night-window times on save (zero-padded `HH:MM` only, start and end must differ) and reports errors with a message box; the time fields are greyed out while the schedule is off and default to `22:00`–`06:00` for new profiles.
+- Dry runs never trigger the scheduled black screen or its automatic resume.
+- Added unit coverage for the window math, config round-trip and coercion, the per-tick schedule decision, the `run_loop` enter/hold/resume cycle, manual-black-screen immunity, and 944×668 Xvfb Settings visibility and save/reject tests for the new controls.
+
+### Changed
+
+- Bumped the package version to `0.2.13`.
+
 ## [0.2.12] - 2026-10-29
 
 ### Added

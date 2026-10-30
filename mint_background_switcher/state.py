@@ -17,6 +17,7 @@ from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, 
 class RuntimeState:
     paused: bool = False
     black_screen: bool = False
+    black_reason: str = ""
     active_profile: str | None = None
     remaining: dict[str, list[str]] = field(default_factory=dict)
     last_wallpaper: str | None = None
@@ -43,6 +44,7 @@ class RuntimeState:
         return cls(
             paused=bool(data.get("paused", False)),
             black_screen=bool(data.get("black_screen", False)),
+            black_reason=str(data.get("black_reason", "") or ""),
             active_profile=data.get("active_profile"),
             remaining=remaining,
             last_wallpaper=data.get("last_wallpaper"),
@@ -54,6 +56,7 @@ class RuntimeState:
         return {
             "paused": self.paused,
             "black_screen": self.black_screen,
+            "black_reason": self.black_reason,
             "active_profile": self.active_profile,
             "remaining": self.remaining,
             "last_wallpaper": self.last_wallpaper,

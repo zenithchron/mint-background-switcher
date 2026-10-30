@@ -1,6 +1,7 @@
 import os
 import random
 import threading
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,12 +9,13 @@ import pytest
 from PIL import Image, ImageEnhance, ImageOps
 
 from mint_background_switcher import service
-from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, save_config
+from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, load_config, save_config
 from mint_background_switcher.images import BRIGHTNESS_FACTOR, CONTRAST_FACTOR, DARKEN_FACTOR
 from mint_background_switcher.monitor import Monitor
 from mint_background_switcher.service import (
     black_screen,
     current_source_images,
+    night_schedule_action,
     resume,
     save_current_wallpaper,
     switch_once,
@@ -2209,3 +2211,134 @@ def test_run_loop_skip_first_is_not_consumed_while_paused(monkeypatch, tmp_path:
     # Cycle 1 is paused (skip not consumed), cycle 2 skips, cycle 3 rotates.
     assert len(calls) == 1
     assert len(sleeps) == 3
+
+
+def test_night_schedule_action_matrix():
+    night_on = Profile(name="P", night_black_screen=True, night_start="22:00", night_end="06:00")
+    night_off = Profile(name="P", night_black_screen=False)
+    inside = datetime(2026, 10, 30, 23, 0)
+    outside = datetime(2026, 10, 31, 12, 0)
+    awake = RuntimeState()
+    black_night = RuntimeState(black_screen=True, black_reason="night")
+    black_manual = RuntimeState(black_screen=True, black_reason="manual")
+
+    # Schedule disabled: never active.
+    assert night_schedule_action(night_off, awake, inside) == "off"
+    assert night_schedule_action(night_off, black_night, outside) == "off"
+    # Window active: enter when awake, hold when already black (any reason).
+    assert night_schedule_action(night_on, awake, inside) == "enter"
+    assert night_schedule_action(night_on, black_night, inside) == "black"
+    assert night_schedule_action(night_on, black_manual, inside) == "black"
+    # Window ended: resume only a schedule-caused black screen.
+    assert night_schedule_action(night_on, black_night, outside) == "exit"
+    assert night_schedule_action(night_on, black_manual, outside) == "black"
+    assert night_schedule_action(night_on, awake, outside) == "off"
+
+
+def test_black_screen_records_night_reason_and_rotation_clears_it(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    black_screen("P", reason="night")
+    state = load_state()
+    assert state.black_screen is True
+    assert state.black_reason == "night"
+    assert state.paused is True
+
+    switch_once("P", rng=random.Random(7))
+    state = load_state()
+    assert state.black_screen is False
+    assert state.black_reason == ""
+
+    black_screen("P")
+    state = load_state()
+    assert state.black_screen is True
+    assert state.black_reason == "manual"
+
+
+def test_run_loop_enters_night_black_and_resumes_when_window_ends(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    config = load_config()
+    config.get_profile("P").night_black_screen = True
+    config.get_profile("P").night_start = "22:00"
+    config.get_profile("P").night_end = "06:00"
+    save_config(config)
+
+    ticks = iter([True, True, False])
+    monkeypatch.setattr(service, "in_night_window", lambda start, end, now: next(ticks))
+    black_calls: list = []
+
+    def fake_black_screen(profile_name=None, *, dry_run=False, cancelled=None, reason="manual"):
+        black_calls.append((profile_name, reason))
+        with service.state_transaction() as state:
+            state.black_screen = True
+            state.black_reason = "night" if reason == "night" else "manual"
+            state.paused = True
+        return SimpleNamespace(wallpaper=str(tmp_path / "black.png"), monitors=["monitor-a"])
+
+    monkeypatch.setattr(service, "black_screen", fake_black_screen)
+    switch_calls: list = []
+
+    def fake_switch_once(profile_name=None, *, dry_run=False, clear_black=True, **_kwargs):
+        switch_calls.append(profile_name)
+        with service.state_transaction() as state:
+            state.black_screen = False
+            state.black_reason = ""
+            state.paused = False
+        return SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"])
+
+    monkeypatch.setattr(service, "switch_once", fake_switch_once)
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 3:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # Tick 1 enters the night black screen; tick 2 holds it while black;
+    # tick 3 resumes rotation when the window ends.
+    assert black_calls == [("P", "night")]
+    assert switch_calls == ["P"]
+    # While black the loop polls on the short interval; the resume tick sleeps
+    # for the full profile interval.
+    assert sleeps == [60.0, 60.0, max(config.get_profile("P").interval_minutes * 60.0, 5.0)]
+    assert load_state().black_screen is False
+
+
+def test_run_loop_does_not_auto_resume_manual_black_screen(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    config = load_config()
+    config.get_profile("P").night_black_screen = True
+    save_config(config)
+    save_state(RuntimeState(black_screen=True, black_reason="manual"))
+
+    monkeypatch.setattr(service, "in_night_window", lambda start, end, now: False)
+    switch_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: switch_calls.append(args)
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 2:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # A manual black screen outlives the night window until the user resumes it.
+    assert switch_calls == []
+    assert load_state().black_screen is True
+    assert load_state().black_reason == "manual"

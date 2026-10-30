@@ -14,6 +14,8 @@ from typing import Any, Callable
 from . import APP_NAME, __version__, public_collections, updater
 from .config import (
     BAR_COLOR_CHOICES,
+    DEFAULT_NIGHT_END,
+    DEFAULT_NIGHT_START,
     EFFECT_CHOICES,
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
@@ -21,6 +23,7 @@ from .config import (
     Config,
     Profile,
     load_config,
+    parse_night_time,
     save_config,
 )
 from .images import SUPPORTED_EXTENSIONS, is_usable_image
@@ -245,6 +248,9 @@ class SettingsApp(tk.Tk):
         self.sequential_var = tk.BooleanVar()
         self.match_orientation_var = tk.BooleanVar()
         self.rotate_on_startup_var = tk.BooleanVar(value=True)
+        self.night_black_screen_var = tk.BooleanVar(value=False)
+        self.night_start_var = tk.StringVar(value=DEFAULT_NIGHT_START)
+        self.night_end_var = tk.StringVar(value=DEFAULT_NIGHT_END)
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
@@ -735,6 +741,28 @@ class SettingsApp(tk.Tk):
             variable=self.rotate_on_startup_var,
         )
         self.rotate_on_startup_checkbutton.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        self.night_black_screen_checkbutton = ttk.Checkbutton(
+            rotation_schedule,
+            text="Keep the desktop black during a nightly window",
+            variable=self.night_black_screen_var,
+        )
+        self.night_black_screen_checkbutton.grid(row=3, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        ttk.Label(rotation_schedule, text="Night window:").grid(row=4, column=0, sticky="w", padx=(20, 0))
+        night_window_frame = ttk.Frame(rotation_schedule)
+        night_window_frame.grid(row=4, column=1, sticky="w", padx=5)
+        self.night_start_entry = ttk.Entry(night_window_frame, textvariable=self.night_start_var, width=6)
+        self.night_start_entry.pack(side=tk.LEFT)
+        ttk.Label(night_window_frame, text="to").pack(side=tk.LEFT, padx=(6, 6))
+        self.night_end_entry = ttk.Entry(night_window_frame, textvariable=self.night_end_var, width=6)
+        self.night_end_entry.pack(side=tk.LEFT)
+        ttk.Label(
+            rotation_schedule,
+            text="Local HH:MM times; the window may cross midnight. Rotation resumes by itself when it ends.",
+            justify=tk.LEFT,
+            wraplength=430,
+        ).grid(row=4, column=2, sticky="w", padx=(16, 0))
+        self.night_black_screen_var.trace_add("write", self._refresh_night_time_state)
+        self._refresh_night_time_state()
 
         shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=10)
         shortcuts.pack(fill=tk.X, pady=(0, 8))
@@ -1068,6 +1096,9 @@ class SettingsApp(tk.Tk):
         self.sequential_var.set(profile.sequential)
         self.match_orientation_var.set(profile.match_orientation)
         self.rotate_on_startup_var.set(profile.rotate_on_startup)
+        self.night_black_screen_var.set(profile.night_black_screen)
+        self.night_start_var.set(profile.night_start)
+        self.night_end_var.set(profile.night_end)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
@@ -1086,6 +1117,12 @@ class SettingsApp(tk.Tk):
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
+
+    def _refresh_night_time_state(self, *_args: object) -> None:
+        """Enable the night-window time fields only while the schedule is on."""
+        state = "normal" if self.night_black_screen_var.get() else "disabled"
+        self.night_start_entry.configure(state=state)
+        self.night_end_entry.configure(state=state)
 
     def _refresh_postcard_count_label(self, *_args: object) -> None:
         text = "Postcard photos across all screens:" if self.postcard_span_var.get() else "Postcard photos per screen:"
@@ -1167,6 +1204,23 @@ class SettingsApp(tk.Tk):
         match_orientation = bool(match_orientation_var.get()) if match_orientation_var is not None else False
         rotate_on_startup_var = vars(self).get("rotate_on_startup_var")
         rotate_on_startup = bool(rotate_on_startup_var.get()) if rotate_on_startup_var is not None else True
+        night_black_screen_var = vars(self).get("night_black_screen_var")
+        night_black_screen = bool(night_black_screen_var.get()) if night_black_screen_var is not None else False
+        night_start_var = vars(self).get("night_start_var")
+        night_end_var = vars(self).get("night_end_var")
+        raw_night_start = str(night_start_var.get()).strip() if night_start_var is not None else DEFAULT_NIGHT_START
+        raw_night_end = str(night_end_var.get()).strip() if night_end_var is not None else DEFAULT_NIGHT_END
+        parsed_night_start = parse_night_time(raw_night_start)
+        parsed_night_end = parse_night_time(raw_night_end)
+        if night_black_screen:
+            if parsed_night_start is None:
+                raise ValueError("Night window start time must use HH:MM (for example 22:00).")
+            if parsed_night_end is None:
+                raise ValueError("Night window end time must use HH:MM (for example 06:00).")
+            if parsed_night_start == parsed_night_end:
+                raise ValueError("The night window start and end times must differ.")
+        night_start = raw_night_start if parsed_night_start is not None else DEFAULT_NIGHT_START
+        night_end = raw_night_end if parsed_night_end is not None else DEFAULT_NIGHT_END
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -1199,6 +1253,9 @@ class SettingsApp(tk.Tk):
             sequential=sequential,
             match_orientation=match_orientation,
             rotate_on_startup=rotate_on_startup,
+            night_black_screen=night_black_screen,
+            night_start=night_start,
+            night_end=night_end,
             postcard_captions=postcard_captions,
             polaroid_captions=polaroid_captions,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],

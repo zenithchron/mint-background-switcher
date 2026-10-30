@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -56,6 +57,54 @@ POSTCARD_BACKGROUND_CHOICES = (
 VALID_POSTCARD_BACKGROUNDS = set(POSTCARD_BACKGROUND_CHOICES)
 MAX_IGNORE_PATTERNS = 20
 MAX_IGNORE_PATTERN_LENGTH = 120
+DEFAULT_NIGHT_START = "22:00"
+DEFAULT_NIGHT_END = "06:00"
+
+
+def parse_night_time(value: Any) -> tuple[int, int] | None:
+    """Parse an ``HH:MM`` local time of day, or return ``None`` when invalid.
+
+    Hours are 00-23 and minutes 00-59. Only the canonical zero-padded
+    ``HH:MM`` form is accepted so saved configs never hold look-alikes.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+    else:
+        return None
+    parts = text.split(":")
+    if len(parts) != 2:
+        return None
+    hour_raw, minute_raw = parts
+    if len(hour_raw) != 2 or len(minute_raw) != 2:
+        return None
+    # ASCII digits only: str.isdigit() would also accept look-alike Unicode
+    # digits such as "٢٢:٠٠".
+    if not all(char in "0123456789" for char in hour_raw + minute_raw):
+        return None
+    hour, minute = int(hour_raw), int(minute_raw)
+    if hour > 23 or minute > 59:
+        return None
+    return hour, minute
+
+
+def in_night_window(start: Any, end: Any, now: datetime) -> bool:
+    """Return whether local time ``now`` falls inside the night window.
+
+    The window begins inclusively at ``start`` and ends exclusively at
+    ``end``. A window whose end time is earlier than its start time wraps
+    across midnight (for example 22:00 to 06:00). Invalid or equal times
+    disable the window, so a bad saved value can never force a black screen.
+    """
+    start_parsed = parse_night_time(start)
+    end_parsed = parse_night_time(end)
+    if start_parsed is None or end_parsed is None or start_parsed == end_parsed:
+        return False
+    now_minutes = now.hour * 60 + now.minute
+    start_minutes = start_parsed[0] * 60 + start_parsed[1]
+    end_minutes = end_parsed[0] * 60 + end_parsed[1]
+    if start_minutes < end_minutes:
+        return start_minutes <= now_minutes < end_minutes
+    return now_minutes >= start_minutes or now_minutes < end_minutes
 
 
 def _coerce_interval(value: Any, default: float = 10.0) -> float:
@@ -94,6 +143,13 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return default
+
+
+def _coerce_night_time(value: Any, default: str) -> str:
+    """Normalize a saved night-window time, falling back to the default."""
+    if parse_night_time(value) is None:
+        return default
+    return str(value).strip()
 
 
 def _coerce_min_image_size(value: Any, default: int = 0) -> int:
@@ -168,6 +224,9 @@ class Profile:
     postcard_captions: bool = False
     polaroid_captions: bool = False
     rotate_on_startup: bool = True
+    night_black_screen: bool = False
+    night_start: str = DEFAULT_NIGHT_START
+    night_end: str = DEFAULT_NIGHT_END
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -196,6 +255,9 @@ class Profile:
             postcard_captions=_coerce_bool(data.get("postcard_captions", False)),
             polaroid_captions=_coerce_bool(data.get("polaroid_captions", False)),
             rotate_on_startup=_coerce_bool(data.get("rotate_on_startup"), default=True),
+            night_black_screen=_coerce_bool(data.get("night_black_screen", False)),
+            night_start=_coerce_night_time(data.get("night_start", DEFAULT_NIGHT_START), DEFAULT_NIGHT_START),
+            night_end=_coerce_night_time(data.get("night_end", DEFAULT_NIGHT_END), DEFAULT_NIGHT_END),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -226,6 +288,9 @@ class Profile:
             "postcard_captions": self.postcard_captions,
             "polaroid_captions": self.polaroid_captions,
             "rotate_on_startup": self.rotate_on_startup,
+            "night_black_screen": self.night_black_screen,
+            "night_start": self.night_start,
+            "night_end": self.night_end,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,
