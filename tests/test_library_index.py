@@ -12,6 +12,7 @@ from mint_background_switcher.library_index import (
     LibraryIndexError,
     LibraryScanCancelled,
     normalized_ignore_patterns,
+    normalized_image_types,
     normalized_scan_roots,
     orientation_matches,
     scan_signature,
@@ -243,6 +244,61 @@ def test_refresh_ignores_name_patterns(tmp_path):
     filtered = index.refresh([str(root)], recursive=True, ignore_patterns=["thumb*", "banner*"])
     assert filtered.image_count == 1
     assert index.paths(filtered.signature) == [str(visible.resolve())]
+
+
+def test_normalized_image_types_canonicalize_order_case_and_blanks():
+    assert normalized_image_types([]) == ()
+    assert normalized_image_types(["  ", ""]) == ()
+    assert normalized_image_types(["PNG", "jpg", ".png"]) == (".jpg", ".png")
+    # Unsupported tokens are dropped from the canonical set.
+    assert normalized_image_types(["doc", "jpg"]) == (".jpg",)
+
+
+def test_scan_signature_changes_with_image_types(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    roots = normalized_scan_roots([str(root)])
+
+    assert scan_signature(roots, recursive=True) == scan_signature(
+        roots, recursive=True, image_types=()
+    )
+    assert scan_signature(roots, recursive=True) != scan_signature(
+        roots, recursive=True, image_types=["jpg"]
+    )
+    # Equivalent inputs (case, dots, order, duplicates) share one signature.
+    assert scan_signature(roots, recursive=True, image_types=["png", "jpg"]) == scan_signature(
+        roots, recursive=True, image_types=[".JPG", " png ", "png"]
+    )
+    assert scan_signature(roots, recursive=True, image_types=["jpg"]) != scan_signature(
+        roots, recursive=True, image_types=["png"]
+    )
+
+
+def test_refresh_filters_image_types_and_reuses_equivalent_signature(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    photo = root / "photo.jpg"
+    photo.write_bytes(b"image")
+    drawing = root / "drawing.png"
+    drawing.write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+
+    default = index.refresh([str(root)], recursive=True)
+    assert default.image_count == 2
+
+    filtered = index.refresh([str(root)], recursive=True, image_types=["png"])
+    assert filtered.image_count == 1
+    assert index.paths(filtered.signature) == [str(drawing.resolve())]
+    assert filtered.signature != default.signature
+
+    # An equivalent filter (case/dot) reuses the same signature.
+    equivalent = index.refresh([str(root)], recursive=True, image_types=[".PNG"])
+    assert equivalent.signature == filtered.signature
+
+    # ensure() with the same filter returns the cached scan without a new signature.
+    snapshot = index.ensure([str(root)], recursive=True, image_types=["png"])
+    assert snapshot.signature == filtered.signature
+    assert snapshot.image_count == 1
 
 
 def test_nonrecursive_refresh_ignores_name_patterns(tmp_path):

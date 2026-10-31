@@ -8,6 +8,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Optional per-profile minimum image size (smallest side) that keeps small pictures out of rotation.
 - Optional per-profile ignore for hidden files and folders (names starting with a dot) in rotation.
 - Optional per-profile ignore name patterns (case-insensitive wildcards such as `thumb*.jpg`) that keep matching picture file names out of rotation.
+- Optional per-profile **Image types** filter (comma-separated list such as `jpg, png, webp`) that keeps rotation limited to the chosen picture formats; empty means all supported types.
 - Optional per-profile monitor-orientation matching that prefers landscape pictures on landscape monitors and portrait pictures on portrait monitors.
 - Random no-repeat rotation until each pool is exhausted, with an optional per-profile folder-order mode that cycles pictures in folder order and restarts from the beginning.
 - Optional per-profile **Rotate at startup** toggle that keeps the current background after login instead of rotating right away; the normal interval takes over from there.
@@ -34,6 +35,11 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.14 - 2026-10-31
+
+- Added a per-profile **Image types** filter under **Settings → Sources → Folder scanning**, inspired by John's Background Switcher's file-type selection: enter comma-separated image types (for example `jpg, png, webp`; a leading dot is accepted and case is ignored) to keep rotation limited to those picture formats. Empty means all supported types, so existing profiles behave exactly as before.
+- The filter is part of the scan signature, so changing it refreshes the library index exactly once; it applies to shared, per-monitor, and individually selected pictures, to recursive and flat scans, and to dry-run previews as well as live rotations; unknown types are rejected by **Save Profile** with a message box that names the supported types; bumped the package version to `0.2.14`.
 
 ### 0.2.13 - 2026-10-30
 

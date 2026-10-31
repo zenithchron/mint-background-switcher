@@ -624,6 +624,39 @@ def test_random_profile_stays_unordered_with_sequential_flag_absent(monkeypatch,
     assert result.images[0] in service.scan_images([str(tmp_path / "images")], recursive=True)
 
 
+def test_live_rotation_respects_image_types_filter(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    extra = tmp_path / "images" / "extra.jpg"
+    Image.new("RGB", (90, 45), (10, 20, 30)).save(extra)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "same"
+    profile.image_types = ["png"]
+    save_config(cfg)
+
+    seen = [switch_once("P", dry_run=False, rng=random.Random(7)).images[0] for _ in range(4)]
+
+    assert all(path.endswith(".png") for path in seen)
+    assert str(extra.resolve()) not in seen
+
+
+def test_dry_run_respects_image_types_filter(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    extra = tmp_path / "images" / "extra.jpg"
+    Image.new("RGB", (90, 45), (10, 20, 30)).save(extra)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "same"
+    profile.image_types = ["png"]
+    save_config(cfg)
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert result.images[0].endswith(".png")
+    assert str(extra.resolve()) not in [str(path) for path in result.images]
+
+
 def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
     cfg = service.load_config()

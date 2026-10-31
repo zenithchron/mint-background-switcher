@@ -161,10 +161,11 @@ def _load_image_pool(
     min_image_size: int = 0,
     ignore_hidden: bool = False,
     ignore_patterns: Iterable[str] = (),
+    image_types: Iterable[str] = (),
 ) -> _ImagePool:
     if dry_run:
         return _ImagePool(
-            paths=scan_images(folders, recursive, min_image_size, ignore_hidden, ignore_patterns)
+            paths=scan_images(folders, recursive, min_image_size, ignore_hidden, ignore_patterns, image_types)
         )
     if index is None:  # pragma: no cover - guarded by switch setup
         raise RuntimeError("live wallpaper rotation requires an image index")
@@ -174,6 +175,7 @@ def _load_image_pool(
         min_image_size=min_image_size,
         ignore_hidden=ignore_hidden,
         ignore_patterns=ignore_patterns,
+        image_types=image_types,
         cancelled=cancelled,
         progress=progress,
     )
@@ -533,6 +535,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -567,6 +570,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -605,6 +609,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -678,6 +683,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -750,6 +756,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -821,6 +828,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -856,6 +864,7 @@ def _switch_once_with_state(
             min_image_size=profile.min_image_size,
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
+            image_types=profile.image_types,
         )
         if pool.empty:
             wallpaper = _apply_black_fallback(
@@ -897,6 +906,7 @@ def _switch_once_with_state(
                 min_image_size=profile.min_image_size,
                 ignore_hidden=profile.ignore_hidden,
                 ignore_patterns=profile.ignore_patterns,
+                image_types=profile.image_types,
             )
             if not pool.empty:
                 pools_by_monitor[monitor.name] = pool

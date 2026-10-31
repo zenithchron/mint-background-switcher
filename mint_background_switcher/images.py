@@ -19,6 +19,7 @@ from .monitor import Monitor, normalized_position, virtual_canvas
 from .paths import xdg_cache_dir
 
 SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff")
+SUPPORTED_TYPE_NAMES = tuple(ext[1:].lower() for ext in SUPPORTED_EXTENSIONS)
 CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
 POLAROID_BACKGROUND_COLOR = (39, 44, 52)
 POLAROID_FRAME_COLOR = (248, 246, 238, 255)
@@ -180,13 +181,35 @@ def name_matches_ignore_patterns(filename: str | Path, patterns: Iterable[str]) 
     return False
 
 
+def normalize_image_types(value: Iterable[str] | None) -> frozenset[str]:
+    """Return the canonical set of supported extensions named by ``value``.
+
+    Tokens are case-insensitive and may be given with or without a leading
+    dot (``JPG`` and ``.jpg`` are the same type). Unsupported tokens are
+    dropped so a saved config can never widen the supported set. An empty
+    result means "all supported types".
+    """
+    result: set[str] = set()
+    for raw in value or ():
+        text = str(raw).strip().lower()
+        if not text:
+            continue
+        if not text.startswith("."):
+            text = "." + text
+        if text in SUPPORTED_EXTENSIONS:
+            result.add(text)
+    return frozenset(result)
+
+
 def scan_images(
     folders: Iterable[str],
     recursive: bool = True,
     min_image_size: int = 0,
     ignore_hidden: bool = False,
     ignore_patterns: Iterable[str] = (),
+    image_types: Iterable[str] = (),
 ) -> list[str]:
+    allowed_types = normalize_image_types(image_types)
     images: list[str] = []
     for raw_folder in folders:
         if not raw_folder:
@@ -194,6 +217,8 @@ def scan_images(
         path = Path(raw_folder).expanduser()
         try:
             if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                if allowed_types and path.suffix.lower() not in allowed_types:
+                    continue
                 if meets_min_image_size(path, min_image_size):
                     images.append(str(path.resolve()))
                 continue
@@ -212,13 +237,17 @@ def scan_images(
                     if name_matches_ignore_patterns(filename, ignore_patterns):
                         continue
                     item = Path(root) / filename
-                    if item.suffix.lower() in SUPPORTED_EXTENSIONS:
-                        if not meets_min_image_size(item, min_image_size):
-                            continue
-                        try:
-                            images.append(str(item.resolve()))
-                        except OSError:
-                            continue
+                    suffix = item.suffix.lower()
+                    if suffix not in SUPPORTED_EXTENSIONS:
+                        continue
+                    if allowed_types and suffix not in allowed_types:
+                        continue
+                    if not meets_min_image_size(item, min_image_size):
+                        continue
+                    try:
+                        images.append(str(item.resolve()))
+                    except OSError:
+                        continue
         else:
             try:
                 iterator = list(path.iterdir())
@@ -230,7 +259,10 @@ def scan_images(
                 if name_matches_ignore_patterns(item.name, ignore_patterns):
                     continue
                 try:
-                    if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    suffix = item.suffix.lower()
+                    if item.is_file() and suffix in SUPPORTED_EXTENSIONS:
+                        if allowed_types and suffix not in allowed_types:
+                            continue
                         if meets_min_image_size(item, min_image_size):
                             images.append(str(item.resolve()))
                 except OSError:

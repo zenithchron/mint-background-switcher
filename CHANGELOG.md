@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.14] - 2026-10-31
+
+### Added
+
+- Per-profile **Image types** filter under **Settings → Sources → Folder scanning**, inspired by John's Background Switcher's file-type selection: enter comma-separated image types (for example `jpg, png, webp`; a leading dot is accepted and case is ignored) to keep rotation limited to those picture formats. The option is empty by default, which keeps every supported type in rotation, so existing profiles behave exactly as before.
+- The filter is part of the scan signature, so changing it refreshes the library index exactly once; it applies to shared, per-monitor, and individually selected pictures, to recursive and flat scans, and to dry-run previews as well as live rotations.
+- Settings validates the list on save: unknown types (anything outside `jpg, jpeg, png, webp, bmp, gif, tif, tiff`) are rejected with a message box that names the supported types, and duplicate entries collapse to one.
+- Added unit coverage for type normalization and scan filtering (recursive, flat, and explicit-picture roots), config round-trip and coercion, scan-signature stability, and 944×668 Xvfb Settings visibility plus save/reject tests for the new control.
+
+### Changed
+
+- Bumped the package version to `0.2.14`.
+
 ## [0.2.13] - 2026-10-30
 
 ### Added

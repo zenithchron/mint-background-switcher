@@ -26,7 +26,7 @@ from .config import (
     parse_night_time,
     save_config,
 )
-from .images import SUPPORTED_EXTENSIONS, is_usable_image
+from .images import SUPPORTED_EXTENSIONS, SUPPORTED_TYPE_NAMES, is_usable_image
 from .monitor import Monitor, detect_monitors
 from .service import SwitchCancelled, black_screen, current_source_images, save_current_wallpaper, switch_once
 from .working_storage import (
@@ -245,6 +245,7 @@ class SettingsApp(tk.Tk):
         self.min_image_size_var = tk.StringVar()
         self.ignore_hidden_var = tk.BooleanVar()
         self.ignore_patterns_var = tk.StringVar()
+        self.image_types_var = tk.StringVar()
         self.sequential_var = tk.BooleanVar()
         self.match_orientation_var = tk.BooleanVar()
         self.rotate_on_startup_var = tk.BooleanVar(value=True)
@@ -466,6 +467,17 @@ class SettingsApp(tk.Tk):
             source_options,
             text="prefer landscape pictures on landscape monitors and portrait pictures on portrait monitors",
         ).grid(row=3, column=2, sticky="w", pady=(5, 0))
+        ttk.Label(source_options, text="Image types:").grid(row=4, column=0, sticky="w", pady=(5, 0))
+        self.image_types_entry = ttk.Entry(
+            source_options,
+            textvariable=self.image_types_var,
+            width=12,
+        )
+        self.image_types_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(5, 0))
+        ttk.Label(
+            source_options,
+            text="comma-separated; for example jpg, png; empty means all supported types",
+        ).grid(row=4, column=2, sticky="w", pady=(5, 0))
         source_options.columnconfigure(2, weight=1)
 
         shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
@@ -1093,6 +1105,7 @@ class SettingsApp(tk.Tk):
         self.min_image_size_var.set(str(profile.min_image_size))
         self.ignore_hidden_var.set(profile.ignore_hidden)
         self.ignore_patterns_var.set(", ".join(profile.ignore_patterns))
+        self.image_types_var.set(", ".join(profile.image_types))
         self.sequential_var.set(profile.sequential)
         self.match_orientation_var.set(profile.match_orientation)
         self.rotate_on_startup_var.set(profile.rotate_on_startup)
@@ -1198,6 +1211,20 @@ class SettingsApp(tk.Tk):
             ignore_patterns.append(pattern)
         if len(ignore_patterns) > MAX_IGNORE_PATTERNS:
             raise ValueError(f"At most {MAX_IGNORE_PATTERNS} ignore patterns can be saved.")
+        image_types_var = vars(self).get("image_types_var")
+        raw_types = str(image_types_var.get()).strip() if image_types_var is not None else ""
+        image_types: list[str] = []
+        seen_types: set[str] = set()
+        for raw in raw_types.split(","):
+            token = raw.strip().lower().lstrip(".")
+            if not token or token in seen_types:
+                continue
+            if token not in SUPPORTED_TYPE_NAMES:
+                raise ValueError(
+                    f"Unknown image type {token!r}; supported types are {', '.join(SUPPORTED_TYPE_NAMES)}."
+                )
+            seen_types.add(token)
+            image_types.append(token)
         sequential_var = vars(self).get("sequential_var")
         sequential = bool(sequential_var.get()) if sequential_var is not None else False
         match_orientation_var = vars(self).get("match_orientation_var")
@@ -1250,6 +1277,7 @@ class SettingsApp(tk.Tk):
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
             ignore_patterns=ignore_patterns,
+            image_types=image_types,
             sequential=sequential,
             match_orientation=match_orientation,
             rotate_on_startup=rotate_on_startup,

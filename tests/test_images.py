@@ -43,6 +43,7 @@ from mint_background_switcher.images import (
     is_usable_image,
     meets_min_image_size,
     name_matches_ignore_patterns,
+    normalize_image_types,
     scan_images,
 )
 from mint_background_switcher.monitor import Monitor
@@ -294,6 +295,51 @@ def test_scan_images_nonrecursive_ignores_name_patterns(tmp_path: Path):
     assert scan_images([str(tmp_path)], recursive=False, ignore_patterns=["thumb*"]) == [
         str(visible.resolve())
     ]
+
+
+def test_normalize_image_types_canonicalize_and_drop_unsupported():
+    assert normalize_image_types(None) == frozenset()
+    assert normalize_image_types([]) == frozenset()
+    assert normalize_image_types(["  ", ""]) == frozenset()
+    # Case and leading dots are accepted; duplicates collapse.
+    assert normalize_image_types(["JPG", ".png", "WEBP", "jpg"]) == {".jpg", ".png", ".webp"}
+    # Unsupported tokens are dropped rather than widened.
+    assert normalize_image_types(["jpg", "doc", ".pdf"]) == {".jpg"}
+
+
+def test_scan_images_filters_image_types(tmp_path: Path):
+    photo = tmp_path / "photo.jpg"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(photo)
+    drawing = tmp_path / "drawing.png"
+    Image.new("RGB", (40, 30), (2, 1, 3)).save(drawing)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    scan = nested / "scan.png"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(scan)
+
+    default = scan_images([str(tmp_path)], recursive=True)
+    assert sorted(default) == sorted(
+        [str(photo.resolve()), str(drawing.resolve()), str(scan.resolve())]
+    )
+
+    filtered = scan_images([str(tmp_path)], recursive=True, image_types=["png"])
+    assert filtered == sorted([str(drawing.resolve()), str(scan.resolve())])
+
+    # Case and leading dots are accepted.
+    assert scan_images([str(tmp_path)], recursive=True, image_types=[".JPG"]) == [str(photo.resolve())]
+
+    # An explicitly configured individual picture respects the type filter.
+    assert scan_images([str(drawing)], recursive=True, image_types=["jpg"]) == []
+    assert scan_images([str(drawing)], recursive=True, image_types=["png"]) == [str(drawing.resolve())]
+
+
+def test_scan_images_nonrecursive_filters_image_types(tmp_path: Path):
+    photo = tmp_path / "photo.jpg"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(photo)
+    drawing = tmp_path / "drawing.png"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(drawing)
+
+    assert scan_images([str(tmp_path)], recursive=False, image_types=["jpg"]) == [str(photo.resolve())]
 
 
 def test_is_usable_image_rejects_files_pillow_cannot_decode(tmp_path: Path):

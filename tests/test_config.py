@@ -4,6 +4,7 @@ from datetime import datetime
 from mint_background_switcher.config import (
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
+    MAX_IMAGE_TYPES,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
@@ -106,6 +107,31 @@ def test_ignore_patterns_roundtrip_and_coercion():
     at_limit = "x" * MAX_IGNORE_PATTERN_LENGTH
     assert Profile.from_dict("P", {"ignore_patterns": [at_limit]}).ignore_patterns == [at_limit]
     assert Profile.from_dict("P", {"ignore_patterns": ["x" * (MAX_IGNORE_PATTERN_LENGTH + 1)]}).ignore_patterns == []
+
+
+def test_image_types_roundtrip_and_coercion():
+    assert Profile(name="P").image_types == []
+
+    loaded = Profile.from_dict("P", {"image_types": ["jpg", "png", "webp"]})
+    assert loaded.image_types == ["jpg", "png", "webp"]
+    assert loaded.to_dict()["image_types"] == ["jpg", "png", "webp"]
+
+    assert Profile.from_dict("P", {}).image_types == []
+    # Non-list values are dropped rather than raised on.
+    assert Profile.from_dict("P", {"image_types": "jpg"}).image_types == []
+    assert Profile.from_dict("P", {"image_types": None}).image_types == []
+
+    # Tokens are normalized to lowercase, dot-free form and duplicates collapse.
+    assert Profile.from_dict("P", {"image_types": [" JPG ", ".jpg", "Jpg", "png"]}).image_types == [
+        "jpg",
+        "png",
+    ]
+    # Blank-only entries are dropped.
+    assert Profile.from_dict("P", {"image_types": ["", "   "]}).image_types == []
+    # Oversized lists are capped and over-long tokens are dropped.
+    many = [f"type{i}" for i in range(MAX_IMAGE_TYPES + 10)]
+    assert len(Profile.from_dict("P", {"image_types": many}).image_types) == MAX_IMAGE_TYPES
+    assert Profile.from_dict("P", {"image_types": ["x" * 33]}).image_types == []
 
 
 def test_sequential_roundtrip_and_coercion():

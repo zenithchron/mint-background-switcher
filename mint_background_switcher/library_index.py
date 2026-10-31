@@ -13,7 +13,13 @@ import sqlite3
 import time
 import uuid
 
-from .images import SUPPORTED_EXTENSIONS, image_orientation, meets_min_image_size, name_matches_ignore_patterns
+from .images import (
+    SUPPORTED_EXTENSIONS,
+    image_orientation,
+    meets_min_image_size,
+    name_matches_ignore_patterns,
+    normalize_image_types,
+)
 
 INDEX_FILENAME = "library-index.sqlite3"
 SCHEMA_VERSION = 2
@@ -117,6 +123,12 @@ def normalized_ignore_patterns(patterns: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted({str(p).strip().lower() for p in patterns if str(p).strip()}))
 
 
+def normalized_image_types(value: Iterable[str]) -> tuple[str, ...]:
+    """Canonicalize image-type filters so equivalent inputs share one scan signature."""
+
+    return tuple(sorted(normalize_image_types(value)))
+
+
 def scan_signature(
     roots: Iterable[str],
     *,
@@ -124,6 +136,7 @@ def scan_signature(
     min_image_size: int = 0,
     ignore_hidden: bool = False,
     ignore_patterns: Iterable[str] = (),
+    image_types: Iterable[str] = (),
 ) -> str:
     try:
         size = int(min_image_size)
@@ -135,6 +148,7 @@ def scan_signature(
             "min_image_size": max(0, size),
             "ignore_hidden": bool(ignore_hidden),
             "ignore_patterns": list(normalized_ignore_patterns(ignore_patterns)),
+            "image_types": list(normalized_image_types(image_types)),
             "roots": list(roots),
         },
         ensure_ascii=True,
@@ -159,6 +173,7 @@ def _iter_image_paths(
     min_image_size: int = 0,
     ignore_hidden: bool = False,
     ignore_patterns: tuple[str, ...] = (),
+    image_types: frozenset[str] = frozenset(),
 ):
     count = 0
     for raw_root in roots:
@@ -168,9 +183,12 @@ def _iter_image_paths(
         root = Path(raw_root)
         try:
             if root.is_file():
-                if root.suffix.lower() in SUPPORTED_EXTENSIONS:
+                suffix = root.suffix.lower()
+                if suffix in SUPPORTED_EXTENSIONS:
                     if root_counts is not None:
                         root_counts[raw_root] += 1
+                    if image_types and suffix not in image_types:
+                        continue
                     if not meets_min_image_size(root, min_image_size):
                         continue
                     count += 1
@@ -197,10 +215,13 @@ def _iter_image_paths(
                         continue
                     if ignore_patterns and name_matches_ignore_patterns(filename, ignore_patterns):
                         continue
-                    if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
+                    suffix = Path(filename).suffix.lower()
+                    if suffix not in SUPPORTED_EXTENSIONS:
                         continue
                     if root_counts is not None:
                         root_counts[raw_root] += 1
+                    if image_types and suffix not in image_types:
+                        continue
                     if not meets_min_image_size(os.path.join(directory, filename), min_image_size):
                         continue
                     path = os.path.abspath(os.path.join(directory, filename))
@@ -220,13 +241,16 @@ def _iter_image_paths(
                 if ignore_patterns and name_matches_ignore_patterns(entry.name, ignore_patterns):
                     continue
                 try:
-                    is_image = entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS
+                    suffix = entry.suffix.lower()
+                    is_image = entry.is_file() and suffix in SUPPORTED_EXTENSIONS
                 except OSError:
                     continue
                 if not is_image:
                     continue
                 if root_counts is not None:
                     root_counts[raw_root] += 1
+                if image_types and suffix not in image_types:
+                    continue
                 if not meets_min_image_size(entry, min_image_size):
                     continue
                 path = str(_absolute(entry))
@@ -336,18 +360,21 @@ class LibraryIndex:
         min_image_size: int = 0,
         ignore_hidden: bool = False,
         ignore_patterns: Iterable[str] = (),
+        image_types: Iterable[str] = (),
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
     ) -> IndexSnapshot:
         roots = normalized_scan_roots(folders)
         patterns = normalized_ignore_patterns(ignore_patterns)
+        types = normalize_image_types(image_types)
         signature = scan_signature(
             roots,
             recursive=recursive,
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
             ignore_patterns=patterns,
+            image_types=types,
         )
         refreshed_ns = time.time_ns() if now_ns is None else int(now_ns)
         connection = self._open()
@@ -366,6 +393,7 @@ class LibraryIndex:
                 min_image_size=min_image_size,
                 ignore_hidden=ignore_hidden,
                 ignore_patterns=patterns,
+                image_types=types,
             ):
                 batch.append((path,))
                 if len(batch) >= 1000:
@@ -428,6 +456,7 @@ class LibraryIndex:
         min_image_size: int = 0,
         ignore_hidden: bool = False,
         ignore_patterns: Iterable[str] = (),
+        image_types: Iterable[str] = (),
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
@@ -440,6 +469,7 @@ class LibraryIndex:
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
             ignore_patterns=ignore_patterns,
+            image_types=image_types,
         )
         current = self.snapshot(signature)
         current_time = time.time_ns() if now_ns is None else int(now_ns)
@@ -456,6 +486,7 @@ class LibraryIndex:
             min_image_size=min_image_size,
             ignore_hidden=ignore_hidden,
             ignore_patterns=ignore_patterns,
+            image_types=image_types,
             cancelled=cancelled,
             progress=progress,
             now_ns=current_time,

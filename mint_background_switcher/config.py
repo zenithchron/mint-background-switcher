@@ -57,6 +57,7 @@ POSTCARD_BACKGROUND_CHOICES = (
 VALID_POSTCARD_BACKGROUNDS = set(POSTCARD_BACKGROUND_CHOICES)
 MAX_IGNORE_PATTERNS = 20
 MAX_IGNORE_PATTERN_LENGTH = 120
+MAX_IMAGE_TYPES = 16
 DEFAULT_NIGHT_START = "22:00"
 DEFAULT_NIGHT_END = "06:00"
 
@@ -195,6 +196,26 @@ def _coerce_monitor_folders(value: Any) -> dict[str, list[str]]:
     return result
 
 
+def _coerce_image_types(value: Any) -> list[str]:
+    """Normalize saved image-type tokens (lowercase, dot-free, de-duplicated).
+
+    Tokens are stored without a leading dot so config files hold one
+    canonical form per type; scan-time normalization maps them back to
+    extensions and drops anything the image stack does not support.
+    """
+    if not isinstance(value, list):
+        return []
+    types: list[str] = []
+    for item in value:
+        text = str(item).strip().lower().lstrip(".")
+        if not text or len(text) > 32 or text in types:
+            continue
+        types.append(text)
+        if len(types) >= MAX_IMAGE_TYPES:
+            break
+    return types
+
+
 @dataclass(slots=True)
 class Profile:
     name: str
@@ -219,6 +240,7 @@ class Profile:
     min_image_size: int = 0
     ignore_hidden: bool = False
     ignore_patterns: list[str] = field(default_factory=list)
+    image_types: list[str] = field(default_factory=list)
     sequential: bool = False
     match_orientation: bool = False
     postcard_captions: bool = False
@@ -250,6 +272,7 @@ class Profile:
             min_image_size=_coerce_min_image_size(data.get("min_image_size", 0)),
             ignore_hidden=_coerce_bool(data.get("ignore_hidden", False)),
             ignore_patterns=_coerce_ignore_patterns(data.get("ignore_patterns", [])),
+            image_types=_coerce_image_types(data.get("image_types", [])),
             sequential=_coerce_bool(data.get("sequential", False)),
             match_orientation=_coerce_bool(data.get("match_orientation", False)),
             postcard_captions=_coerce_bool(data.get("postcard_captions", False)),
@@ -283,6 +306,7 @@ class Profile:
             "min_image_size": self.min_image_size,
             "ignore_hidden": self.ignore_hidden,
             "ignore_patterns": list(self.ignore_patterns),
+            "image_types": list(self.image_types),
             "sequential": self.sequential,
             "match_orientation": self.match_orientation,
             "postcard_captions": self.postcard_captions,

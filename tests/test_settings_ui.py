@@ -270,6 +270,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.ignore_hidden_checkbutton,
                 app.min_image_size_entry,
                 app.ignore_patterns_entry,
+                app.image_types_entry,
                 app.match_orientation_checkbutton,
                 app.shared_text,
             ),
@@ -2113,6 +2114,78 @@ def test_settings_ignore_patterns_entry_is_visible_and_persists(monkeypatch, tmp
         app.ignore_patterns_var.set("a*, A*, b*")
         assert app._save_current() is True
         assert settings_ui.load_config().get_profile("Default").ignore_patterns == ["a*", "b*"]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_image_types_entry_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+        assert app.image_types_var.get() == ""
+        assert is_descendant(app.image_types_entry, app.sources_tab)
+        assert app.image_types_entry.winfo_ismapped()
+        assert app.image_types_entry.winfo_width() >= app.image_types_entry.winfo_reqwidth()
+
+        app.image_types_var.set("jpg, .png, WEBP")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.image_types == ["jpg", "png", "webp"]
+
+        app._load_profile("Default")
+        assert app.image_types_var.get() == "jpg, png, webp"
+
+        # Case-insensitive duplicates are collapsed to the first occurrence.
+        app.image_types_var.set("jpg, JPG, png")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").image_types == ["jpg", "png"]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_image_types_save_rejects_unknown_types(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    errors = []
+    monkeypatch.setattr(
+        settings_ui.messagebox, "showerror", lambda title, message: errors.append((title, message))
+    )
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.image_types_var.set("jpg, doc")
+        assert app._save_current() is False
+        assert any(
+            "'doc'" in message and "jpg, jpeg, png" in message for _title, message in errors
+        )
+        # A rejected save leaves the previous value in place.
+        assert settings_ui.load_config().get_profile("Default").image_types == []
     finally:
         app.destroy()
 
