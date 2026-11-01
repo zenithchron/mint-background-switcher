@@ -301,31 +301,110 @@ def automatic_bar_color(image: Image.Image) -> tuple[int, int, int]:
     return (int(round(mean[0])), int(round(mean[1])), int(round(mean[2])))
 
 
-def fit_with_black_bars(image: Image.Image, size: tuple[int, int], bar_color: str = "black") -> Image.Image:
+def _bar_background(image: Image.Image, size: tuple[int, int], bar_color: str) -> Image.Image:
+    """Return the unused-space background for a panel, sized to ``size``."""
     target_w, target_h = size
-    if target_w <= 0 or target_h <= 0:
-        raise ValueError(f"Invalid target size: {size}")
     if bar_color == "blurred":
         blur_radius = max(4.0, min(target_w, target_h) * 0.025)
-        canvas = ImageOps.fit(
+        return ImageOps.fit(
             image.convert("RGB"),
             (target_w, target_h),
             method=Image.Resampling.LANCZOS,
         ).filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    elif bar_color == "auto":
-        fill = automatic_bar_color(image)
-        canvas = Image.new("RGB", (target_w, target_h), fill)
-    elif bar_color == "black":
-        fill = (0, 0, 0)
-        canvas = Image.new("RGB", (target_w, target_h), fill)
-    else:
-        raise ValueError(f"Unsupported letterbox bar style: {bar_color}")
-    working = image.copy()
-    working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
-    x = (target_w - working.width) // 2
-    y = (target_h - working.height) // 2
-    canvas.paste(working, (x, y))
+    if bar_color == "auto":
+        return Image.new("RGB", (target_w, target_h), automatic_bar_color(image))
+    if bar_color == "black":
+        return Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    raise ValueError(f"Unsupported letterbox bar style: {bar_color}")
+
+
+def _paste_centered(canvas: Image.Image, working: Image.Image) -> Image.Image:
+    """Paste ``working`` centered on ``canvas``, clipping any overflow.
+
+    Each axis is cropped only when that axis overflows, so a picture
+    larger than the panel in one dimension but smaller in the other keeps
+    its bar-colored background on the other axis.
+    """
+    if working.width > canvas.width:
+        crop_left = (working.width - canvas.width) // 2
+        working = working.crop((crop_left, 0, crop_left + canvas.width, working.height))
+    if working.height > canvas.height:
+        crop_top = (working.height - canvas.height) // 2
+        working = working.crop((0, crop_top, working.width, crop_top + canvas.height))
+    canvas.paste(
+        working,
+        ((canvas.width - working.width) // 2, (canvas.height - working.height) // 2),
+    )
     return canvas
+
+
+def fit_image(
+    image: Image.Image,
+    size: tuple[int, int],
+    fit_mode: str = "fit_bars",
+    bar_color: str = "black",
+) -> Image.Image:
+    """Fit one image into a panel using the profile's display fit mode.
+
+    ``fit_mode`` selects the geometry:
+
+    - ``fit_bars``: scale down only, preserving aspect ratio (the
+      historical letterbox behavior; small pictures keep their native
+      size); unused space uses the ``bar_color`` style.
+    - ``center``: no scaling; the native-size picture is centered on the
+      ``bar_color`` background, and pictures larger than the panel show
+      their central region (edges clipped).
+    - ``scale_to_fit``: scale (up or down) so one edge of the picture
+      touches the panel; unused space uses the ``bar_color`` style.
+      Unlike ``fit_bars``, small pictures are enlarged.
+    - ``stretch``: stretch to fill the panel exactly, distorting the
+      aspect ratio when necessary.
+    - ``scale_and_crop``: scale to fully cover the panel and center-crop
+      the overflow; no bars, no distortion.
+    - ``scale_and_blur``: like ``fit_bars`` but unused space always uses a
+      heavily blurred stretched copy of the picture.
+    """
+    target_w, target_h = size
+    if target_w <= 0 or target_h <= 0:
+        raise ValueError(f"Invalid target size: {size}")
+    if fit_mode == "fit_bars":
+        working = image.copy()
+        working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+        return _paste_centered(_bar_background(image, size, bar_color), working)
+    if fit_mode == "center":
+        return _paste_centered(_bar_background(image, size, bar_color), image.copy())
+    if fit_mode == "scale_to_fit":
+        working = image.copy()
+        if working.width <= target_w and working.height <= target_h:
+            # Unlike fit_bars, small pictures are enlarged so one edge
+            # touches the panel (JBS "Scale to fit" semantics).
+            if working.size != size:
+                scale = min(target_w / working.width, target_h / working.height)
+                working = working.resize(
+                    (max(1, int(round(working.width * scale))), max(1, int(round(working.height * scale)))),
+                    Image.Resampling.LANCZOS,
+                )
+        else:
+            working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+        return _paste_centered(_bar_background(image, size, bar_color), working)
+    if fit_mode == "stretch":
+        return image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    if fit_mode == "scale_and_crop":
+        return ImageOps.fit(
+            image.convert("RGB"),
+            (target_w, target_h),
+            method=Image.Resampling.LANCZOS,
+        )
+    if fit_mode == "scale_and_blur":
+        working = image.copy()
+        working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+        return _paste_centered(_bar_background(image, size, "blurred"), working)
+    raise ValueError(f"Unsupported display fit mode: {fit_mode}")
+
+
+def fit_with_black_bars(image: Image.Image, size: tuple[int, int], bar_color: str = "black") -> Image.Image:
+    """Fit an image with bars, preserving the whole picture (default fit mode)."""
+    return fit_image(image, size, fit_mode="fit_bars", bar_color=bar_color)
 
 
 def _calendar_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -510,6 +589,7 @@ def compose_per_monitor(
     output_path: str | Path,
     *,
     bar_color: str = "black",
+    fit_mode: str = "fit_bars",
 ) -> Path:
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
@@ -519,7 +599,12 @@ def compose_per_monitor(
         image_path = image_by_monitor.get(monitor.name)
         if not image_path:
             continue
-        panel = fit_with_black_bars(open_image(image_path), (monitor.width, monitor.height), bar_color)
+        panel = fit_image(
+            open_image(image_path),
+            (monitor.width, monitor.height),
+            fit_mode=fit_mode,
+            bar_color=bar_color,
+        )
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     return _save_png_atomic(combined, output_path)
 
@@ -530,6 +615,7 @@ def compose_montage(
     output_path: str | Path,
     *,
     bar_color: str = "black",
+    fit_mode: str = "fit_bars",
 ) -> Path:
     """Compose a 2x2 local-image montage independently on each monitor."""
 
@@ -555,7 +641,12 @@ def compose_montage(
             cell_height = bottom - top
             if cell_width <= 0 or cell_height <= 0:
                 continue
-            tile = fit_with_black_bars(open_image(image_path), (cell_width, cell_height), bar_color)
+            tile = fit_image(
+                open_image(image_path),
+                (cell_width, cell_height),
+                fit_mode=fit_mode,
+                bar_color=bar_color,
+            )
             panel.paste(tile, (left, top))
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
     return _save_png_atomic(combined, output_path)
@@ -566,6 +657,7 @@ def _collage_tile(
     size: tuple[int, int],
     *,
     bar_color: str,
+    fit_mode: str = "fit_bars",
 ) -> Image.Image:
     """Fit one complete source image into an asymmetric collage cell."""
 
@@ -581,7 +673,7 @@ def _collage_tile(
         Image.DecompressionBombWarning,
     ) as exc:
         raise ImageDecodeError(image_path) from exc
-    return fit_with_black_bars(source, size, bar_color)
+    return fit_image(source, size, fit_mode=fit_mode, bar_color=bar_color)
 
 
 def compose_collage(
@@ -590,6 +682,7 @@ def compose_collage(
     output_path: str | Path,
     *,
     bar_color: str = "black",
+    fit_mode: str = "fit_bars",
 ) -> Path:
     """Compose five uncropped local photos as an asymmetric mosaic per monitor."""
 
@@ -620,6 +713,7 @@ def compose_collage(
                 image_path,
                 (cell_width, cell_height),
                 bar_color=bar_color,
+                fit_mode=fit_mode,
             )
             panel.paste(tile, (left, top))
         combined.paste(panel, normalized_position(monitor, min_x, min_y))
@@ -1447,9 +1541,10 @@ def compose_span(
     output_path: str | Path,
     *,
     bar_color: str = "black",
+    fit_mode: str = "fit_bars",
 ) -> Path:
     width, height, _, _ = virtual_canvas(monitors)
-    fitted = fit_with_black_bars(open_image(image_path), (width, height), bar_color)
+    fitted = fit_image(open_image(image_path), (width, height), fit_mode=fit_mode, bar_color=bar_color)
     return _save_png_atomic(fitted, output_path)
 
 

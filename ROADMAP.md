@@ -5,7 +5,7 @@ This roadmap turns the John’s Background Switcher 6.1 parity audit into an imp
 ## Product principles
 
 - Local-first and usable without an account or cloud service.
-- Keep every foreground picture visible: no fill-cropping or distortion.
+- Keep every foreground picture visible by default: the default display fit mode (fit with bars) never fill-crops or distorts; stretch and scale-and-crop exist only as opt-in per-profile modes chosen in `0.2.15`.
 - Preserve deterministic per-monitor source assignment and database-backed no-repeat rotation.
 - Treat source folders and files as read-only.
 - Keep privacy mode, recovery, state writes, updates, and downloads fail-safe.
@@ -86,7 +86,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 
 - JBS features removed from its current release are not parity targets.
 - Generic website scraping is not supported; providers require a stable public or self-hosted API.
-- Fill-crop and aspect-distorting stretch modes conflict with the whole-image design and remain non-goals unless that product decision changes.
+- Fill-crop and aspect-distorting stretch modes are no longer non-goals: the user-approved feature backlog (2026-10-30) requested them, and `0.2.15` shipped them as opt-in per-profile display fit modes. The default remains whole-picture fit with bars.
 - Cloud accounts must never be required for the core local-library experience.
 - Mint’s no-repeat pools and per-monitor source binding remain advantages even though JBS does not guarantee them.
 

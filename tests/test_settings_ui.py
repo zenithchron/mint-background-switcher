@@ -274,7 +274,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.match_orientation_checkbutton,
                 app.shared_text,
             ),
-            str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu),
+            str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu, app.fit_mode_menu),
             str(app.rotation_tab): (
                 app.rotation_scope_label,
                 app.interval_entry,
@@ -323,6 +323,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                     app.layout_scope_label,
                     app.effect_menu,
                     app.bar_color_menu,
+                    app.fit_mode_menu,
                     app.layout_description_label,
                     app.layout_panels[layout],
                     *footer_controls,
@@ -1352,6 +1353,83 @@ def test_settings_letterbox_menu_exposes_blurred_edges_and_applies_selection(
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_styles == ["blurred", "blurred"]
         assert errors == [("Apply failed", "blurred edges preview failed")]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_fit_mode_menu_exposes_all_modes_and_applies_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        menu = app.nametowidget(app.fit_mode_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        saved_fit_modes = []
+        applied_profiles = []
+        messages = []
+        errors = []
+        monkeypatch.setattr(
+            settings_ui,
+            "save_config",
+            lambda config: saved_fit_modes.append(config.get_profile("Default").fit_mode),
+        )
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile, **_kwargs: applied_profiles.append(profile)
+            or SimpleNamespace(wallpaper="/tmp/fit-mode-preview.png"),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showinfo",
+            lambda title, message, **_kwargs: messages.append((title, message)),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+
+        assert labels == [
+            "Fit with bars",
+            "Center (border color)",
+            "Scale to fit",
+            "Stretch",
+            "Scale and crop (overscale)",
+            "Scale and blur edges",
+        ]
+        # Default keeps the historical fit-with-bars behavior.
+        assert app.fit_mode_var.get() == "Fit with bars"
+        app.notebook.select(app.layout_tab)
+        app.update_idletasks()
+        app.update()
+        assert app.fit_mode_menu.winfo_ismapped()
+        assert app.fit_mode_menu.winfo_width() > 1
+
+        menu.invoke(labels.index("Scale and crop (overscale)"))
+        assert app.fit_mode_var.get() == "Scale and crop (overscale)"
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert saved_fit_modes == ["scale_and_crop"]
+        assert applied_profiles == ["Default"]
+        assert messages and messages[-1][0] == "Applied"
+        assert not errors
+
+        # A persisted fit mode is restored into the menu on reload.
+        from mint_background_switcher import config as mbs_config
+
+        cfg = mbs_config.load_config()
+        cfg.get_profile("Default").fit_mode = "scale_and_blur"
+        mbs_config.save_config(cfg)
+        app.config_data = mbs_config.load_config()
+        app._load_profile("Default")
+        app.update_idletasks()
+        app.update()
+        assert app.fit_mode_var.get() == "Scale and blur edges"
     finally:
         app.destroy()
 
@@ -2898,6 +2976,7 @@ def test_rename_profile_preserves_current_form_settings_and_saves(monkeypatch):
     setattr(dummy, "desktop_var", _Var("mate"))
     setattr(dummy, "effect_var", _Var("grayscale"))
     setattr(dummy, "bar_color_var", _Var("auto"))
+    setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
     setattr(dummy, "shared_text", _Text("/new-shared\n"))
     setattr(dummy, "monitor_text", _Text(""))
     setattr(dummy, "monitor_folders_data", {"HDMI-1": ["/new-monitor"]})

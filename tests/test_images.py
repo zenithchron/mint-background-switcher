@@ -5,7 +5,7 @@ import random
 import subprocess
 import sys
 
-from PIL import Image, ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 import pytest
 
 from mint_background_switcher import images as images_module
@@ -37,6 +37,7 @@ from mint_background_switcher.images import (
     compose_polaroid,
     compose_postcard,
     compose_span,
+    fit_image,
     fit_with_black_bars,
     image_min_dimension,
     image_orientation,
@@ -121,6 +122,285 @@ def test_fit_with_blurred_edges_keeps_the_whole_foreground_and_does_not_mutate_s
     assert blurred_seam[0] > 20
     assert blurred_seam[2] > 20
     assert blurred_seam != fitted.getpixel((50, 50))
+
+
+def _legacy_fit_with_black_bars(image, size, bar_color="black"):
+    """Byte-for-byte copy of the v0.2.14 ``fit_with_black_bars`` algorithm.
+
+    Kept as an independent reference so the fit_bars backward-compatibility
+    claim is pinned against the pre-0.2.15 implementation, not against the
+    current code path itself.
+    """
+    target_w, target_h = size
+    if target_w <= 0 or target_h <= 0:
+        raise ValueError(f"Invalid target size: {size}")
+    if bar_color == "blurred":
+        blur_radius = max(4.0, min(target_w, target_h) * 0.025)
+        canvas = ImageOps.fit(
+            image.convert("RGB"),
+            (target_w, target_h),
+            method=Image.Resampling.LANCZOS,
+        ).filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    elif bar_color == "auto":
+        fill = images_module.automatic_bar_color(image)
+        canvas = Image.new("RGB", (target_w, target_h), fill)
+    elif bar_color == "black":
+        fill = (0, 0, 0)
+        canvas = Image.new("RGB", (target_w, target_h), fill)
+    else:
+        raise ValueError(f"Unsupported letterbox bar style: {bar_color}")
+    working = image.copy()
+    working.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+    x = (target_w - working.width) // 2
+    y = (target_h - working.height) // 2
+    canvas.paste(working, (x, y))
+    return canvas
+
+
+def test_fit_image_fit_bars_matches_historical_default():
+    """The default fit mode must match the v0.2.14 algorithm in all bar styles."""
+    img = Image.new("RGB", (240, 160), (10, 220, 90))
+    img.paste((200, 10, 10), (40, 20, 120, 60))
+    for bar_color in ("black", "auto", "blurred"):
+        historical = _legacy_fit_with_black_bars(img, (200, 200), bar_color)
+        assert fit_image(img, (200, 200), fit_mode="fit_bars", bar_color=bar_color).tobytes() == historical.tobytes()
+    # The public alias delegates to the same code path.
+    assert fit_with_black_bars(img, (200, 200)).tobytes() == fit_image(img, (200, 200)).tobytes()
+
+
+def test_fit_image_center_mixed_aspect_keeps_bar_color():
+    """Oversized in one dimension only: the other axis must keep its bar color.
+
+    Regression test: a single combined crop box zero-padded the negative
+    coordinates and replaced the bar-colored background with black.
+    """
+    img = Image.new("RGB", (200, 20), (255, 0, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="center", bar_color="auto")
+    assert fitted.size == (100, 100)
+    # Content rows 40..59 hold the cropped center of the picture.
+    assert fitted.getpixel((50, 49)) == (255, 0, 0)
+    # Bar rows carry the auto (average) color, not zero-padded black.
+    assert fitted.getpixel((50, 5)) != (0, 0, 0)
+    assert fitted.getpixel((50, 95)) != (0, 0, 0)
+    blurred = fit_image(img, (100, 100), fit_mode="center", bar_color="blurred")
+    assert blurred.getpixel((50, 5)) != (0, 0, 0)
+    assert blurred.getpixel((50, 95)) != (0, 0, 0)
+
+
+def test_fit_image_center_keeps_native_size_on_border():
+    img = Image.new("RGB", (40, 20), (255, 0, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="center")
+    assert fitted.size == (100, 100)
+    # Native 40x20 picture centered at (30, 40).
+    assert fitted.getpixel((30, 40)) == (255, 0, 0)
+    assert fitted.getpixel((50, 50)) == (255, 0, 0)
+    assert fitted.getpixel((29, 40)) == (0, 0, 0)
+    assert fitted.getpixel((50, 39)) == (0, 0, 0)
+    assert fitted.getpixel((69, 59)) == (255, 0, 0)
+    assert fitted.getpixel((70, 59)) == (0, 0, 0)
+    assert fitted.getpixel((5, 5)) == (0, 0, 0)
+
+
+def test_fit_image_center_border_follows_bar_style():
+    left_red = Image.new("RGB", (20, 10), (255, 0, 0))
+    right_blue = Image.new("RGB", (20, 10), (0, 0, 255))
+    img = Image.new("RGB", (40, 10))
+    img.paste(left_red, (0, 0))
+    img.paste(right_blue, (20, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="center", bar_color="auto")
+    # Average of the two halves becomes the border color.
+    assert fitted.getpixel((5, 5)) == (128, 0, 128)
+    # The native picture is still visible and unscaled in the middle.
+    assert fitted.getpixel((40, 50)) == (255, 0, 0)
+    assert fitted.getpixel((60, 50)) == (0, 0, 255)
+
+
+def test_fit_image_center_crops_wider_picture_to_center_region():
+    img = Image.new("RGB", (200, 100))
+    img.paste(Image.new("RGB", (100, 100), (255, 0, 0)), (0, 0))
+    img.paste(Image.new("RGB", (100, 100), (0, 0, 255)), (100, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="center")
+    assert fitted.size == (100, 100)
+    # Central 100 columns: 50 red, then 50 blue. No border at all.
+    assert fitted.getpixel((0, 50)) == (255, 0, 0)
+    assert fitted.getpixel((49, 50)) == (255, 0, 0)
+    assert fitted.getpixel((50, 50)) == (0, 0, 255)
+    assert fitted.getpixel((99, 50)) == (0, 0, 255)
+
+
+def test_fit_image_center_crops_taller_picture_to_center_region():
+    img = Image.new("RGB", (100, 200))
+    img.paste(Image.new("RGB", (100, 100), (0, 255, 0)), (0, 0))
+    img.paste(Image.new("RGB", (100, 100), (128, 0, 128)), (0, 100))
+    fitted = fit_image(img, (100, 100), fit_mode="center")
+    assert fitted.getpixel((50, 0)) == (0, 255, 0)
+    assert fitted.getpixel((50, 49)) == (0, 255, 0)
+    assert fitted.getpixel((50, 50)) == (128, 0, 128)
+    assert fitted.getpixel((50, 99)) == (128, 0, 128)
+
+
+def test_fit_image_center_exact_size_picture_is_unchanged():
+    img = Image.new("RGB", (100, 100), (10, 20, 30))
+    img.putpixel((0, 0), (200, 100, 50))
+    img.putpixel((99, 99), (50, 100, 200))
+    fitted = fit_image(img, (100, 100), fit_mode="center")
+    assert fitted.tobytes() == img.tobytes()
+
+
+def test_fit_image_scale_to_fit_upscales_small_picture_to_touch_panel():
+    img = Image.new("RGB", (40, 20), (255, 0, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="scale_to_fit")
+    assert fitted.size == (100, 100)
+    # Enlarged to 100x50 (one edge touches the panel), centered at y=25.
+    assert fitted.getpixel((50, 50)) == (255, 0, 0)
+    assert fitted.getpixel((5, 25)) == (255, 0, 0)
+    assert fitted.getpixel((99, 74)) == (255, 0, 0)
+    assert fitted.getpixel((5, 24)) == (0, 0, 0)
+    assert fitted.getpixel((99, 75)) == (0, 0, 0)
+    # fit_bars keeps the same small picture at its native size instead.
+    native = fit_image(img, (100, 100), fit_mode="fit_bars")
+    assert native.getpixel((5, 50)) == (0, 0, 0)
+    assert native.getpixel((30, 40)) == (255, 0, 0)
+    assert fitted.tobytes() != native.tobytes()
+
+
+def test_fit_image_scale_to_fit_downscales_large_picture():
+    img = Image.new("RGB", (400, 100), (255, 0, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="scale_to_fit")
+    assert fitted.size == (100, 100)
+    # Scaled to 100x25 and centered vertically at y=37.
+    assert fitted.getpixel((50, 37)) == (255, 0, 0)
+    assert fitted.getpixel((50, 61)) == (255, 0, 0)
+    assert fitted.getpixel((50, 36)) == (0, 0, 0)
+    assert fitted.getpixel((50, 62)) == (0, 0, 0)
+
+
+def test_fit_image_stretch_fills_panel_exactly():
+    img = Image.new("RGB", (40, 20), (255, 0, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="stretch")
+    assert fitted.size == (100, 100)
+    assert fitted.getpixel((0, 0)) == (255, 0, 0)
+    assert fitted.getpixel((99, 99)) == (255, 0, 0)
+    assert (0, 0, 0) not in (fitted.getpixel((1, 1)), fitted.getpixel((98, 98)))
+
+
+def test_fit_image_scale_and_crop_covers_panel_without_distortion():
+    # A centered red 50x50 square on a 200x100 canvas. Center-cropping to
+    # 100x100 keeps the square 50px wide; a distorted stretch would squash
+    # it to 25px.
+    img = Image.new("RGB", (200, 100), (0, 100, 0))
+    img.paste(Image.new("RGB", (50, 50), (255, 0, 0)), (75, 25))
+    fitted = fit_image(img, (100, 100), fit_mode="scale_and_crop")
+    assert fitted.size == (100, 100)
+    assert fitted.getpixel((0, 0)) == (0, 100, 0)
+    assert fitted.getpixel((99, 99)) == (0, 100, 0)
+    middle_row = [fitted.getpixel((x, 50)) for x in range(100)]
+    red_run = sum(1 for pixel in middle_row if pixel == (255, 0, 0))
+    assert red_run == 50
+
+
+def test_fit_image_scale_and_blur_matches_blurred_bar_style():
+    img = Image.new("RGB", (100, 50))
+    img.paste(Image.new("RGB", (50, 50), (240, 20, 20)), (0, 0))
+    img.paste(Image.new("RGB", (50, 50), (20, 20, 240)), (50, 0))
+    fitted = fit_image(img, (100, 100), fit_mode="scale_and_blur")
+    assert fitted.tobytes() == fit_with_black_bars(img, (100, 100), bar_color="blurred").tobytes()
+
+
+def test_fit_image_rejects_unknown_fit_mode():
+    with pytest.raises(ValueError, match="Unsupported display fit mode"):
+        fit_image(Image.new("RGB", (10, 10)), (50, 50), fit_mode="tile")
+
+
+def test_fit_image_rejects_invalid_target_size():
+    with pytest.raises(ValueError, match="Invalid target size"):
+        fit_image(Image.new("RGB", (10, 10)), (0, 50), fit_mode="stretch")
+
+
+def test_fit_image_bar_modes_reject_unknown_bar_style():
+    img = Image.new("RGB", (10, 10), (1, 2, 3))
+    for mode in ("fit_bars", "center", "scale_to_fit"):
+        with pytest.raises(ValueError, match="Unsupported letterbox bar style"):
+            fit_image(img, (50, 50), fit_mode=mode, bar_color="rainbow")
+    # Barless modes ignore the bar style entirely.
+    assert fit_image(img, (50, 50), fit_mode="stretch", bar_color="rainbow").size == (50, 50)
+    assert fit_image(img, (50, 50), fit_mode="scale_and_crop", bar_color="rainbow").size == (50, 50)
+    assert fit_image(img, (50, 50), fit_mode="scale_and_blur", bar_color="rainbow").size == (50, 50)
+
+
+def test_fit_image_handles_one_pixel_picture_in_every_mode():
+    img = Image.new("RGB", (1, 1), (9, 8, 7))
+    # Modes that scale the picture up cover the panel center; thumbnail-
+    # based modes keep the single pixel at ((64-1)//2, (48-1)//2).
+    for mode in ("scale_to_fit", "stretch", "scale_and_crop"):
+        fitted = fit_image(img, (64, 48), fit_mode=mode)
+        assert fitted.size == (64, 48)
+        assert fitted.getpixel((32, 24)) == (9, 8, 7)
+    for mode in ("fit_bars", "center", "scale_and_blur"):
+        fitted = fit_image(img, (64, 48), fit_mode=mode)
+        assert fitted.size == (64, 48)
+        assert fitted.getpixel((31, 23)) == (9, 8, 7)
+
+
+def test_compose_per_monitor_applies_profile_fit_mode(tmp_path: Path):
+    picture = tmp_path / "wide.png"
+    wide = Image.new("RGB", (200, 100))
+    wide.paste(Image.new("RGB", (100, 100), (255, 0, 0)), (0, 0))
+    wide.paste(Image.new("RGB", (100, 100), (0, 0, 255)), (100, 0))
+    wide.save(picture)
+    monitors = [Monitor("A", 100, 100, 0, 0)]
+    # Default: fit-with-bars scales the 200x100 picture to 100x50 with black bars.
+    default_out = compose_per_monitor(monitors, {"A": str(picture)}, tmp_path / "default.png")
+    default = Image.open(default_out)
+    assert default.getpixel((5, 5)) == (0, 0, 0)
+    # Stretch: the whole panel is covered.
+    stretch_out = compose_per_monitor(
+        monitors, {"A": str(picture)}, tmp_path / "stretch.png", fit_mode="stretch"
+    )
+    stretch = Image.open(stretch_out)
+    assert stretch.getpixel((5, 5)) == (255, 0, 0)
+    assert stretch.getpixel((99, 99)) == (0, 0, 255)
+    # Center: the 200-wide picture shows its central 100 columns (50 red, 50 blue).
+    center_out = compose_per_monitor(
+        monitors, {"A": str(picture)}, tmp_path / "center.png", fit_mode="center"
+    )
+    center = Image.open(center_out)
+    assert center.getpixel((0, 50)) == (255, 0, 0)
+    assert center.getpixel((99, 50)) == (0, 0, 255)
+
+
+def test_compose_span_applies_profile_fit_mode(tmp_path: Path):
+    picture = tmp_path / "tall.png"
+    Image.new("RGB", (50, 200), (0, 255, 0)).save(picture)
+    monitors = [Monitor("A", 100, 100, 0, 0)]
+    crop_out = compose_span(monitors, str(picture), tmp_path / "crop.png", fit_mode="scale_and_crop")
+    crop = Image.open(crop_out)
+    assert crop.size == (100, 100)
+    assert crop.getpixel((0, 0)) == (0, 255, 0)
+    assert crop.getpixel((99, 99)) == (0, 255, 0)
+    assert (0, 0, 0) not in {crop.getpixel((0, 50)), crop.getpixel((50, 0)), crop.getpixel((50, 99))}
+
+
+def test_compose_montage_applies_fit_mode_to_cells(tmp_path: Path):
+    picture = tmp_path / "small.png"
+    Image.new("RGB", (40, 20), (255, 0, 0)).save(picture)
+    monitors = [Monitor("A", 100, 100, 0, 0)]
+    by_monitor = {"A": [str(picture)] * 4}
+    # Default cells fit the small picture onto black bars: panel corners are black.
+    default_out = compose_montage(monitors, by_monitor, tmp_path / "default.png")
+    default = Image.open(default_out)
+    assert default.getpixel((0, 0)) == (0, 0, 0)
+    # Center cells keep the native picture on a black border: cell (25,25) is
+    # inside the 50x50 top-left cell, whose 40x20 picture occupies (5,15)-(45,35).
+    center_out = compose_montage(monitors, by_monitor, tmp_path / "center.png", fit_mode="center")
+    center = Image.open(center_out)
+    assert center.getpixel((25, 25)) == (255, 0, 0)
+    assert center.getpixel((0, 0)) == (0, 0, 0)
+    # Stretch cells cover their cell fully.
+    stretch_out = compose_montage(monitors, by_monitor, tmp_path / "stretch.png", fit_mode="stretch")
+    stretch = Image.open(stretch_out)
+    assert stretch.getpixel((0, 0)) == (255, 0, 0)
+    assert stretch.getpixel((49, 49)) == (255, 0, 0)
 
 
 def test_scan_images_recursive(tmp_path: Path):

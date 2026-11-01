@@ -280,7 +280,7 @@ def test_cancelled_rotation_does_not_apply_or_commit_state(monkeypatch, tmp_path
     before = load_state().to_dict()
     cancelled = False
 
-    def compose_then_cancel(_monitors, _image, output_path, *, bar_color="black"):
+    def compose_then_cancel(_monitors, _image, output_path, *, bar_color="black", fit_mode="fit_bars"):
         nonlocal cancelled
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"completed inactive wallpaper")
@@ -575,10 +575,11 @@ def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path
     save_config(cfg)
     captured = {}
 
-    def fake_compose_per_monitor(monitors, image_by_monitor, output_path, *, bar_color="black"):
+    def fake_compose_per_monitor(monitors, image_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars"):
         captured["monitors"] = [monitor.name for monitor in monitors]
         captured["image_by_monitor"] = dict(image_by_monitor)
         captured["bar_color"] = bar_color
+        captured["fit_mode"] = fit_mode
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"same")
         return Path(output_path)
@@ -593,7 +594,31 @@ def test_same_mode_uses_one_shared_image_for_every_monitor(monkeypatch, tmp_path
     assert captured["monitors"] == ["A", "B"]
     assert captured["image_by_monitor"] == {"A": result.images[0], "B": result.images[0]}
     assert captured["bar_color"] == "black"
+    assert captured["fit_mode"] == "fit_bars"
     assert "profile:P:same" not in state.remaining
+
+
+def test_switch_once_passes_profile_fit_mode_to_composers(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mode = "same"
+    profile.fit_mode = "scale_and_crop"
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_per_monitor(monitors, image_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars"):
+        captured["fit_mode"] = fit_mode
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"same")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_per_monitor", fake_compose_per_monitor)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert captured["fit_mode"] == "scale_and_crop"
 
 
 def test_sequential_profile_rotates_live_in_folder_order_and_wraps(monkeypatch, tmp_path: Path):
@@ -664,10 +689,11 @@ def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     save_config(cfg)
     captured = {}
 
-    def fake_compose_montage(monitors, images_by_monitor, output_path, *, bar_color="black"):
+    def fake_compose_montage(monitors, images_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars"):
         captured["monitors"] = [monitor.name for monitor in monitors]
         captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
         captured["bar_color"] = bar_color
+        captured["fit_mode"] = fit_mode
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"montage")
         return Path(output_path)
@@ -683,6 +709,7 @@ def test_montage_mode_uses_four_images_per_monitor(monkeypatch, tmp_path: Path):
     assert captured["images_by_monitor"] == {"A": result.images[:4], "B": result.images[4:]}
     assert all(len(paths) == 4 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
+    assert captured["fit_mode"] == "fit_bars"
     assert "profile:P:montage" not in state.remaining
 
 
@@ -693,10 +720,11 @@ def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
     save_config(cfg)
     captured = {}
 
-    def fake_compose_collage(monitors, images_by_monitor, output_path, *, bar_color="black"):
+    def fake_compose_collage(monitors, images_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars"):
         captured["monitors"] = [monitor.name for monitor in monitors]
         captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
         captured["bar_color"] = bar_color
+        captured["fit_mode"] = fit_mode
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"collage")
         return Path(output_path)
@@ -728,6 +756,7 @@ def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
     assert captured["images_by_monitor"] == {"A": result.images[:5], "B": result.images[5:]}
     assert all(len(paths) == 5 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
+    assert captured["fit_mode"] == "fit_bars"
     assert "profile:P:collage" not in state.remaining
     assert draw_counts == [("profile:P:collage", 10)]
 
@@ -805,7 +834,7 @@ def test_collage_decode_retry_is_bounded_before_safe_black_fallback(monkeypatch,
     _write_images(image_dir, count=24)
     attempts = []
 
-    def fail_selected_source(_monitors, images_by_monitor, _output_path, *, bar_color="black"):
+    def fail_selected_source(_monitors, images_by_monitor, _output_path, *, bar_color="black", fit_mode="fit_bars"):
         selected = [path for paths in images_by_monitor.values() for path in paths]
         attempts.append(selected)
         raise service.ImageDecodeError(selected[0])

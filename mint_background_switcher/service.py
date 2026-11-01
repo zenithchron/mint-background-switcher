@@ -555,7 +555,7 @@ def _switch_once_with_state(
                 sequential=profile.sequential,
                 orientation=single_orientation,
             )
-            wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color)
+            wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color, fit_mode=profile.fit_mode)
             images_used = [image]
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "montage":
@@ -595,7 +595,13 @@ def _switch_once_with_state(
                 for index, monitor in enumerate(monitors)
             }
             images_used = chosen
-            wallpaper = compose_montage(monitors, montage_by_monitor, wallpaper_path, bar_color=profile.bar_color)
+            wallpaper = compose_montage(
+                monitors,
+                montage_by_monitor,
+                wallpaper_path,
+                bar_color=profile.bar_color,
+                fit_mode=profile.fit_mode,
+            )
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "collage":
         pool = _load_image_pool(
@@ -653,6 +659,7 @@ def _switch_once_with_state(
                         collage_by_monitor,
                         wallpaper_path,
                         bar_color=profile.bar_color,
+                        fit_mode=profile.fit_mode,
                     )
                 except ImageDecodeError as exc:
                     _discard_from_pool(pool, exc.image_path)
@@ -850,7 +857,13 @@ def _switch_once_with_state(
             )
             selections = {monitor.name: image for monitor in monitors}
             images_used = [image]
-            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
+            wallpaper = compose_per_monitor(
+                monitors,
+                selections,
+                wallpaper_path,
+                bar_color=profile.bar_color,
+                fit_mode=profile.fit_mode,
+            )
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "shared":
         pool = _load_image_pool(
@@ -888,7 +901,13 @@ def _switch_once_with_state(
             for monitor, image in zip(monitors, chosen):
                 selections[monitor.name] = image
             images_used = chosen
-            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
+            wallpaper = compose_per_monitor(
+                monitors,
+                selections,
+                wallpaper_path,
+                bar_color=profile.bar_color,
+                fit_mode=profile.fit_mode,
+            )
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     else:
         pools_by_monitor: dict[str, _ImagePool] = {}
@@ -933,7 +952,13 @@ def _switch_once_with_state(
                 )
                 selections[monitor.name] = image
                 images_used.append(image)
-            wallpaper = compose_per_monitor(monitors, selections, wallpaper_path, bar_color=profile.bar_color)
+            wallpaper = compose_per_monitor(
+                monitors,
+                selections,
+                wallpaper_path,
+                bar_color=profile.bar_color,
+                fit_mode=profile.fit_mode,
+            )
             _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
 
     if next_slot is not None:

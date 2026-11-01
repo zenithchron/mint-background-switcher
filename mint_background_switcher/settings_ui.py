@@ -17,6 +17,9 @@ from .config import (
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
     EFFECT_CHOICES,
+    FIT_MODE_CHOICES,
+    FIT_MODE_LABELS,
+    FIT_MODE_LABEL_TO_VALUE,
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
     POSTCARD_BACKGROUND_CHOICES,
@@ -256,6 +259,7 @@ class SettingsApp(tk.Tk):
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
+        self.fit_mode_var = tk.StringVar(value=FIT_MODE_LABELS[FIT_MODE_CHOICES[0]])
         self.postcard_background_var = tk.StringVar(value=POSTCARD_BACKGROUND_CHOICES[0])
         self.postcard_count_var = tk.IntVar(value=4)
         self.postcard_size_var = tk.DoubleVar(value=0.5)
@@ -543,6 +547,14 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
         )
         self.bar_color_help.grid(row=1, column=2, columnspan=2, sticky="w", pady=(3, 0))
+        ttk.Label(appearance, text="Display fit mode:").grid(row=1, column=0, sticky="w", pady=(3, 0))
+        self.fit_mode_menu = ttk.OptionMenu(
+            appearance,
+            self.fit_mode_var,
+            FIT_MODE_LABELS[FIT_MODE_CHOICES[0]],
+            *(FIT_MODE_LABELS[value] for value in FIT_MODE_CHOICES),
+        )
+        self.fit_mode_menu.grid(row=1, column=1, sticky="w", padx=(5, 20), pady=(3, 0))
         appearance.columnconfigure(3, weight=1)
 
         self.layout_description_var = tk.StringVar(value=LAYOUT_DESCRIPTIONS[LAYOUT_CHOICES[0]])
@@ -1116,6 +1128,7 @@ class SettingsApp(tk.Tk):
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
+        self.fit_mode_var.set(FIT_MODE_LABELS.get(profile.fit_mode, FIT_MODE_LABELS["fit_bars"]))
         self.postcard_background_var.set(profile.postcard_background)
         self.postcard_count_var.set(profile.postcard_count)
         self.postcard_size_var.set(profile.postcard_size)
@@ -1269,6 +1282,7 @@ class SettingsApp(tk.Tk):
         polaroid_tilt = bool(tilt_var.get()) if tilt_var is not None else True
         polaroid_captions_var = vars(self).get("polaroid_captions_var")
         polaroid_captions = bool(polaroid_captions_var.get()) if polaroid_captions_var is not None else False
+        fit_mode = FIT_MODE_LABEL_TO_VALUE.get(str(self.fit_mode_var.get()).strip(), "fit_bars")
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -1292,6 +1306,7 @@ class SettingsApp(tk.Tk):
             desktop=self.desktop_var.get(),
             effect=self.effect_var.get(),
             bar_color=self.bar_color_var.get(),
+            fit_mode=fit_mode,
             postcard_background=postcard_background,
             postcard_count=postcard_count,
             postcard_size=postcard_size,

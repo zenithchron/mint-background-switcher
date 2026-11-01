@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.15] - 2026-11-01
+
+### Added
+
+- Per-profile **Display fit mode** under **Settings → Layout & Appearance → Appearance**, inspired by John's Background Switcher's display modes: choose **Fit with bars**, **Center (border color)**, **Scale to fit**, **Stretch**, **Scale and crop (overscale)**, or **Scale and blur edges**. The mode applies to every fitted panel in Shared, Same, Per-monitor, and Span layouts and to each cell of Montage and Collage layouts.
+- **Fit with bars** (the default) keeps the historical behavior exactly: the picture is scaled down only, the whole picture stays visible, and unused space uses the chosen letterbox bar style. **Center** places the unscaled picture on the bar-color background and shows the central region of oversized pictures. **Scale to fit** enlarges small pictures so one edge touches the panel, unlike the bar modes that keep them at native size. **Stretch** fills the panel exactly, distorting the aspect ratio when necessary. **Scale and crop (overscale)** scales to fully cover the panel and center-crops the overflow with no bars and no distortion. **Scale and blur edges** fills unused space with a heavily blurred copy of the picture, like the existing blurred letterbox bar as a first-class mode.
+- The **Letterbox bars** control (black, auto, blurred) still chooses the bar style for the bar-based modes; Stretch and Scale and crop ignore it because they leave no unused space.
+- Added unit coverage for all six fit modes (pixel-level geometry, distortion checks, bar-style interaction, one-pixel edge cases, and historical byte-identity of the default), config round-trip and coercion, service-level mode propagation to every composer, and 944×668 Xvfb Settings visibility plus save/reload tests for the new control.
+
+### Changed
+
+- Bumped the package version to `0.2.15`.
+
 ## [0.2.14] - 2026-10-31
 
 ### Added

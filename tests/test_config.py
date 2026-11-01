@@ -489,6 +489,27 @@ def test_letterbox_bar_styles_roundtrip_and_invalid_value_falls_back():
     assert invalid.get_profile().bar_color == "black"
 
 
+def test_display_fit_mode_roundtrips_and_invalid_value_falls_back():
+    from mint_background_switcher.config import FIT_MODE_CHOICES
+
+    assert FIT_MODE_CHOICES[0] == "fit_bars"
+    # Default profile keeps the historical fit-with-bars behavior.
+    default = Config.from_dict({"active_profile": "P", "profiles": {"P": {}}})
+    assert default.get_profile().fit_mode == "fit_bars"
+    assert default.to_dict()["profiles"]["P"]["fit_mode"] == "fit_bars"
+
+    cropped = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"fit_mode": "SCALE_AND_CROP"}}}
+    )
+    assert cropped.get_profile().fit_mode == "scale_and_crop"
+    assert cropped.to_dict()["profiles"]["P"]["fit_mode"] == "scale_and_crop"
+
+    invalid = Config.from_dict(
+        {"active_profile": "P", "profiles": {"P": {"fit_mode": "tile"}}}
+    )
+    assert invalid.get_profile().fit_mode == "fit_bars"
+
+
 def test_invalid_mode_falls_back_to_shared():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "crop"}}})
     assert cfg.get_profile().mode == "shared"

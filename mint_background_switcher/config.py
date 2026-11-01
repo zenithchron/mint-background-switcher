@@ -40,6 +40,27 @@ EFFECT_CHOICES = ("none", "random", *RANDOM_EFFECT_CHOICES)
 VALID_EFFECTS = set(EFFECT_CHOICES)
 BAR_COLOR_CHOICES = ("black", "auto", "blurred")
 VALID_BAR_COLORS = set(BAR_COLOR_CHOICES)
+# Display fit modes for single-image layouts (shared, same, per-monitor,
+# span) and for each cell of montage/collage layouts. The default keeps the
+# historical fit-with-bars behavior.
+FIT_MODE_CHOICES = (
+    "fit_bars",
+    "center",
+    "scale_to_fit",
+    "stretch",
+    "scale_and_crop",
+    "scale_and_blur",
+)
+FIT_MODE_LABELS = {
+    "fit_bars": "Fit with bars",
+    "center": "Center (border color)",
+    "scale_to_fit": "Scale to fit",
+    "stretch": "Stretch",
+    "scale_and_crop": "Scale and crop (overscale)",
+    "scale_and_blur": "Scale and blur edges",
+}
+FIT_MODE_LABEL_TO_VALUE = {label: value for value, label in FIT_MODE_LABELS.items()}
+VALID_FIT_MODES = set(FIT_MODE_CHOICES)
 POSTCARD_BACKGROUND_CHOICES = (
     "dark",
     "corkboard",
@@ -249,6 +270,7 @@ class Profile:
     night_black_screen: bool = False
     night_start: str = DEFAULT_NIGHT_START
     night_end: str = DEFAULT_NIGHT_END
+    fit_mode: str = "fit_bars"
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -261,6 +283,9 @@ class Profile:
         bar_color = str(data.get("bar_color", "black")).strip().lower()
         if bar_color not in VALID_BAR_COLORS:
             bar_color = "black"
+        fit_mode = str(data.get("fit_mode", "fit_bars")).strip().lower()
+        if fit_mode not in VALID_FIT_MODES:
+            fit_mode = "fit_bars"
         postcard_background = str(data.get("postcard_background", "dark")).strip().lower()
         if postcard_background not in VALID_POSTCARD_BACKGROUNDS:
             postcard_background = "dark"
@@ -287,6 +312,7 @@ class Profile:
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
+            fit_mode=fit_mode,
             postcard_background=postcard_background,
             postcard_count=_coerce_photo_count(data.get("postcard_count", 4)),
             postcard_size=_coerce_photo_size(data.get("postcard_size", 0.5)),
@@ -321,6 +347,7 @@ class Profile:
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,
+            "fit_mode": self.fit_mode,
             "postcard_background": self.postcard_background,
             "postcard_count": self.postcard_count,
             "postcard_size": self.postcard_size,
