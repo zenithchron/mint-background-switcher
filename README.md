@@ -29,6 +29,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Optional per-profile random selection, grayscale, half-color desaturation, 1.5× saturation, 1.25× contrast, 1.15× brightening, 0.85× darkening, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.
 - Per-profile display fit modes for fitted panels and montage/collage cells: fit with bars (default, historical), center, scale to fit, stretch, scale and crop (overscale), and scale and blur edges.
+- Optional per-profile **Mirror wallpaper to the lock screen** toggle: GNOME gets an explicit lock-screen image on every rotation (Cinnamon already shows the desktop wallpaper on its lock screen; other desktops keep their own lock screen).
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
@@ -36,6 +37,11 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.16 - 2026-11-02
+
+- Added a per-profile **Mirror wallpaper to the lock screen** toggle under **Settings → Rotation & Shortcuts → Desktop integration**, inspired by John's Background Switcher's lock/logon-screen overlay: when enabled, the generated wallpaper is also written to the session lock screen on every rotation.
+- GNOME exposes a per-user lock-screen image, so the same generated wallpaper is written there explicitly (including the black screen, so the lock screen never shows a stale picture); Cinnamon already shows the desktop wallpaper on its lock screen, so no extra write is needed there; desktops without a per-user lock-screen image setting report that the lock screen keeps its own image. A failed lock-screen write never breaks the desktop wallpaper path — the rotation completes and the note is reported by **Save & Apply Now**, `mint-background-switcher next`, and the background loop; bumped the package version to `0.2.16`.
 
 ### 0.2.15 - 2026-11-01
 

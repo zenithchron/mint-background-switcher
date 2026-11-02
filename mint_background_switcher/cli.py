@@ -43,6 +43,8 @@ def _print_result(result) -> None:
         for image in result.images:
             print(f"  {image}")
     print(f"applied={result.applied}")
+    if result.lockscreen_note:
+        print(f"lock_screen={result.lockscreen_note}")
 
 
 def build_parser() -> argparse.ArgumentParser:

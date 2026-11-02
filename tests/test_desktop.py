@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -134,3 +135,100 @@ def test_dry_run_apply_validates_output_exists(tmp_path: Path):
 def test_dry_run_black_validates_output_exists(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         DesktopSetter(dry_run=True).apply_black(tmp_path / "missing.png", "auto")
+
+
+def test_gnome_mirror_lockscreen_writes_screensaver_schema(monkeypatch, tmp_path: Path):
+    image = tmp_path / "wall.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(image)
+    commands = []
+
+    def fake_check_output(args, **_kwargs):
+        return "'old'\n"
+
+    def fake_run(args, **_kwargs):
+        commands.append(args)
+
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: "/usr/bin/gsettings" if cmd == "gsettings" else None)
+    monkeypatch.setattr(desktop.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(desktop.subprocess, "run", fake_run)
+
+    result = DesktopSetter().mirror_lockscreen(image, "gnome")
+
+    assert result.status == desktop.LOCKSCREEN_MIRRORED
+    assert [cmd[3] for cmd in commands] == ["picture-uri", "picture-uri-dark", "picture-options"]
+    assert commands[0][:3] == ["gsettings", "set", "org.gnome.desktop.screensaver"]
+    assert commands[0][-1] == desktop.file_uri(image)
+    assert commands[2][-1] == "spanned"
+
+
+def test_cinnamon_mirror_lockscreen_is_automatic_without_writes(monkeypatch, tmp_path: Path):
+    image = tmp_path / "wall.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(image)
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: "/usr/bin/gsettings" if cmd == "gsettings" else None)
+    monkeypatch.setattr(
+        desktop.subprocess,
+        "check_output",
+        lambda *_a, **_k: pytest.fail("Cinnamon mirroring must not read gsettings"),
+    )
+    monkeypatch.setattr(desktop.subprocess, "run", lambda *_a, **_k: pytest.fail("Cinnamon mirroring must not write gsettings"))
+
+    result = DesktopSetter().mirror_lockscreen(image, "cinnamon")
+
+    assert result.status == desktop.LOCKSCREEN_AUTOMATIC
+    assert "Cinnamon" in result.detail
+
+
+def test_mate_mirror_lockscreen_reports_unsupported_without_writes(monkeypatch, tmp_path: Path):
+    image = tmp_path / "wall.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(image)
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: "/usr/bin/gsettings" if cmd == "gsettings" else None)
+    monkeypatch.setattr(desktop.subprocess, "run", lambda *_a, **_k: pytest.fail("unsupported desktops must not write gsettings"))
+
+    result = DesktopSetter().mirror_lockscreen(image, "mate")
+
+    assert result.status == desktop.LOCKSCREEN_UNSUPPORTED
+    assert "keeps its own lock screen" in result.detail
+
+
+def test_gnome_mirror_lockscreen_reports_failure_instead_of_raising(monkeypatch, tmp_path: Path):
+    image = tmp_path / "wall.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(image)
+
+    def fake_run(args, **_kwargs):
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: "/usr/bin/gsettings" if cmd == "gsettings" else None)
+    monkeypatch.setattr(desktop.subprocess, "check_output", lambda *_a, **_k: "'old'\n")
+    monkeypatch.setattr(desktop.subprocess, "run", fake_run)
+
+    result = DesktopSetter().mirror_lockscreen(image, "gnome")
+
+    assert result.status == desktop.LOCKSCREEN_FAILED
+    assert "Could not update the GNOME lock screen" in result.detail
+
+
+def test_gnome_mirror_lockscreen_missing_gsettings_reports_failure(monkeypatch, tmp_path: Path):
+    image = tmp_path / "wall.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(image)
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: None)
+
+    result = DesktopSetter().mirror_lockscreen(image, "gnome")
+
+    assert result.status == desktop.LOCKSCREEN_FAILED
+    assert "gsettings is not available" in result.detail
+
+
+def test_dry_run_gnome_mirror_lockscreen_reports_dry_run_without_writes(monkeypatch, tmp_path: Path):
+    image = tmp_path / "wall.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(image)
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: "/usr/bin/gsettings" if cmd == "gsettings" else None)
+    monkeypatch.setattr(desktop.subprocess, "run", lambda *_a, **_k: pytest.fail("dry run must not write"))
+
+    result = DesktopSetter(dry_run=True).mirror_lockscreen(image, "gnome")
+
+    assert result.status == desktop.LOCKSCREEN_DRY_RUN
+
+
+def test_dry_run_mirror_lockscreen_missing_image_raises(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        DesktopSetter(dry_run=True).mirror_lockscreen(tmp_path / "missing.png", "gnome")

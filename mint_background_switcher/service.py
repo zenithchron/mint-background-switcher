@@ -44,6 +44,7 @@ class SwitchResult:
     monitors: list[Monitor]
     applied: bool
     action: str
+    lockscreen_note: str = ""
 
 
 class SwitchCancelled(RuntimeError):
@@ -370,6 +371,19 @@ def _next_wallpaper_path(
     return generated_wallpaper_path(profile.name, suffix=f"active-{slot}", base_dir=working_directory), slot
 
 
+def _mirror_lockscreen(profile: Profile, wallpaper: Path, *, dry_run: bool) -> str:
+    """Mirror an applied wallpaper to the lock screen when the profile asks for it.
+
+    Returns a short user-facing note describing the mirror outcome (or an empty
+    string when the profile does not enable mirroring). Failures are reported
+    through the note so the desktop wallpaper path is never broken.
+    """
+    if not profile.mirror_lockscreen:
+        return ""
+    result = DesktopSetter(dry_run=dry_run).mirror_lockscreen(wallpaper, profile.desktop)
+    return result.detail
+
+
 def _apply_black_fallback(
     profile: Profile,
     monitors: list[Monitor],
@@ -377,7 +391,7 @@ def _apply_black_fallback(
     *,
     dry_run: bool,
     cancelled: Callable[[], bool] | None,
-) -> Path:
+) -> tuple[Path, str]:
     """Apply an all-black non-sticky fallback when configured image folders are empty.
 
     This is intentionally different from the user-invoked black-screen action: it
@@ -387,7 +401,7 @@ def _apply_black_fallback(
     wallpaper = compose_black(monitors, wallpaper_path)
     _cancel_if_requested(cancelled)
     DesktopSetter(dry_run=dry_run).apply_black(wallpaper, profile.desktop)
-    return wallpaper
+    return wallpaper, _mirror_lockscreen(profile, wallpaper, dry_run=dry_run)
 
 
 def _apply_composed_wallpaper(
@@ -397,11 +411,12 @@ def _apply_composed_wallpaper(
     dry_run: bool,
     rng: random.Random | None,
     cancelled: Callable[[], bool] | None,
-) -> None:
+) -> str:
     _cancel_if_requested(cancelled)
     apply_effect(wallpaper, profile.effect, rng=rng)
     _cancel_if_requested(cancelled)
     DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+    return _mirror_lockscreen(profile, wallpaper, dry_run=dry_run)
 
 
 @dataclass(slots=True)
@@ -523,6 +538,7 @@ def _switch_once_with_state(
     selections: dict[str, str] = {}
     images_used: list[str] = []
     action: str = "next"
+    lockscreen_note: str = ""
     if profile.mode == "span":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -538,7 +554,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -557,7 +573,7 @@ def _switch_once_with_state(
             )
             wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color, fit_mode=profile.fit_mode)
             images_used = [image]
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "montage":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -573,7 +589,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -602,7 +618,7 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "collage":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -618,7 +634,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -640,7 +656,7 @@ def _switch_once_with_state(
                     sequential=profile.sequential,
                 )
                 if not chosen:
-                    wallpaper = _apply_black_fallback(
+                    wallpaper, lockscreen_note = _apply_black_fallback(
                         profile,
                         monitors,
                         wallpaper_path,
@@ -665,7 +681,7 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     decode_retries_remaining -= 1
                     if decode_retries_remaining <= 0:
-                        wallpaper = _apply_black_fallback(
+                        wallpaper, lockscreen_note = _apply_black_fallback(
                             profile,
                             monitors,
                             wallpaper_path,
@@ -676,7 +692,7 @@ def _switch_once_with_state(
                         break
                     continue
                 images_used = chosen
-                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+                lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
                 break
     elif profile.mode == "postcard":
         pool = _load_image_pool(
@@ -693,7 +709,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -716,7 +732,7 @@ def _switch_once_with_state(
                     sequential=profile.sequential,
                 )
                 if not chosen:
-                    wallpaper = _apply_black_fallback(
+                    wallpaper, lockscreen_note = _apply_black_fallback(
                         profile,
                         monitors,
                         wallpaper_path,
@@ -749,7 +765,7 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     continue
                 images_used = chosen
-                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+                lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
                 break
     elif profile.mode == "polaroid":
         pool = _load_image_pool(
@@ -766,7 +782,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -789,7 +805,7 @@ def _switch_once_with_state(
                     sequential=profile.sequential,
                 )
                 if not chosen:
-                    wallpaper = _apply_black_fallback(
+                    wallpaper, lockscreen_note = _apply_black_fallback(
                         profile,
                         monitors,
                         wallpaper_path,
@@ -821,7 +837,7 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     continue
                 images_used = chosen
-                _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+                lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
                 break
     elif profile.mode == "same":
         pool = _load_image_pool(
@@ -838,7 +854,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -864,7 +880,7 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "shared":
         pool = _load_image_pool(
             profile.shared_folders,
@@ -880,7 +896,7 @@ def _switch_once_with_state(
             image_types=profile.image_types,
         )
         if pool.empty:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -908,7 +924,7 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     else:
         pools_by_monitor: dict[str, _ImagePool] = {}
         missing_monitors: list[str] = []
@@ -932,7 +948,7 @@ def _switch_once_with_state(
             else:
                 missing_monitors.append(monitor.name)
         if missing_monitors:
-            wallpaper = _apply_black_fallback(
+            wallpaper, lockscreen_note = _apply_black_fallback(
                 profile,
                 monitors,
                 wallpaper_path,
@@ -959,7 +975,7 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
 
     if next_slot is not None:
         state.wallpaper_slot = next_slot
@@ -969,7 +985,15 @@ def _switch_once_with_state(
         state.paused = False
     state.last_wallpaper = str(wallpaper)
     state.last_images = images_used
-    return SwitchResult(profile.name, wallpaper, images_used, monitors, applied=not dry_run, action=action)
+    return SwitchResult(
+        profile.name,
+        wallpaper,
+        images_used,
+        monitors,
+        applied=not dry_run,
+        action=action,
+        lockscreen_note=lockscreen_note,
+    )
 
 
 def black_screen(
@@ -1005,7 +1029,15 @@ def black_screen(
         wallpaper = compose_black(monitors, wallpaper_path)
         _cancel_if_requested(cancelled)
         setter.apply_black(wallpaper, profile.desktop)
-        return SwitchResult(profile.name, wallpaper, [], monitors, applied=False, action="black-screen")
+        return SwitchResult(
+            profile.name,
+            wallpaper,
+            [],
+            monitors,
+            applied=False,
+            action="black-screen",
+            lockscreen_note=_mirror_lockscreen(profile, wallpaper, dry_run=True),
+        )
 
     _cancel_if_requested(cancelled)
     supports_solid_black = setter.supports_solid_black(profile.desktop)
@@ -1037,7 +1069,15 @@ def black_screen(
         state.last_wallpaper = str(wallpaper)
         state.last_images = []
 
-    return SwitchResult(profile.name, wallpaper, [], monitors, applied=True, action="black-screen")
+    return SwitchResult(
+        profile.name,
+        wallpaper,
+        [],
+        monitors,
+        applied=True,
+        action="black-screen",
+        lockscreen_note=_mirror_lockscreen(profile, wallpaper, dry_run=False),
+    )
 
 
 def pause() -> RuntimeState:
@@ -1154,20 +1194,24 @@ def run_loop(
         rotated_this_tick = False
         if night_action == "enter":
             try:
-                black_screen(profile.name, reason="night")
+                result = black_screen(profile.name, reason="night")
                 state = load_state()
                 print(
                     f"Night schedule active; keeping the desktop black until {profile.night_end} local time",
                     flush=True,
                 )
+                if result.lockscreen_note:
+                    print(result.lockscreen_note, flush=True)
             except Exception as exc:
                 print(f"Mint Background Switcher error: {exc}", flush=True)
         elif night_action == "exit":
             try:
-                switch_once(profile.name)
+                result = switch_once(profile.name)
                 state = load_state()
                 rotated_this_tick = True
                 print("Night schedule ended; resuming rotation", flush=True)
+                if result.lockscreen_note:
+                    print(result.lockscreen_note, flush=True)
             except Exception as exc:
                 print(f"Mint Background Switcher error: {exc}", flush=True)
         if state.black_screen:
@@ -1187,6 +1231,8 @@ def run_loop(
                 try:
                     result = switch_once(profile.name, dry_run=dry_run)
                     print(f"Generated {result.wallpaper} for {len(result.monitors)} monitor(s)", flush=True)
+                    if result.lockscreen_note:
+                        print(result.lockscreen_note, flush=True)
                 except Exception as exc:
                     print(f"Mint Background Switcher error: {exc}", flush=True)
         time.sleep(max(profile.interval_minutes * 60.0, 5.0))

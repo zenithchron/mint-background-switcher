@@ -10,6 +10,7 @@ from PIL import Image, ImageEnhance, ImageOps
 
 from mint_background_switcher import service
 from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, load_config, save_config
+from mint_background_switcher.desktop import LockscreenMirrorResult
 from mint_background_switcher.images import BRIGHTNESS_FACTOR, CONTRAST_FACTOR, DARKEN_FACTOR
 from mint_background_switcher.monitor import Monitor
 from mint_background_switcher.service import (
@@ -2404,3 +2405,147 @@ def test_run_loop_does_not_auto_resume_manual_black_screen(monkeypatch, tmp_path
     assert switch_calls == []
     assert load_state().black_screen is True
     assert load_state().black_reason == "manual"
+
+
+def _mirror_recording_setter(mirror_calls, status="mirrored", note="GNOME lock screen updated to match the wallpaper."):
+    class _MirrorSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def apply(self, *_args, **_kwargs):
+            return ["fake"]
+
+        def apply_black(self, *_args, **_kwargs):
+            return ["fake-black"]
+
+        def supports_solid_black(self, *_args, **_kwargs):
+            return False
+
+        def mirror_lockscreen(self, image_path, desktop: str = "auto"):
+            mirror_calls.append((Path(image_path).name, desktop, self.dry_run))
+            return LockscreenMirrorResult(status, note)
+
+    return _MirrorSetter
+
+
+def test_rotation_reports_lockscreen_mirror_note_when_enabled(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.desktop = "gnome"
+    profile.mirror_lockscreen = True
+    save_config(cfg)
+    mirror_calls: list = []
+    monkeypatch.setattr(service, "DesktopSetter", _mirror_recording_setter(mirror_calls))
+
+    result = switch_once("P", dry_run=False, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is True
+    assert result.lockscreen_note == "GNOME lock screen updated to match the wallpaper."
+    assert mirror_calls == [(result.wallpaper.name, "gnome", False)]
+
+
+def test_rotation_skips_lockscreen_mirror_when_disabled(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    class _NoMirrorSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def apply(self, *_args, **_kwargs):
+            return ["fake"]
+
+        def apply_black(self, *_args, **_kwargs):
+            return ["fake-black"]
+
+        def supports_solid_black(self, *_args, **_kwargs):
+            return False
+
+        def mirror_lockscreen(self, *_args, **_kwargs):
+            raise AssertionError("mirror must not be called when the profile toggle is off")
+
+    monkeypatch.setattr(service, "DesktopSetter", _NoMirrorSetter)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.lockscreen_note == ""
+
+
+def test_dry_run_rotation_reports_lockscreen_mirror_without_side_effects(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.desktop = "cinnamon"
+    profile.mirror_lockscreen = True
+    save_config(cfg)
+    mirror_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "DesktopSetter",
+        _mirror_recording_setter(
+            mirror_calls,
+            status="automatic",
+            note="Cinnamon's lock screen already shows the desktop wallpaper.",
+        ),
+    )
+    original = load_state().to_dict()
+
+    result = switch_once("P", dry_run=True, rng=random.Random(2))
+
+    assert result.action == "next"
+    assert result.applied is False
+    assert result.lockscreen_note == "Cinnamon's lock screen already shows the desktop wallpaper."
+    assert mirror_calls == [("P-dry-run.png", "cinnamon", True)]
+    assert load_state().to_dict() == original
+
+
+def test_black_screen_reports_lockscreen_mirror_note(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mirror_lockscreen = True
+    save_config(cfg)
+    mirror_calls: list = []
+    monkeypatch.setattr(service, "DesktopSetter", _mirror_recording_setter(mirror_calls))
+
+    result = black_screen("P", dry_run=False)
+
+    assert result.action == "black-screen"
+    assert result.applied is True
+    assert result.lockscreen_note == "GNOME lock screen updated to match the wallpaper."
+    assert mirror_calls == [(result.wallpaper.name, "unknown", False)]
+
+
+def test_dry_run_black_screen_reports_lockscreen_mirror(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mirror_lockscreen = True
+    save_config(cfg)
+    mirror_calls: list = []
+    monkeypatch.setattr(service, "DesktopSetter", _mirror_recording_setter(mirror_calls))
+    original = load_state().to_dict()
+
+    result = black_screen("P", dry_run=True)
+
+    assert result.applied is False
+    assert result.lockscreen_note == "GNOME lock screen updated to match the wallpaper."
+    assert mirror_calls == [("P-dry-run-black.png", "unknown", True)]
+    assert load_state().to_dict() == original
+
+
+def test_empty_folder_black_fallback_reports_lockscreen_mirror(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    profile = cfg.get_profile("P")
+    profile.mirror_lockscreen = True
+    profile.shared_folders = [str(tmp_path / "missing")]
+    save_config(cfg)
+    mirror_calls: list = []
+    monkeypatch.setattr(service, "DesktopSetter", _mirror_recording_setter(mirror_calls))
+
+    result = switch_once("P", dry_run=True, rng=random.Random(2))
+
+    assert result.action == "black-fallback"
+    assert result.lockscreen_note == "GNOME lock screen updated to match the wallpaper."
+    assert mirror_calls == [("P-dry-run.png", "unknown", True)]

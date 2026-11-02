@@ -285,6 +285,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.night_end_entry,
                 app.hotkey_entry,
                 app.desktop_menu,
+                app.mirror_lockscreen_checkbutton,
             ),
             str(app.collections_tab): (
                 app.collections_scope_label,
@@ -2550,6 +2551,70 @@ def test_settings_loads_night_schedule_from_saved_profile(monkeypatch, tmp_path)
         assert app.night_black_screen_var.get() is True
         assert app.night_start_var.get() == "23:00"
         assert app.night_end_var.get() == "05:45"
+    finally:
+        app.destroy()
+
+
+def test_settings_mirror_lockscreen_toggles_saves_and_reloads(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        # Off by default, visible on the rotation tab inside the pinned window.
+        assert app.mirror_lockscreen_var.get() is False
+        assert is_descendant(app.mirror_lockscreen_checkbutton, app.rotation_tab)
+        assert app.mirror_lockscreen_checkbutton.winfo_ismapped()
+        assert app.mirror_lockscreen_checkbutton.winfo_width() >= app.mirror_lockscreen_checkbutton.winfo_reqwidth()
+
+        app.mirror_lockscreen_var.set(True)
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.mirror_lockscreen is True
+
+        app._load_profile("Default")
+        assert app.mirror_lockscreen_var.get() is True
+    finally:
+        app.destroy()
+
+
+def test_settings_loads_mirror_lockscreen_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={
+            "Default": settings_ui.Profile(
+                name="Default",
+                mirror_lockscreen=True,
+            )
+        },
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.mirror_lockscreen_var.get() is True
     finally:
         app.destroy()
 

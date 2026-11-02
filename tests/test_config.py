@@ -602,3 +602,18 @@ def test_night_black_screen_roundtrip_and_coercion():
     # Coerced defaults are valid times, so the window behaves like the default window.
     assert in_night_window(bad_times.night_start, bad_times.night_end, datetime(2026, 10, 30, 23, 0)) is True
     assert in_night_window(bad_times.night_start, bad_times.night_end, datetime(2026, 10, 30, 12, 0)) is False
+
+
+def test_mirror_lockscreen_roundtrip_and_coercion():
+    profile = Profile(name="P")
+    assert profile.mirror_lockscreen is False
+
+    loaded = Profile.from_dict("P", {"mirror_lockscreen": True})
+    assert loaded.mirror_lockscreen is True
+    dumped = loaded.to_dict()
+    assert dumped["mirror_lockscreen"] is True
+    assert Profile.from_dict("P", dumped).mirror_lockscreen is True
+
+    assert Profile.from_dict("P", {}).mirror_lockscreen is False
+    assert Profile.from_dict("P", {"mirror_lockscreen": "on"}).mirror_lockscreen is True
+    assert Profile.from_dict("P", {"mirror_lockscreen": "garbage"}).mirror_lockscreen is False

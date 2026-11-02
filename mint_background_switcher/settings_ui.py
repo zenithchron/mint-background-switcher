@@ -255,6 +255,7 @@ class SettingsApp(tk.Tk):
         self.night_black_screen_var = tk.BooleanVar(value=False)
         self.night_start_var = tk.StringVar(value=DEFAULT_NIGHT_START)
         self.night_end_var = tk.StringVar(value=DEFAULT_NIGHT_END)
+        self.mirror_lockscreen_var = tk.BooleanVar(value=False)
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
@@ -821,6 +822,18 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
             wraplength=570,
         ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+        self.mirror_lockscreen_checkbutton = ttk.Checkbutton(
+            desktop_integration,
+            text="Mirror wallpaper to the lock screen",
+            variable=self.mirror_lockscreen_var,
+        )
+        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Label(
+            desktop_integration,
+            text="GNOME writes the lock-screen image on each rotation; Cinnamon already mirrors it.",
+            justify=tk.LEFT,
+            wraplength=800,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", padx=(20, 0))
         desktop_integration.columnconfigure(2, weight=1)
 
         self.storage_scope_label = ttk.Label(
@@ -1124,6 +1137,7 @@ class SettingsApp(tk.Tk):
         self.night_black_screen_var.set(profile.night_black_screen)
         self.night_start_var.set(profile.night_start)
         self.night_end_var.set(profile.night_end)
+        self.mirror_lockscreen_var.set(profile.mirror_lockscreen)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
@@ -1244,6 +1258,8 @@ class SettingsApp(tk.Tk):
         match_orientation = bool(match_orientation_var.get()) if match_orientation_var is not None else False
         rotate_on_startup_var = vars(self).get("rotate_on_startup_var")
         rotate_on_startup = bool(rotate_on_startup_var.get()) if rotate_on_startup_var is not None else True
+        mirror_lockscreen_var = vars(self).get("mirror_lockscreen_var")
+        mirror_lockscreen = bool(mirror_lockscreen_var.get()) if mirror_lockscreen_var is not None else False
         night_black_screen_var = vars(self).get("night_black_screen_var")
         night_black_screen = bool(night_black_screen_var.get()) if night_black_screen_var is not None else False
         night_start_var = vars(self).get("night_start_var")
@@ -1298,6 +1314,7 @@ class SettingsApp(tk.Tk):
             night_black_screen=night_black_screen,
             night_start=night_start,
             night_end=night_end,
+            mirror_lockscreen=mirror_lockscreen,
             postcard_captions=postcard_captions,
             polaroid_captions=polaroid_captions,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
@@ -2016,6 +2033,9 @@ class SettingsApp(tk.Tk):
                                 if kind == "black-done"
                                 else f"Generated {result.wallpaper}"
                             )
+                        lockscreen_note = getattr(result, "lockscreen_note", "") or ""
+                        if lockscreen_note:
+                            detail = f"{detail}\n\n{lockscreen_note}"
                         messagebox.showinfo(title, detail, parent=self)
         except queue.Empty:
             pass

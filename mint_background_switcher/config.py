@@ -271,6 +271,7 @@ class Profile:
     night_start: str = DEFAULT_NIGHT_START
     night_end: str = DEFAULT_NIGHT_END
     fit_mode: str = "fit_bars"
+    mirror_lockscreen: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -306,6 +307,7 @@ class Profile:
             night_black_screen=_coerce_bool(data.get("night_black_screen", False)),
             night_start=_coerce_night_time(data.get("night_start", DEFAULT_NIGHT_START), DEFAULT_NIGHT_START),
             night_end=_coerce_night_time(data.get("night_end", DEFAULT_NIGHT_END), DEFAULT_NIGHT_END),
+            mirror_lockscreen=_coerce_bool(data.get("mirror_lockscreen", False)),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -341,6 +343,7 @@ class Profile:
             "night_black_screen": self.night_black_screen,
             "night_start": self.night_start,
             "night_end": self.night_end,
+            "mirror_lockscreen": self.mirror_lockscreen,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,

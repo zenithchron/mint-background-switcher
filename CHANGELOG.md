@@ -4,6 +4,15 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.16] - 2026-11-02
+
+### Added
+
+- Per-profile **Mirror wallpaper to the lock screen** toggle under **Settings → Rotation & Shortcuts → Desktop integration**, inspired by John's Background Switcher's lock/logon-screen overlay: when enabled, the generated wallpaper is also written to the session lock screen on every rotation.
+- **GNOME** exposes a per-user lock-screen image (`org.gnome.desktop.screensaver`), so the same generated wallpaper is written there explicitly on each rotation, including the black screen, so the lock screen never shows a stale picture. **Cinnamon** shows the desktop wallpaper on its lock screen by itself, so enabling the toggle there needs no extra write and reports that the lock screen already matches. Other desktops (Mate, XFCE, ...) do not expose a per-user lock-screen image setting; the toggle reports that the lock screen keeps its own image.
+- A failed lock-screen write never breaks the desktop wallpaper path: the rotation still completes, and the result carries a short note that **Save & Apply Now**, `mint-background-switcher next`, and the background loop report.
+- Added unit coverage for the per-desktop mirror behavior (GNOME schema writes, Cinnamon no-op, unsupported desktops, dry runs, and failure reporting), service-level propagation for rotations, black-screen, and empty-folder fallbacks, config round-trip and coercion, and 944×668 Xvfb Settings visibility plus save/reload tests for the new control.
+
 ## [0.2.15] - 2026-11-01
 
 ### Added

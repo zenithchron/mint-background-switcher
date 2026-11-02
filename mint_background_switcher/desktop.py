@@ -6,7 +6,22 @@ import ast
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+
+LOCKSCREEN_MIRRORED = "mirrored"
+LOCKSCREEN_AUTOMATIC = "automatic"
+LOCKSCREEN_UNSUPPORTED = "unsupported"
+LOCKSCREEN_FAILED = "failed"
+LOCKSCREEN_DRY_RUN = "dry-run"
+
+
+@dataclass(frozen=True, slots=True)
+class LockscreenMirrorResult:
+    """Outcome of mirroring a wallpaper to the session lock screen."""
+
+    status: str
+    detail: str
 
 
 def file_uri(path: str | Path) -> str:
@@ -93,6 +108,62 @@ class DesktopSetter:
 
     def supports_solid_black(self, desktop: str = "auto") -> bool:
         return self._resolve_desktop(desktop) in {"cinnamon", "gnome"}
+
+    def mirror_lockscreen(self, image_path: str | Path, desktop: str = "auto") -> LockscreenMirrorResult:
+        """Mirror an applied wallpaper to the session lock screen.
+
+        GNOME exposes a per-user lock-screen image (``org.gnome.desktop.screensaver``),
+        so the same generated wallpaper is written there explicitly. Cinnamon shows
+        the desktop wallpaper on its lock screen by itself, so mirroring is
+        automatic and needs no extra write. Desktops without a per-user
+        lock-screen image setting report that the lock screen keeps its own image.
+        A failed mirror never breaks the desktop wallpaper path: the failure is
+        returned as a result instead of raised.
+        """
+        image = Path(image_path).expanduser().resolve()
+        resolved = self._resolve_desktop(desktop)
+        if self.dry_run:
+            if not image.exists():
+                raise FileNotFoundError(image)
+            if resolved == "gnome":
+                return LockscreenMirrorResult(
+                    LOCKSCREEN_DRY_RUN,
+                    "Would update the GNOME lock screen image.",
+                )
+            if resolved == "cinnamon":
+                return LockscreenMirrorResult(
+                    LOCKSCREEN_AUTOMATIC,
+                    "Cinnamon's lock screen already shows the desktop wallpaper.",
+                )
+            return LockscreenMirrorResult(
+                LOCKSCREEN_UNSUPPORTED,
+                "This desktop keeps its own lock screen image; no per-user lock-screen setting is available.",
+            )
+        if resolved == "gnome":
+            try:
+                self._apply_gnome_lockscreen(image)
+            except Exception as exc:
+                return LockscreenMirrorResult(LOCKSCREEN_FAILED, f"Could not update the GNOME lock screen: {exc}")
+            return LockscreenMirrorResult(
+                LOCKSCREEN_MIRRORED,
+                "GNOME lock screen updated to match the wallpaper.",
+            )
+        if resolved == "cinnamon":
+            return LockscreenMirrorResult(
+                LOCKSCREEN_AUTOMATIC,
+                "Cinnamon's lock screen already shows the desktop wallpaper.",
+            )
+        return LockscreenMirrorResult(
+            LOCKSCREEN_UNSUPPORTED,
+            "This desktop keeps its own lock screen image; no per-user lock-screen setting is available.",
+        )
+
+    def _apply_gnome_lockscreen(self, image_path: Path) -> None:
+        schema = "org.gnome.desktop.screensaver"
+        uri = file_uri(image_path)
+        _set_gsettings(schema, "picture-uri", uri, self.dry_run)
+        _try_set_gsettings(schema, "picture-uri-dark", uri, self.dry_run)
+        _try_set_gsettings(schema, "picture-options", "spanned", self.dry_run)
 
     def apply(self, image_path: str | Path, desktop: str = "auto") -> list[str]:
         image_path = Path(image_path).expanduser().resolve()
