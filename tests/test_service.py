@@ -2407,6 +2407,201 @@ def test_run_loop_does_not_auto_resume_manual_black_screen(monkeypatch, tmp_path
     assert load_state().black_reason == "manual"
 
 
+def test_run_loop_suppressed_conditions_pause_rotation(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr(service, "active_run_conditions", lambda profile: ["mpv is running"])
+    switch_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: switch_calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 3:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # Every tick is suppressed: nothing switches, and retries use the short cadence.
+    assert switch_calls == []
+    assert len(sleeps) == 3
+    assert all(5.0 <= seconds <= 60.0 for seconds in sleeps)
+
+
+def test_run_loop_suppression_clearing_resumes_rotation(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    suppressed = {"active": True}
+    monkeypatch.setattr(service, "active_run_conditions", lambda profile: ["mpv is running"] if suppressed["active"] else [])
+    switch_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: switch_calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            suppressed["active"] = False
+        if len(sleeps) >= 2:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # Tick 1 is suppressed; once the condition clears, the next tick rotates.
+    assert len(switch_calls) == 1
+    assert len(sleeps) == 2
+
+
+def test_run_loop_probe_exception_fails_open(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    def boom(profile):
+        raise RuntimeError("probe exploded")
+
+    monkeypatch.setattr(service, "active_run_conditions", boom)
+    switch_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: switch_calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 1:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # A failing probe means "no condition holds": the loop kept running and
+    # the first tick rotated as if no condition were configured.
+    assert len(switch_calls) == 1
+    assert len(sleeps) == 1
+
+
+def test_run_loop_suppression_does_not_consume_skip_first(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    suppressed = {"active": True}
+    monkeypatch.setattr(service, "active_run_conditions", lambda profile: ["mpv is running"] if suppressed["active"] else [])
+    switch_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: switch_calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            suppressed["active"] = False
+        if len(sleeps) >= 3:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", skip_first=True)
+    except _StopLoop:
+        pass
+
+    # Tick 1 is suppressed (skip not consumed), tick 2 consumes the skip, tick 3 rotates.
+    assert len(switch_calls) == 1
+    assert len(sleeps) == 3
+
+
+def test_run_loop_dry_run_ignores_run_conditions(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr(service, "active_run_conditions", lambda profile: ["mpv is running"])
+    switch_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: switch_calls.append((args, kwargs))
+        or SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"]),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 1:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", dry_run=True)
+    except _StopLoop:
+        pass
+
+    # Dry-run previews keep their historic behavior and ignore run conditions.
+    assert len(switch_calls) == 1
+    assert switch_calls[0][1]["dry_run"] is True
+
+
+def test_run_loop_night_exit_suppressed_defers_resume(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    config = load_config()
+    config.get_profile("P").night_black_screen = True
+    save_config(config)
+    save_state(RuntimeState(black_screen=True, black_reason="night"))
+    monkeypatch.setattr(service, "in_night_window", lambda start, end, now: False)
+    suppressed = {"active": True}
+    monkeypatch.setattr(service, "active_run_conditions", lambda profile: ["mpv is running"] if suppressed["active"] else [])
+    switch_calls: list = []
+
+    def fake_switch(*args, **kwargs):
+        switch_calls.append((args, kwargs))
+        state = load_state()
+        state.black_screen = False
+        state.black_reason = ""
+        state.paused = False
+        save_state(state)
+        return SimpleNamespace(wallpaper=str(tmp_path / "generated.png"), monitors=["monitor-a"])
+
+    monkeypatch.setattr(service, "switch_once", fake_switch)
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            suppressed["active"] = False
+        if len(sleeps) >= 2:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # The night window ended but conditions held, so the resume is deferred
+    # until the conditions clear; then rotation resumes with the black lifted.
+    assert len(switch_calls) == 1
+    assert len(sleeps) == 2
+    assert load_state().black_screen is False
+
+
 def _mirror_recording_setter(mirror_calls, status="mirrored", note="GNOME lock screen updated to match the wallpaper."):
     class _MirrorSetter:
         def __init__(self, dry_run: bool = False):

@@ -14,6 +14,7 @@ from typing import Any, Callable
 from . import APP_NAME, __version__, public_collections, updater
 from .config import (
     BAR_COLOR_CHOICES,
+    DEFAULT_IDLE_SECONDS,
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
     EFFECT_CHOICES,
@@ -22,6 +23,8 @@ from .config import (
     FIT_MODE_LABEL_TO_VALUE,
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
+    MAX_IDLE_SECONDS,
+    MAX_SUPPRESS_PROCESS_LENGTH,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
@@ -256,6 +259,13 @@ class SettingsApp(tk.Tk):
         self.night_start_var = tk.StringVar(value=DEFAULT_NIGHT_START)
         self.night_end_var = tk.StringVar(value=DEFAULT_NIGHT_END)
         self.mirror_lockscreen_var = tk.BooleanVar(value=False)
+        self.suppress_process_var = tk.BooleanVar(value=False)
+        self.suppress_process_name_var = tk.StringVar()
+        self.suppress_battery_var = tk.BooleanVar(value=False)
+        self.suppress_remote_var = tk.BooleanVar(value=False)
+        self.idle_only_var = tk.BooleanVar(value=False)
+        self.idle_seconds_var = tk.StringVar(value=str(DEFAULT_IDLE_SECONDS))
+        self.suppress_locked_var = tk.BooleanVar(value=False)
         self.hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
@@ -404,6 +414,7 @@ class SettingsApp(tk.Tk):
         self.sources_tab = ttk.Frame(self.notebook, padding=10)
         self.layout_tab = ttk.Frame(self.notebook, padding=12)
         self.rotation_tab = ttk.Frame(self.notebook, padding=12)
+        self.conditions_tab = ttk.Frame(self.notebook, padding=12)
         self.collections_tab = ttk.Frame(self.notebook, padding=12)
         self.storage_tab = ttk.Frame(self.notebook, padding=12)
         self.about_tab = ttk.Frame(self.notebook, padding=12)
@@ -412,6 +423,7 @@ class SettingsApp(tk.Tk):
         self.notebook.add(self.sources_tab, text="Sources", underline=0)
         self.notebook.add(self.layout_tab, text="Layout & Appearance", underline=0)
         self.notebook.add(self.rotation_tab, text="Rotation & Shortcuts", underline=0)
+        self.notebook.add(self.conditions_tab, text="Conditions", underline=0)
         self.notebook.add(self.collections_tab, text="Public Collections", underline=0)
         self.notebook.add(self.storage_tab, text="Storage", underline=1)
         self.notebook.add(self.about_tab, text="Updates & About", underline=0)
@@ -836,6 +848,73 @@ class SettingsApp(tk.Tk):
         ).grid(row=2, column=0, columnspan=3, sticky="w", padx=(20, 0))
         desktop_integration.columnconfigure(2, weight=1)
 
+        self.conditions_scope_label = ttk.Label(
+            self.conditions_tab,
+            textvariable=self.profile_scope_var,
+            style="Heading.TLabel",
+        )
+        self.conditions_scope_label.pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            self.conditions_tab,
+            text=(
+                "Choose the local conditions that pause scheduled switching for this profile. "
+                "Manual switches and Save & Apply Now always apply."
+            ),
+            justify=tk.LEFT,
+            wraplength=860,
+        ).pack(anchor="w", pady=(0, 8))
+        run_conditions = ttk.LabelFrame(self.conditions_tab, text="Run conditions", padding=(10, 6))
+        run_conditions.pack(fill=tk.X, pady=(0, 8))
+        self.suppress_process_checkbutton = ttk.Checkbutton(
+            run_conditions,
+            text="Pause scheduled switching while a named process is running:",
+            variable=self.suppress_process_var,
+        )
+        self.suppress_process_checkbutton.grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self.suppress_process_name_entry = ttk.Entry(
+            run_conditions, textvariable=self.suppress_process_name_var, width=18
+        )
+        self.suppress_process_name_entry.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
+        self.suppress_battery_checkbutton = ttk.Checkbutton(
+            run_conditions,
+            text="Pause scheduled switching while running on battery (laptops)",
+            variable=self.suppress_battery_var,
+        )
+        self.suppress_battery_checkbutton.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        self.suppress_remote_checkbutton = ttk.Checkbutton(
+            run_conditions,
+            text="Pause scheduled switching while a remote (VNC) session is active",
+            variable=self.suppress_remote_var,
+        )
+        self.suppress_remote_checkbutton.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        self.idle_only_checkbutton = ttk.Checkbutton(
+            run_conditions,
+            text="Only switch when the session has been idle (seconds):",
+            variable=self.idle_only_var,
+        )
+        self.idle_only_checkbutton.grid(row=3, column=0, sticky="w", pady=(0, 4))
+        self.idle_seconds_entry = ttk.Entry(run_conditions, textvariable=self.idle_seconds_var, width=6)
+        self.idle_seconds_entry.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 4))
+        self.suppress_locked_checkbutton = ttk.Checkbutton(
+            run_conditions,
+            text="Pause scheduled switching while the session is locked or the screensaver is active",
+            variable=self.suppress_locked_var,
+        )
+        self.suppress_locked_checkbutton.grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        ttk.Label(
+            run_conditions,
+            text=(
+                "Conditions pause the background loop only — Save & Apply Now and manual next switches always apply. "
+                "Battery, idle time (xprintidle), and lock state are probed locally; a condition that cannot be "
+                "detected never blocks."
+            ),
+            justify=tk.LEFT,
+            wraplength=860,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.suppress_process_var.trace_add("write", self._refresh_run_condition_states)
+        self.idle_only_var.trace_add("write", self._refresh_run_condition_states)
+        self._refresh_run_condition_states()
+
         self.storage_scope_label = ttk.Label(
             self.storage_tab,
             text="Application setting — shared by every profile",
@@ -1138,6 +1217,13 @@ class SettingsApp(tk.Tk):
         self.night_start_var.set(profile.night_start)
         self.night_end_var.set(profile.night_end)
         self.mirror_lockscreen_var.set(profile.mirror_lockscreen)
+        self.suppress_process_var.set(bool(profile.suppress_process))
+        self.suppress_process_name_var.set(profile.suppress_process)
+        self.suppress_battery_var.set(profile.suppress_on_battery)
+        self.suppress_remote_var.set(profile.suppress_remote_session)
+        self.idle_only_var.set(profile.idle_only)
+        self.idle_seconds_var.set(str(profile.idle_seconds))
+        self.suppress_locked_var.set(profile.suppress_when_locked)
         self.hotkey_var.set(profile.black_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
@@ -1163,6 +1249,13 @@ class SettingsApp(tk.Tk):
         state = "normal" if self.night_black_screen_var.get() else "disabled"
         self.night_start_entry.configure(state=state)
         self.night_end_entry.configure(state=state)
+
+    def _refresh_run_condition_states(self, *_args: object) -> None:
+        """Enable the run-condition value fields only while their toggle is on."""
+        process_state = "normal" if self.suppress_process_var.get() else "disabled"
+        self.suppress_process_name_entry.configure(state=process_state)
+        idle_state = "normal" if self.idle_only_var.get() else "disabled"
+        self.idle_seconds_entry.configure(state=idle_state)
 
     def _refresh_postcard_count_label(self, *_args: object) -> None:
         text = "Postcard photos across all screens:" if self.postcard_span_var.get() else "Postcard photos per screen:"
@@ -1277,6 +1370,38 @@ class SettingsApp(tk.Tk):
                 raise ValueError("The night window start and end times must differ.")
         night_start = raw_night_start if parsed_night_start is not None else DEFAULT_NIGHT_START
         night_end = raw_night_end if parsed_night_end is not None else DEFAULT_NIGHT_END
+        suppress_process_var = vars(self).get("suppress_process_var")
+        suppress_process_enabled = bool(suppress_process_var.get()) if suppress_process_var is not None else False
+        suppress_process_name_var = vars(self).get("suppress_process_name_var")
+        raw_suppress_process = (
+            str(suppress_process_name_var.get()).strip() if suppress_process_name_var is not None else ""
+        )
+        if suppress_process_enabled:
+            if not raw_suppress_process:
+                raise ValueError("Enter the process name to watch, or turn the run condition off.")
+            if len(raw_suppress_process) > MAX_SUPPRESS_PROCESS_LENGTH:
+                raise ValueError(
+                    f"The process name can be at most {MAX_SUPPRESS_PROCESS_LENGTH} characters "
+                    "(Linux process names are limited to that length)."
+                )
+        else:
+            raw_suppress_process = ""
+        suppress_battery_var = vars(self).get("suppress_battery_var")
+        suppress_on_battery = bool(suppress_battery_var.get()) if suppress_battery_var is not None else False
+        suppress_remote_var = vars(self).get("suppress_remote_var")
+        suppress_remote_session = bool(suppress_remote_var.get()) if suppress_remote_var is not None else False
+        idle_only_var = vars(self).get("idle_only_var")
+        idle_only = bool(idle_only_var.get()) if idle_only_var is not None else False
+        idle_seconds_var = vars(self).get("idle_seconds_var")
+        raw_idle_seconds = str(idle_seconds_var.get()).strip() if idle_seconds_var is not None else str(DEFAULT_IDLE_SECONDS)
+        try:
+            idle_seconds = int(raw_idle_seconds)
+        except ValueError:
+            raise ValueError("The idle time must be a whole number of seconds.") from None
+        if not 0 <= idle_seconds <= MAX_IDLE_SECONDS:
+            raise ValueError(f"The idle time must be between 0 and {MAX_IDLE_SECONDS} seconds.")
+        suppress_locked_var = vars(self).get("suppress_locked_var")
+        suppress_when_locked = bool(suppress_locked_var.get()) if suppress_locked_var is not None else False
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -1315,6 +1440,12 @@ class SettingsApp(tk.Tk):
             night_start=night_start,
             night_end=night_end,
             mirror_lockscreen=mirror_lockscreen,
+            suppress_process=raw_suppress_process,
+            suppress_on_battery=suppress_on_battery,
+            suppress_remote_session=suppress_remote_session,
+            idle_only=idle_only,
+            idle_seconds=idle_seconds,
+            suppress_when_locked=suppress_when_locked,
             postcard_captions=postcard_captions,
             polaroid_captions=polaroid_captions,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],

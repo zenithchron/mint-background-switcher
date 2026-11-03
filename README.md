@@ -16,7 +16,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
-- Settings with a persistent Profile, Layout, and Save Profile strip above six task-based pages: Sources, Layout & Appearance, Rotation & Shortcuts, Public Collections, Storage, and Updates & About.
+- Settings with a persistent Profile, Layout, and Save Profile strip above seven task-based pages: Sources, Layout & Appearance, Rotation & Shortcuts, Conditions, Public Collections, Storage, and Updates & About.
 - Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, twelve selectable solid or procedurally textured backgrounds, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
@@ -30,6 +30,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.
 - Per-profile display fit modes for fitted panels and montage/collage cells: fit with bars (default, historical), center, scale to fit, stretch, scale and crop (overscale), and scale and blur edges.
 - Optional per-profile **Mirror wallpaper to the lock screen** toggle: GNOME gets an explicit lock-screen image on every rotation (Cinnamon already shows the desktop wallpaper on its lock screen; other desktops keep their own lock screen).
+- Per-profile **run conditions** that pause scheduled switching while a local condition holds: a named process is running, the laptop is on battery, a remote (VNC) session is active, the session has not been idle long enough, or the session is locked / the screensaver is active. Explicit switches (Save & Apply Now, `next`, resuming) always apply, and a condition that cannot be detected never blocks.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
@@ -37,6 +38,11 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.17 - 2026-11-03
+
+- Added per-profile **run conditions** on a new **Settings → Conditions** page, inspired by John's Background Switcher's switching conditions: five independent toggles pause *scheduled* background switching while a local condition holds — a named process is running (process names are limited to 15 characters), the laptop is on battery, a remote (VNC) session is active, the session has not been idle for the configured number of seconds, or the session is locked / the screensaver is active.
+- Conditions pause the background loop only: **Save & Apply Now**, `mint-background-switcher next`, and resuming from a black screen always apply, and dry-run previews ignore conditions. While a condition holds the loop retries on a short cadence (at most 60 s) so a clearing condition resumes the schedule quickly; a night-window resume is deferred the same way; bumped the package version to `0.2.17`.
 
 ### 0.2.16 - 2026-11-02
 

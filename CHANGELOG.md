@@ -4,6 +4,26 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.17] - 2026-11-03
+
+### Added
+
+- Per-profile **run conditions** on a new **Settings → Conditions** page, inspired by John's Background Switcher's switching conditions (SW-07..SW-11): each of the five conditions is an independent toggle that pauses *scheduled* background switching while it holds:
+  - **Pause scheduled switching while a named process is running** — watch for a process by exact name (Linux process names are limited to 15 characters; longer names are rejected on save).
+  - **Pause scheduled switching while running on battery** — laptops only; desktops without a battery are unaffected.
+  - **Pause scheduled switching while a remote (VNC) session is active** — detects common VNC/remote-desktop server processes (`x11vnc`, `vncserver`, TigerVNC, TurboVNC, KasmVNC, ...).
+  - **Only switch when the session has been idle** — require N seconds of idle time (via `xprintidle`) before a due switch.
+  - **Pause scheduled switching while the session is locked or the screensaver is active** — probed through the desktop's screensaver/locker D-Bus service (Cinnamon, GNOME, LightDM).
+- Conditions pause the background loop only: **Save & Apply Now**, `mint-background-switcher next`, and resuming from a black screen always apply, and the dry-run preview ignores conditions. While a condition holds the loop retries on a short cadence (at most 60 s), so a clearing condition resumes the schedule without waiting a full interval; the rotate-at-startup skip is not consumed while suppressed, matching the existing pause/black-screen handling. A night-window resume is deferred the same way.
+- Every probe fails open: a condition that cannot be detected (no battery, no `xprintidle`, no reachable locker service) never blocks switching.
+- The Settings window validates the new controls on save (empty process name while the toggle is on, more than 15 characters, non-numeric or out-of-range idle seconds are rejected with a message box), and the value fields are greyed out while their toggle is off.
+- Added unit coverage for every probe and the fail-open rules, config round-trip and coercion, `run_loop` suppression/resume/skip-first/dry-run/night-exit behavior, and 944×668 Xvfb Settings visibility, save, reject, and reload tests for the new Conditions page.
+
+### Changed
+
+- The Settings window now has seven task-based pages (Conditions sits between Rotation & Shortcuts and Public Collections); the fixed 944×668 minimum geometry is unchanged and every page still fits it under the default and `clam` themes.
+- Bumped the package version to `0.2.17`.
+
 ## [0.2.16] - 2026-11-02
 
 ### Added

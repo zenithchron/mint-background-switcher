@@ -56,7 +56,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 - Independent source-set add, edit, enable, disable, and cross-source mixing.
 - Ignored folders, path exclusions, and temporary-unavailability handling. Orientation matching shipped in `0.2.10` as a per-profile selection preference; minimum dimensions (smallest side) shipped in `0.2.6`, hidden files/folders (dot names) in `0.2.7`, and filename pattern exclusions in `0.2.9` as per-profile Settings filters; optional folder-order rotation shipped in `0.2.8` as a per-profile rotation mode.
 - Broader intervals, switch at startup, startup delay, and topology-change refresh. Switch-at-startup shipped in `0.2.12` as a per-profile Rotate-at-startup toggle under Rotation & Shortcuts.
-- Optional suppression while locked, on battery, not idle, or while selected applications are running.
+- Optional suppression while locked, on battery, not idle, or while selected applications are running. Rich run-conditions shipped in `0.2.17` as five per-profile toggles on the Settings → Conditions page (named process, battery, remote/VNC session, idle-only, locked/screensaver), pausing scheduled switching only and failing open when a condition cannot be detected.
 - Optional post-switch command hook.
 
 ### 5. History and current-wallpaper actions

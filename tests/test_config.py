@@ -617,3 +617,51 @@ def test_mirror_lockscreen_roundtrip_and_coercion():
     assert Profile.from_dict("P", {}).mirror_lockscreen is False
     assert Profile.from_dict("P", {"mirror_lockscreen": "on"}).mirror_lockscreen is True
     assert Profile.from_dict("P", {"mirror_lockscreen": "garbage"}).mirror_lockscreen is False
+
+
+def test_run_conditions_roundtrip_and_coercion():
+    profile = Profile(
+        name="P",
+        suppress_process="mpv",
+        suppress_on_battery=True,
+        suppress_remote_session=True,
+        idle_only=True,
+        idle_seconds=420,
+        suppress_when_locked=True,
+    )
+    dumped = profile.to_dict()
+    assert dumped["suppress_process"] == "mpv"
+    assert dumped["suppress_on_battery"] is True
+    assert dumped["suppress_remote_session"] is True
+    assert dumped["idle_only"] is True
+    assert dumped["idle_seconds"] == 420
+    assert dumped["suppress_when_locked"] is True
+    reloaded = Profile.from_dict("P", dumped)
+    assert reloaded.suppress_process == "mpv"
+    assert reloaded.suppress_on_battery is True
+    assert reloaded.suppress_remote_session is True
+    assert reloaded.idle_only is True
+    assert reloaded.idle_seconds == 420
+    assert reloaded.suppress_when_locked is True
+
+    # Defaults stay disabled.
+    defaults = Profile.from_dict("P", {})
+    assert defaults.suppress_process == ""
+    assert defaults.suppress_on_battery is False
+    assert defaults.suppress_remote_session is False
+    assert defaults.idle_only is False
+    assert defaults.idle_seconds == 300
+    assert defaults.suppress_when_locked is False
+
+    # A name longer than the 15-character comm limit is dropped, not truncated.
+    assert Profile.from_dict("P", {"suppress_process": "x" * 15}).suppress_process == "x" * 15
+    assert Profile.from_dict("P", {"suppress_process": "x" * 16}).suppress_process == ""
+    assert Profile.from_dict("P", {"suppress_process": 123}).suppress_process == ""
+    assert Profile.from_dict("P", {"suppress_process": " mpv "}).suppress_process == "mpv"
+
+    # Idle seconds are clamped and coerced.
+    assert Profile.from_dict("P", {"idle_seconds": "700"}).idle_seconds == 700
+    assert Profile.from_dict("P", {"idle_seconds": -5}).idle_seconds == 0
+    assert Profile.from_dict("P", {"idle_seconds": 999_999}).idle_seconds == 86_400
+    assert Profile.from_dict("P", {"idle_seconds": True}).idle_seconds == 300
+    assert Profile.from_dict("P", {"idle_seconds": "garbage"}).idle_seconds == 300

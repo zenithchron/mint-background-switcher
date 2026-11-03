@@ -81,6 +81,11 @@ MAX_IGNORE_PATTERN_LENGTH = 120
 MAX_IMAGE_TYPES = 16
 DEFAULT_NIGHT_START = "22:00"
 DEFAULT_NIGHT_END = "06:00"
+# /proc/*/comm is limited to 15 characters, so a longer saved name could never
+# match a process and would only mislead the user.
+MAX_SUPPRESS_PROCESS_LENGTH = 15
+DEFAULT_IDLE_SECONDS = 300
+MAX_IDLE_SECONDS = 86_400
 
 
 def parse_night_time(value: Any) -> tuple[int, int] | None:
@@ -237,6 +242,31 @@ def _coerce_image_types(value: Any) -> list[str]:
     return types
 
 
+def _coerce_suppress_process(value: Any) -> str:
+    """Normalize the saved suppress-process name, or drop it when unusable.
+
+    Over-long names are dropped rather than truncated (a name longer than
+    ``comm`` can never match) so a saved config never holds a silently
+    altered user value.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text or len(text) > MAX_SUPPRESS_PROCESS_LENGTH:
+        return ""
+    return text
+
+
+def _coerce_idle_seconds(value: Any, default: int = DEFAULT_IDLE_SECONDS) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0, min(seconds, MAX_IDLE_SECONDS))
+
+
 @dataclass(slots=True)
 class Profile:
     name: str
@@ -272,6 +302,12 @@ class Profile:
     night_end: str = DEFAULT_NIGHT_END
     fit_mode: str = "fit_bars"
     mirror_lockscreen: bool = False
+    suppress_process: str = ""
+    suppress_on_battery: bool = False
+    suppress_remote_session: bool = False
+    idle_only: bool = False
+    idle_seconds: int = DEFAULT_IDLE_SECONDS
+    suppress_when_locked: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -308,6 +344,12 @@ class Profile:
             night_start=_coerce_night_time(data.get("night_start", DEFAULT_NIGHT_START), DEFAULT_NIGHT_START),
             night_end=_coerce_night_time(data.get("night_end", DEFAULT_NIGHT_END), DEFAULT_NIGHT_END),
             mirror_lockscreen=_coerce_bool(data.get("mirror_lockscreen", False)),
+            suppress_process=_coerce_suppress_process(data.get("suppress_process", "")),
+            suppress_on_battery=_coerce_bool(data.get("suppress_on_battery", False)),
+            suppress_remote_session=_coerce_bool(data.get("suppress_remote_session", False)),
+            idle_only=_coerce_bool(data.get("idle_only", False)),
+            idle_seconds=_coerce_idle_seconds(data.get("idle_seconds", DEFAULT_IDLE_SECONDS)),
+            suppress_when_locked=_coerce_bool(data.get("suppress_when_locked", False)),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -344,6 +386,12 @@ class Profile:
             "night_start": self.night_start,
             "night_end": self.night_end,
             "mirror_lockscreen": self.mirror_lockscreen,
+            "suppress_process": self.suppress_process,
+            "suppress_on_battery": self.suppress_on_battery,
+            "suppress_remote_session": self.suppress_remote_session,
+            "idle_only": self.idle_only,
+            "idle_seconds": self.idle_seconds,
+            "suppress_when_locked": self.suppress_when_locked,
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,

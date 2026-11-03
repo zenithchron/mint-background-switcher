@@ -232,11 +232,12 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             "Sources",
             "Layout & Appearance",
             "Rotation & Shortcuts",
+            "Conditions",
             "Public Collections",
             "Storage",
             "Updates & About",
         ]
-        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 1, 0]
+        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 0, 1, 0]
         app.notebook.select(app.sources_tab)
         app.notebook.focus_force()
         app.update()
@@ -255,6 +256,11 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.sequential_checkbutton, app.rotation_tab)
         assert is_descendant(app.hotkey_entry, app.rotation_tab)
         assert is_descendant(app.desktop_menu, app.rotation_tab)
+        assert is_descendant(app.suppress_process_checkbutton, app.conditions_tab)
+        assert is_descendant(app.suppress_battery_checkbutton, app.conditions_tab)
+        assert is_descendant(app.suppress_remote_checkbutton, app.conditions_tab)
+        assert is_descendant(app.idle_only_checkbutton, app.conditions_tab)
+        assert is_descendant(app.suppress_locked_checkbutton, app.conditions_tab)
         assert is_descendant(app.collections_download_button, app.collections_tab)
         assert is_descendant(app.working_directory_entry, app.storage_tab)
         assert is_descendant(app.update_button, app.about_tab)
@@ -286,6 +292,16 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.hotkey_entry,
                 app.desktop_menu,
                 app.mirror_lockscreen_checkbutton,
+            ),
+            str(app.conditions_tab): (
+                app.conditions_scope_label,
+                app.suppress_process_checkbutton,
+                app.suppress_process_name_entry,
+                app.suppress_battery_checkbutton,
+                app.suppress_remote_checkbutton,
+                app.idle_only_checkbutton,
+                app.idle_seconds_entry,
+                app.suppress_locked_checkbutton,
             ),
             str(app.collections_tab): (
                 app.collections_scope_label,
@@ -367,6 +383,19 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 *page_controls[str(app.collections_tab)],
             ):
                 assert_visible_inside_window(control)
+
+            app.notebook.select(app.conditions_tab)
+            app.update_idletasks()
+            app.update()
+            for control in (
+                app.profile_context_frame,
+                *context_controls,
+                *footer_controls,
+                *page_controls[str(app.conditions_tab)],
+            ):
+                assert_visible_inside_window(control)
+            assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
+            assert app.winfo_reqheight() <= settings_ui.SETTINGS_WINDOW_TARGET_HEIGHT
     finally:
         app.destroy()
 
@@ -1861,6 +1890,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
             "Sources",
             "Layout & Appearance",
             "Rotation & Shortcuts",
+            "Conditions",
             "Public Collections",
             "Storage",
             "Updates & About",
@@ -2551,6 +2581,164 @@ def test_settings_loads_night_schedule_from_saved_profile(monkeypatch, tmp_path)
         assert app.night_black_screen_var.get() is True
         assert app.night_start_var.get() == "23:00"
         assert app.night_end_var.get() == "05:45"
+    finally:
+        app.destroy()
+
+
+def test_settings_run_condition_controls_are_visible_and_persist(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.conditions_tab)
+        app.update()
+        # All conditions are off by default and the value fields are greyed out.
+        assert app.suppress_process_var.get() is False
+        assert app.suppress_battery_var.get() is False
+        assert app.suppress_remote_var.get() is False
+        assert app.idle_only_var.get() is False
+        assert app.idle_seconds_var.get() == "300"
+        assert app.suppress_locked_var.get() is False
+        for control in (
+            app.suppress_process_checkbutton,
+            app.suppress_process_name_entry,
+            app.suppress_battery_checkbutton,
+            app.suppress_remote_checkbutton,
+            app.idle_only_checkbutton,
+            app.idle_seconds_entry,
+            app.suppress_locked_checkbutton,
+        ):
+            assert is_descendant(control, app.conditions_tab)
+            assert control.winfo_ismapped()
+            assert control.winfo_width() >= control.winfo_reqwidth()
+        assert str(app.suppress_process_name_entry.cget("state")) == "disabled"
+        assert str(app.idle_seconds_entry.cget("state")) == "disabled"
+
+        app.suppress_process_var.set(True)
+        app.idle_only_var.set(True)
+        app.update()
+        assert str(app.suppress_process_name_entry.cget("state")) == "normal"
+        assert str(app.idle_seconds_entry.cget("state")) == "normal"
+
+        app.suppress_process_name_var.set("mpv")
+        app.suppress_battery_var.set(True)
+        app.suppress_remote_var.set(True)
+        app.idle_seconds_var.set("420")
+        app.suppress_locked_var.set(True)
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.suppress_process == "mpv"
+        assert saved.suppress_on_battery is True
+        assert saved.suppress_remote_session is True
+        assert saved.idle_only is True
+        assert saved.idle_seconds == 420
+        assert saved.suppress_when_locked is True
+
+        app._load_profile("Default")
+        assert app.suppress_process_var.get() is True
+        assert app.suppress_process_name_var.get() == "mpv"
+        assert app.suppress_battery_var.get() is True
+        assert app.suppress_remote_var.get() is True
+        assert app.idle_only_var.get() is True
+        assert app.idle_seconds_var.get() == "420"
+        assert app.suppress_locked_var.get() is True
+        assert str(app.suppress_process_name_entry.cget("state")) == "normal"
+
+        # Turning the toggle off disables the value field and clears the value on save.
+        app.suppress_process_var.set(False)
+        app.update()
+        assert str(app.suppress_process_name_entry.cget("state")) == "disabled"
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.suppress_process == ""
+        assert saved.suppress_on_battery is True
+    finally:
+        app.destroy()
+
+
+def test_settings_run_conditions_reject_invalid_values_on_save(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    errors: list = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda *_args: errors.append(_args))
+    app = settings_ui.SettingsApp()
+    try:
+        app.suppress_process_var.set(True)
+        assert app._save_current() is False
+        assert errors and "process name" in str(errors[-1])
+        errors.clear()
+
+        app.suppress_process_name_var.set("x" * 16)
+        assert app._save_current() is False
+        assert errors and "15 characters" in str(errors[-1])
+        errors.clear()
+
+        app.suppress_process_name_var.set("mpv")
+        app.idle_only_var.set(True)
+        app.idle_seconds_var.set("not-a-number")
+        assert app._save_current() is False
+        assert errors and "whole number" in str(errors[-1])
+        errors.clear()
+
+        app.idle_seconds_var.set("9999999")
+        assert app._save_current() is False
+        assert errors and "between 0" in str(errors[-1])
+
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.suppress_process == ""
+        assert saved.idle_only is False
+    finally:
+        app.destroy()
+
+
+def test_settings_loads_run_conditions_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={
+            "Default": settings_ui.Profile(
+                name="Default",
+                suppress_process="mpv",
+                suppress_on_battery=True,
+                suppress_remote_session=True,
+                idle_only=True,
+                idle_seconds=420,
+                suppress_when_locked=True,
+            )
+        },
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.suppress_process_var.get() is True
+        assert app.suppress_process_name_var.get() == "mpv"
+        assert app.suppress_battery_var.get() is True
+        assert app.suppress_remote_var.get() is True
+        assert app.idle_only_var.get() is True
+        assert app.idle_seconds_var.get() == "420"
+        assert app.suppress_locked_var.get() is True
     finally:
         app.destroy()
 

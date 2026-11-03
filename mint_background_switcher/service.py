@@ -32,6 +32,7 @@ from .images import (
 from .library_index import IndexSnapshot, LibraryIndex, LibrarySelection, orientation_matches
 from .monitor import Monitor, detect_monitors, monitor_orientation
 from .paths import generated_wallpaper_path
+from .run_conditions import active_run_conditions
 from .state import RuntimeState, draw_many, load_state, state_transaction
 from .working_storage import ensure_configured_working_directory
 
@@ -1191,6 +1192,18 @@ def run_loop(
         # Dry-run previews keep their historic behavior and never trigger the
         # scheduled black screen or its automatic resume.
         night_action = "off" if dry_run else night_schedule_action(profile, state, datetime.now())
+        # Run conditions only pause *scheduled* switching in this loop; manual
+        # switches (Save & Apply Now, `next`, resume) always apply. Probes are
+        # fail-open by design, and detection failure here must not stop the
+        # background loop either: an exception means "no condition holds".
+        if dry_run:
+            suppressed_reasons: list[str] = []
+        else:
+            try:
+                suppressed_reasons = active_run_conditions(profile)
+            except Exception:
+                suppressed_reasons = []
+        retry_delay = min(max(profile.interval_minutes * 60.0, 5.0), 60.0)
         rotated_this_tick = False
         if night_action == "enter":
             try:
@@ -1205,23 +1218,39 @@ def run_loop(
             except Exception as exc:
                 print(f"Mint Background Switcher error: {exc}", flush=True)
         elif night_action == "exit":
-            try:
-                result = switch_once(profile.name)
-                state = load_state()
-                rotated_this_tick = True
-                print("Night schedule ended; resuming rotation", flush=True)
-                if result.lockscreen_note:
-                    print(result.lockscreen_note, flush=True)
-            except Exception as exc:
-                print(f"Mint Background Switcher error: {exc}", flush=True)
+            if suppressed_reasons:
+                # The window ended, but run conditions still hold; the next
+                # tick retries the resume once they clear.
+                print(
+                    f"Night schedule ended, but scheduled switching is paused ({'; '.join(suppressed_reasons)}); "
+                    "will resume as soon as the conditions clear",
+                    flush=True,
+                )
+            else:
+                try:
+                    result = switch_once(profile.name)
+                    state = load_state()
+                    rotated_this_tick = True
+                    print("Night schedule ended; resuming rotation", flush=True)
+                    if result.lockscreen_note:
+                        print(result.lockscreen_note, flush=True)
+                except Exception as exc:
+                    print(f"Mint Background Switcher error: {exc}", flush=True)
         if state.black_screen:
-            time.sleep(min(max(profile.interval_minutes * 60.0, 5.0), 60.0))
+            time.sleep(retry_delay)
             continue
         if rotated_this_tick:
             time.sleep(max(profile.interval_minutes * 60.0, 5.0))
             continue
         if not state.paused:
-            if skip_first:
+            if suppressed_reasons:
+                # Do not consume the rotate-at-startup skip while suppressed,
+                # mirroring the pause/black-screen handling.
+                print(
+                    f"Wallpaper switch paused ({'; '.join(suppressed_reasons)}); will retry sooner",
+                    flush=True,
+                )
+            elif skip_first:
                 # Rotate-at-startup is off: keep the current background and let
                 # the normal interval take over. Black-screen/pause cycles do not
                 # consume the skip, so resuming from either still switches on time.
@@ -1235,4 +1264,9 @@ def run_loop(
                         print(result.lockscreen_note, flush=True)
                 except Exception as exc:
                     print(f"Mint Background Switcher error: {exc}", flush=True)
-        time.sleep(max(profile.interval_minutes * 60.0, 5.0))
+        if suppressed_reasons:
+            # Retry on a short cadence so a clearing condition resumes the
+            # schedule without waiting a full interval.
+            time.sleep(retry_delay)
+        else:
+            time.sleep(max(profile.interval_minutes * 60.0, 5.0))
