@@ -86,6 +86,11 @@ DEFAULT_NIGHT_END = "06:00"
 MAX_SUPPRESS_PROCESS_LENGTH = 15
 DEFAULT_IDLE_SECONDS = 300
 MAX_IDLE_SECONDS = 86_400
+# "Never show again" exclusion list bounds: keep saved configs small and
+# selection filtering cheap; over-long paths are dropped rather than
+# truncated so a config can never hold a silently altered entry.
+MAX_EXCLUDED_IMAGES = 1000
+MAX_EXCLUDED_PATH_LENGTH = 4096
 
 
 def parse_night_time(value: Any) -> tuple[int, int] | None:
@@ -267,6 +272,25 @@ def _coerce_idle_seconds(value: Any, default: int = DEFAULT_IDLE_SECONDS) -> int
     return max(0, min(seconds, MAX_IDLE_SECONDS))
 
 
+def _coerce_excluded_images(value: Any) -> list[str]:
+    """Normalize the never-show-again list (strip, de-dupe, bound length/count)."""
+    if not isinstance(value, list):
+        return []
+    images: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if not text or text in seen or len(text) > MAX_EXCLUDED_PATH_LENGTH:
+            continue
+        seen.add(text)
+        images.append(text)
+        if len(images) >= MAX_EXCLUDED_IMAGES:
+            break
+    return images
+
+
 @dataclass(slots=True)
 class Profile:
     name: str
@@ -308,6 +332,7 @@ class Profile:
     idle_only: bool = False
     idle_seconds: int = DEFAULT_IDLE_SECONDS
     suppress_when_locked: bool = False
+    excluded_images: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -350,6 +375,7 @@ class Profile:
             idle_only=_coerce_bool(data.get("idle_only", False)),
             idle_seconds=_coerce_idle_seconds(data.get("idle_seconds", DEFAULT_IDLE_SECONDS)),
             suppress_when_locked=_coerce_bool(data.get("suppress_when_locked", False)),
+            excluded_images=_coerce_excluded_images(data.get("excluded_images", [])),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
             black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
@@ -392,6 +418,7 @@ class Profile:
             "idle_only": self.idle_only,
             "idle_seconds": self.idle_seconds,
             "suppress_when_locked": self.suppress_when_locked,
+            "excluded_images": list(self.excluded_images),
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,

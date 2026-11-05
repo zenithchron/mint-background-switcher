@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .config import Config, Profile, in_night_window, load_config
+from .config import (
+    MAX_EXCLUDED_IMAGES,
+    Config,
+    Profile,
+    config_file,
+    in_night_window,
+    load_config,
+)
 from .desktop import DesktopSetter
 from .images import (
     ImageDecodeError,
@@ -34,6 +41,7 @@ from .monitor import Monitor, detect_monitors, monitor_orientation
 from .paths import generated_wallpaper_path
 from .run_conditions import active_run_conditions
 from .state import RuntimeState, draw_many, load_state, state_transaction
+from .storage import atomic_write_json_unlocked, locked_file, lock_path_for, read_json_unlocked
 from .working_storage import ensure_configured_working_directory
 
 
@@ -73,6 +81,123 @@ def current_source_images() -> list[Path]:
             seen.add(key)
             images.append(image)
     return images
+
+
+def _normalized_exclusion_path(raw: object) -> str:
+    """Absolute form of a never-show-again entry, or raise when unusable."""
+    candidate = str(raw or "").strip()
+    if not candidate or any(ch in candidate for ch in "\r\n\t"):
+        raise ValueError("picture path is empty or contains a line break")
+    return os.path.abspath(os.path.expanduser(candidate))
+
+
+def _exclusion_match_set(profile: Profile) -> frozenset[str]:
+    """Every path form that satisfies a saved never-show-again entry.
+
+    Entries are stored as the absolute path captured at exclusion time, but
+    pool paths may be the resolved realpath (dry-run scan) or a plain abspath
+    (library index), so matching accepts the stored, abspath, and resolved
+    forms of each entry.
+    """
+    if not profile.excluded_images:
+        return frozenset()
+    matches: set[str] = set()
+    for raw in profile.excluded_images:
+        matches.add(raw)
+        try:
+            expanded = os.path.expanduser(raw)
+            matches.add(os.path.abspath(expanded))
+            matches.add(str(Path(expanded).resolve(strict=False)))
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return frozenset(matches)
+
+
+def _mutate_excluded_images(profile_name: str | None, mutate: Callable[[Profile], list[str]]) -> list[str]:
+    """Apply one never-show-again change to the freshest saved config."""
+    path = config_file()
+    with locked_file(lock_path_for(path)):
+        config = Config.from_dict(read_json_unlocked(path)) if path.exists() else Config.default()
+        profile = config.get_profile(profile_name)
+        result = mutate(profile)
+        atomic_write_json_unlocked(path, config.to_dict())
+    return result
+
+
+def get_excluded_images(profile_name: str | None = None) -> list[str]:
+    """Return the profile's never-show-again list (read-only)."""
+    return list(load_config(create=False).get_profile(profile_name).excluded_images)
+
+
+def excluded_path_set(profile_name: str | None = None) -> frozenset[str]:
+    """All path forms matched by the profile's never-show-again entries."""
+    return _exclusion_match_set(load_config(create=False).get_profile(profile_name))
+
+
+def add_excluded_images(profile_name: str | None, raw_paths: Iterable[str]) -> list[str]:
+    """Add pictures to the profile's never-show-again list.
+
+    Returns the entries actually added. Paths are normalized to absolute
+    form; duplicates are dropped and the list is capped at the config limit.
+    """
+
+    def _add(profile: Profile) -> list[str]:
+        added: list[str] = []
+        for raw in raw_paths:
+            if len(profile.excluded_images) >= MAX_EXCLUDED_IMAGES:
+                break
+            normalized = _normalized_exclusion_path(raw)
+            if normalized in profile.excluded_images:
+                continue
+            profile.excluded_images.append(normalized)
+            added.append(normalized)
+        return added
+
+    return _mutate_excluded_images(profile_name, _add)
+
+
+def remove_excluded_images(profile_name: str | None, raw_paths: Iterable[str]) -> list[str]:
+    """Remove pictures from the profile's never-show-again list.
+
+    Returns the entries actually removed.
+    """
+
+    def _remove(profile: Profile) -> list[str]:
+        targets = {_normalized_exclusion_path(raw) for raw in raw_paths}
+        removed = [path for path in profile.excluded_images if path in targets]
+        profile.excluded_images = [path for path in profile.excluded_images if path not in targets]
+        return removed
+
+    return _mutate_excluded_images(profile_name, _remove)
+
+
+def clear_excluded_images(profile_name: str | None) -> int:
+    """Empty the profile's never-show-again list; return how many entries left."""
+
+    def _clear(profile: Profile) -> list[str]:
+        removed = list(profile.excluded_images)
+        profile.excluded_images = []
+        return removed
+
+    return len(_mutate_excluded_images(profile_name, _clear))
+
+
+def exclude_current_images(
+    profile_name: str | None = None,
+    paths: Sequence[str | Path] | None = None,
+) -> list[str]:
+    """Exclude the current wallpaper's source pictures from future rotation.
+
+    With no explicit paths, the sources recorded for the currently applied
+    wallpaper are used, so multi-picture layouts exclude every picture that
+    is currently on screen.
+    """
+    if paths is None:
+        paths = [str(image) for image in current_source_images()]
+    sources = [str(path) for path in paths]
+    if not sources:
+        return []
+    return add_excluded_images(profile_name, sources)
 
 
 def _cancel_if_requested(cancelled: Callable[[], bool] | None) -> None:
@@ -143,12 +268,17 @@ class _ImagePool:
     index: LibraryIndex | None = None
     snapshot: IndexSnapshot | None = None
     selection: LibrarySelection | None = None
+    excluded: frozenset[str] = frozenset()
 
     @property
     def empty(self) -> bool:
         if self.paths is not None:
             return not self.paths
-        return self.snapshot is None or self.snapshot.image_count <= 0
+        if self.snapshot is None:
+            return True
+        if self.index is None or not self.excluded:
+            return self.snapshot.image_count <= 0
+        return self.index.available_count(self.snapshot.signature, self.excluded) == 0
 
 
 def _load_image_pool(
@@ -164,11 +294,13 @@ def _load_image_pool(
     ignore_hidden: bool = False,
     ignore_patterns: Iterable[str] = (),
     image_types: Iterable[str] = (),
+    excluded: frozenset[str] = frozenset(),
 ) -> _ImagePool:
     if dry_run:
-        return _ImagePool(
-            paths=scan_images(folders, recursive, min_image_size, ignore_hidden, ignore_patterns, image_types)
-        )
+        paths = scan_images(folders, recursive, min_image_size, ignore_hidden, ignore_patterns, image_types)
+        if excluded:
+            paths = [path for path in paths if path not in excluded]
+        return _ImagePool(paths=paths, excluded=excluded)
     if index is None:  # pragma: no cover - guarded by switch setup
         raise RuntimeError("live wallpaper rotation requires an image index")
     snapshot = index.ensure(
@@ -181,7 +313,7 @@ def _load_image_pool(
         cancelled=cancelled,
         progress=progress,
     )
-    return _ImagePool(index=index, snapshot=snapshot, selection=selection)
+    return _ImagePool(index=index, snapshot=snapshot, selection=selection, excluded=excluded)
 
 
 def _draw_oriented_from_list(
@@ -522,9 +654,12 @@ def _switch_once_with_state(
 ) -> SwitchResult:
     cfg = load_config()
     profile = cfg.get_profile(profile_name)
+    excluded_paths = _exclusion_match_set(profile)
     working_directory = ensure_configured_working_directory(cfg)
     index = None if dry_run else LibraryIndex(working_directory)
     selection = selection_scope.begin(index)
+    if selection is not None and excluded_paths:
+        selection.exclude(excluded_paths)
     monitors = detect_monitors()
     state.active_profile = profile.name
     orientation_requirements = _orientation_requirements(profile, monitors, profile.mode)
@@ -553,6 +688,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -588,6 +724,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -633,6 +770,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -708,6 +846,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -781,6 +920,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -853,6 +993,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -895,6 +1036,7 @@ def _switch_once_with_state(
             ignore_hidden=profile.ignore_hidden,
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
+            excluded=excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -943,6 +1085,7 @@ def _switch_once_with_state(
                 ignore_hidden=profile.ignore_hidden,
                 ignore_patterns=profile.ignore_patterns,
                 image_types=profile.image_types,
+                excluded=excluded_paths,
             )
             if not pool.empty:
                 pools_by_monitor[monitor.name] = pool

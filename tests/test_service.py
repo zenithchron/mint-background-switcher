@@ -9,13 +9,25 @@ import pytest
 from PIL import Image, ImageEnhance, ImageOps
 
 from mint_background_switcher import service
-from mint_background_switcher.config import RANDOM_EFFECT_CHOICES, Config, Profile, load_config, save_config
+from mint_background_switcher.config import (
+    RANDOM_EFFECT_CHOICES,
+    Config,
+    Profile,
+    load_config,
+    save_config,
+)
 from mint_background_switcher.desktop import LockscreenMirrorResult
 from mint_background_switcher.images import BRIGHTNESS_FACTOR, CONTRAST_FACTOR, DARKEN_FACTOR
 from mint_background_switcher.monitor import Monitor
 from mint_background_switcher.service import (
+    MAX_EXCLUDED_IMAGES,
+    add_excluded_images,
     black_screen,
+    clear_excluded_images,
     current_source_images,
+    exclude_current_images,
+    get_excluded_images,
+    remove_excluded_images,
     night_schedule_action,
     resume,
     save_current_wallpaper,
@@ -2744,3 +2756,85 @@ def test_empty_folder_black_fallback_reports_lockscreen_mirror(monkeypatch, tmp_
     assert result.action == "black-fallback"
     assert result.lockscreen_note == "GNOME lock screen updated to match the wallpaper."
     assert mirror_calls == [("P-dry-run.png", "unknown", True)]
+
+
+def test_exclusion_list_persists_add_remove_and_clear(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    first = str(tmp_path / "one.png")
+    second = str(tmp_path / "two.png")
+    assert get_excluded_images("P") == []
+    added = add_excluded_images("P", [f"{first} ", first, second])
+    assert added == [first, second]
+    assert get_excluded_images("P") == [first, second]
+
+    removed = remove_excluded_images("P", [first, str(tmp_path / "missing.png")])
+    assert removed == [first]
+    assert get_excluded_images("P") == [second]
+
+    assert clear_excluded_images("P") == 1
+    assert get_excluded_images("P") == []
+
+
+def test_add_excluded_images_stops_at_config_limit(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    added = add_excluded_images("P", [f"/library/{idx:04d}.png" for idx in range(MAX_EXCLUDED_IMAGES + 25)])
+
+    assert len(added) == MAX_EXCLUDED_IMAGES
+    assert get_excluded_images("P") == added
+
+
+def test_excluded_pictures_never_rotate_and_all_excluded_falls_back_to_black(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = load_config()
+    cfg.get_profile("P").sequential = True
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    excluded_raw = str(next(image_dir.glob("*.png")))
+    add_excluded_images("P", [excluded_raw])
+    excluded = str(Path(excluded_raw).resolve())
+
+    seen = set()
+    # Dry-run previews are deterministic and do not persist state: they always
+    # preview the pool head, which must never be the excluded picture.
+    for seed in range(4):
+        preview = switch_once("P", dry_run=True, rng=random.Random(seed))
+        assert preview.action == "next"
+        assert excluded not in preview.images
+        seen.update(preview.images)
+    # Live rotations persist the queue and cycle through the remaining pool.
+    for seed in range(9):
+        live = switch_once("P", dry_run=False, rng=random.Random(seed))
+        assert live.action == "next"
+        assert excluded not in live.images
+        seen.update(live.images)
+
+    assert seen == {str(path.resolve()) for path in image_dir.glob("*.png")} - {excluded}
+
+    for path in image_dir.glob("*.png"):
+        if str(path) != excluded_raw:
+            add_excluded_images("P", [str(path)])
+
+    result = switch_once("P", dry_run=True, rng=random.Random(7))
+    assert result.action == "black-fallback"
+    assert result.images == []
+    assert result.wallpaper.exists()
+
+
+def test_exclude_current_images_uses_recorded_sources(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = load_config()
+    cfg.get_profile("P").sequential = True
+    save_config(cfg)
+
+    first = switch_once("P", dry_run=False, rng=random.Random(3))
+    assert first.applied is True
+    assert current_source_images() == [Path(image) for image in first.images]
+
+    excluded = exclude_current_images("P")
+
+    assert excluded == first.images
+    assert get_excluded_images("P") == first.images

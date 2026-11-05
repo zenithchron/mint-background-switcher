@@ -16,7 +16,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
-- Settings with a persistent Profile, Layout, and Save Profile strip above seven task-based pages: Sources, Layout & Appearance, Rotation & Shortcuts, Conditions, Public Collections, Storage, and Updates & About.
+- Settings with a persistent Profile, Layout, and Save Profile strip above eight task-based pages: Sources, Layout & Appearance, Rotation & Shortcuts, Conditions, Never Show Again, Public Collections, Storage, and Updates & About.
 - Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, twelve selectable solid or procedurally textured backgrounds, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
@@ -24,7 +24,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - User-triggered managed updates from Settings with versioned per-user installs, atomic activation, restart, and rollback.
 - Optional tray menu for quick actions.
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
-- View every unique original picture used in the current wallpaper and open a selected source or its containing folder from Settings.
+- View every unique original picture used in the current wallpaper, open a selected source or its containing folder, and keep selected pictures out of future rotation with a per-profile **Never Show Again** list (one click for the whole current wallpaper, individual remove, and clear-all with confirmation).
 - User-triggered Public Collections downloads from NASA and rights-filtered Wikimedia Commons CC0/public-domain sets, with provenance manifests and optional profile-source setup.
 - Optional per-profile random selection, grayscale, half-color desaturation, 1.5× saturation, 1.25× contrast, 1.15× brightening, 0.85× darkening, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.

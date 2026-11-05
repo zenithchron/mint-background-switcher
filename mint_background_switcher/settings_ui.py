@@ -34,7 +34,18 @@ from .config import (
 )
 from .images import SUPPORTED_EXTENSIONS, SUPPORTED_TYPE_NAMES, is_usable_image
 from .monitor import Monitor, detect_monitors
-from .service import SwitchCancelled, black_screen, current_source_images, save_current_wallpaper, switch_once
+from .service import (
+    SwitchCancelled,
+    black_screen,
+    clear_excluded_images,
+    current_source_images,
+    exclude_current_images,
+    excluded_path_set,
+    get_excluded_images,
+    remove_excluded_images,
+    save_current_wallpaper,
+    switch_once,
+)
 from .working_storage import (
     MARKER_FILENAME,
     WorkingDirectoryMigrationCancelled,
@@ -79,6 +90,18 @@ SUPPORTED_PICTURE_PATTERNS = " ".join(
     for extension in SUPPORTED_EXTENSIONS
     for pattern in (f"*{extension}", f"*{extension.upper()}")
 )
+
+
+def _excluded_count_status(count: int, action: str | None = None) -> str:
+    """Short user-facing sentence for the never-show-again list and its edits."""
+    label = "picture" if count == 1 else "pictures"
+    if action == "excluded":
+        return f"Excluded {count} {label} from the current wallpaper."
+    if action == "removed":
+        return f"Removed {count} {label} from the never-show-again list."
+    if action == "cleared":
+        return f"Cleared {count} {label} from the never-show-again list."
+    return f"{count} {label} will never show again for this profile."
 
 
 def _active_working_directory_status(path: str | Path) -> str:
@@ -313,6 +336,7 @@ class SettingsApp(tk.Tk):
         self._collection_cancel = threading.Event()
         self._current_pictures_window: tk.Toplevel | None = None
         self._refresh_current_pictures: Callable[[], bool] | None = None
+        self._excluded_display: list[str] = []
         self._operation_results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self.detected_monitors = detect_monitors()
         self._build()
@@ -415,6 +439,7 @@ class SettingsApp(tk.Tk):
         self.layout_tab = ttk.Frame(self.notebook, padding=12)
         self.rotation_tab = ttk.Frame(self.notebook, padding=12)
         self.conditions_tab = ttk.Frame(self.notebook, padding=12)
+        self.excluded_tab = ttk.Frame(self.notebook, padding=12)
         self.collections_tab = ttk.Frame(self.notebook, padding=12)
         self.storage_tab = ttk.Frame(self.notebook, padding=12)
         self.about_tab = ttk.Frame(self.notebook, padding=12)
@@ -424,6 +449,7 @@ class SettingsApp(tk.Tk):
         self.notebook.add(self.layout_tab, text="Layout & Appearance", underline=0)
         self.notebook.add(self.rotation_tab, text="Rotation & Shortcuts", underline=0)
         self.notebook.add(self.conditions_tab, text="Conditions", underline=0)
+        self.notebook.add(self.excluded_tab, text="Never Show Again", underline=0)
         self.notebook.add(self.collections_tab, text="Public Collections", underline=0)
         self.notebook.add(self.storage_tab, text="Storage", underline=1)
         self.notebook.add(self.about_tab, text="Updates & About", underline=0)
@@ -915,6 +941,61 @@ class SettingsApp(tk.Tk):
         self.idle_only_var.trace_add("write", self._refresh_run_condition_states)
         self._refresh_run_condition_states()
 
+        self.excluded_scope_label = ttk.Label(
+            self.excluded_tab,
+            textvariable=self.profile_scope_var,
+            style="Heading.TLabel",
+        )
+        self.excluded_scope_label.pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            self.excluded_tab,
+            text=(
+                "Pictures on this list are never chosen for this profile. "
+                "Excluding the current wallpaper removes every picture it is using from future rotation."
+            ),
+            justify=tk.LEFT,
+            wraplength=860,
+        ).pack(anchor="w", pady=(0, 8))
+        excluded_current_frame = ttk.LabelFrame(self.excluded_tab, text="Current wallpaper", padding=(10, 6))
+        excluded_current_frame.pack(fill=tk.X, pady=(0, 8))
+        self.excluded_current_text = tk.Text(
+            excluded_current_frame,
+            height=3,
+            width=80,
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+        )
+        self.excluded_current_text.pack(fill=tk.X)
+        self.excluded_current_button = ttk.Button(
+            excluded_current_frame,
+            text="Never Show Again (current wallpaper)",
+            command=self._exclude_current_wallpaper,
+        )
+        self.excluded_current_button.pack(anchor="w", pady=(6, 0))
+        excluded_frame = ttk.LabelFrame(self.excluded_tab, text="Excluded pictures", padding=(10, 6))
+        excluded_frame.pack(fill=tk.BOTH, expand=True)
+        self.excluded_status_var = tk.StringVar()
+        ttk.Label(excluded_frame, textvariable=self.excluded_status_var).pack(anchor="w")
+        excluded_list_row = ttk.Frame(excluded_frame)
+        excluded_list_row.pack(fill=tk.BOTH, expand=True, pady=(4, 6))
+        self.excluded_list = tk.Listbox(excluded_list_row, height=5, selectmode=tk.EXTENDED, exportselection=False)
+        excluded_scrollbar = ttk.Scrollbar(excluded_list_row, orient=tk.VERTICAL, command=self.excluded_list.yview)
+        self.excluded_list.configure(yscrollcommand=excluded_scrollbar.set)
+        self.excluded_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        excluded_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.excluded_remove_button = ttk.Button(
+            excluded_frame,
+            text="Remove Selected",
+            command=self._remove_selected_excluded,
+        )
+        self.excluded_remove_button.pack(anchor="w", pady=(0, 4))
+        self.excluded_clear_button = ttk.Button(
+            excluded_frame,
+            text="Clear All...",
+            command=self._clear_excluded_confirmed,
+        )
+        self.excluded_clear_button.pack(anchor="w")
+
         self.storage_scope_label = ttk.Label(
             self.storage_tab,
             text="Application setting — shared by every profile",
@@ -1243,6 +1324,100 @@ class SettingsApp(tk.Tk):
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
+        self._refresh_excluded_tab()
+
+    def _refresh_excluded_tab(self) -> None:
+        """Reload the Never Show Again page from the saved config and state."""
+        name = self.profile_var.get()
+        try:
+            excluded = get_excluded_images(name)
+        except Exception:
+            excluded = []
+        self._excluded_display = list(excluded)
+        self.excluded_list.delete(0, tk.END)
+        for path in excluded:
+            self.excluded_list.insert(tk.END, path)
+        try:
+            sources = [str(image) for image in current_source_images()]
+        except Exception:
+            sources = []
+        self.excluded_current_text.configure(state=tk.NORMAL)
+        self.excluded_current_text.delete("1.0", tk.END)
+        self.excluded_current_text.insert(
+            tk.END,
+            "\n".join(sources) if sources else "No source pictures are recorded for the current wallpaper yet.",
+        )
+        self.excluded_current_text.configure(state=tk.DISABLED)
+        self.excluded_status_var.set(_excluded_count_status(len(excluded)))
+
+    def _sync_profile_exclusions(self, name: str) -> None:
+        """Keep the in-memory profile's exclusion list in step with the saved config."""
+        profile = self.config_data.profiles.get(name)
+        if profile is None:
+            return
+        try:
+            profile.excluded_images = list(get_excluded_images(name))
+        except Exception:
+            pass
+
+    def _exclude_current_wallpaper(self) -> None:
+        name = self.profile_var.get()
+        try:
+            sources = [str(image) for image in current_source_images()]
+        except Exception as exc:
+            messagebox.showerror("Could not read the current wallpaper", str(exc), parent=self)
+            return
+        if not sources:
+            self.excluded_status_var.set("No source pictures are recorded for the current wallpaper yet.")
+            return
+        try:
+            added = exclude_current_images(name, sources)
+        except Exception as exc:
+            messagebox.showerror("Could not exclude pictures", str(exc), parent=self)
+            return
+        self._sync_profile_exclusions(name)
+        self._refresh_excluded_tab()
+        if added:
+            self.excluded_status_var.set(_excluded_count_status(len(added), action="excluded"))
+        else:
+            self.excluded_status_var.set("The current wallpaper's pictures are already excluded.")
+
+    def _remove_selected_excluded(self) -> None:
+        selection = self.excluded_list.curselection()
+        if not selection:
+            self.excluded_status_var.set("Select one or more pictures to remove first.")
+            return
+        name = self.profile_var.get()
+        paths = [self._excluded_display[index] for index in selection]
+        try:
+            removed = remove_excluded_images(name, paths)
+        except Exception as exc:
+            messagebox.showerror("Could not remove exclusions", str(exc), parent=self)
+            return
+        self._sync_profile_exclusions(name)
+        self._refresh_excluded_tab()
+        self.excluded_status_var.set(_excluded_count_status(len(removed), action="removed"))
+
+    def _clear_excluded_confirmed(self) -> None:
+        name = self.profile_var.get()
+        count = len(self._excluded_display)
+        if not count:
+            self.excluded_status_var.set("The never-show-again list is already empty.")
+            return
+        if not messagebox.askyesno(
+            "Clear never-show-again list",
+            f"Remove all {count} excluded picture{'s' if count != 1 else ''} for “{name}”?",
+            parent=self,
+        ):
+            return
+        try:
+            removed = clear_excluded_images(name)
+        except Exception as exc:
+            messagebox.showerror("Could not clear exclusions", str(exc), parent=self)
+            return
+        self._sync_profile_exclusions(name)
+        self._refresh_excluded_tab()
+        self.excluded_status_var.set(_excluded_count_status(removed, action="cleared"))
 
     def _refresh_night_time_state(self, *_args: object) -> None:
         """Enable the night-window time fields only while the schedule is on."""
@@ -1424,6 +1599,10 @@ class SettingsApp(tk.Tk):
         polaroid_captions_var = vars(self).get("polaroid_captions_var")
         polaroid_captions = bool(polaroid_captions_var.get()) if polaroid_captions_var is not None else False
         fit_mode = FIT_MODE_LABEL_TO_VALUE.get(str(self.fit_mode_var.get()).strip(), "fit_bars")
+        # Exclusions are managed on the Never Show Again page, not in these fields; carry the
+        # current profile's list forward so saving or renaming never silently wipes it.
+        existing = self.config_data.profiles.get(self.profile_var.get())
+        excluded_images = list(existing.excluded_images) if existing is not None else []
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -1464,6 +1643,7 @@ class SettingsApp(tk.Tk):
             polaroid_size=polaroid_size,
             polaroid_span=polaroid_span,
             polaroid_tilt=polaroid_tilt,
+            excluded_images=excluded_images,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
@@ -2256,17 +2436,30 @@ class SettingsApp(tk.Tk):
 
         list_frame = ttk.Frame(content)
         list_frame.pack(fill=tk.BOTH, expand=True)
-        picture_list = tk.Listbox(list_frame, selectmode=tk.SINGLE, exportselection=False)
+        picture_list = tk.Listbox(list_frame, selectmode=tk.EXTENDED, exportselection=False)
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=picture_list.yview)
         picture_list.configure(yscrollcommand=scrollbar.set)
         picture_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        excluded_now = excluded_path_set(self.profile_var.get())
+
+        def display_label(image: Path) -> str:
+            if str(image) in excluded_now:
+                return f"{image} [excluded]"
+            try:
+                resolved = str(image.resolve())
+            except OSError:
+                resolved = ""
+            return f"{image} [excluded]" if resolved in excluded_now else str(image)
+
         for image in images:
-            picture_list.insert(tk.END, str(image))
+            picture_list.insert(tk.END, display_label(image))
         picture_list.selection_set(0)
         picture_list.activate(0)
 
-        status_var = tk.StringVar(value="Select a source picture, then open it or its containing folder.")
+        status_var = tk.StringVar(
+            value="Select a source picture, then open it, open its folder, or add it to Never Show Again."
+        )
         ttk.Label(content, textvariable=status_var, anchor="w").pack(fill=tk.X, pady=(8, 4))
         buttons = ttk.Frame(content)
         buttons.pack(fill=tk.X)
@@ -2276,6 +2469,8 @@ class SettingsApp(tk.Tk):
         open_button.pack(side=tk.LEFT)
         open_folder_button = ttk.Button(buttons, text="Open Containing Folder")
         open_folder_button.pack(side=tk.LEFT, padx=(6, 0))
+        never_button = ttk.Button(buttons, text="Never Show Again")
+        never_button.pack(side=tk.LEFT, padx=(6, 0))
 
         def set_open_controls_enabled(enabled: bool) -> None:
             state = ["!disabled"] if enabled else ["disabled"]
@@ -2283,13 +2478,15 @@ class SettingsApp(tk.Tk):
             open_folder_button.state(state)
 
         def refresh_sources() -> bool:
+            nonlocal excluded_now
             latest = current_source_images()
             if latest == images:
                 return False
             images[:] = latest
+            excluded_now = excluded_path_set(self.profile_var.get())
             picture_list.delete(0, tk.END)
             for image in images:
-                picture_list.insert(tk.END, str(image))
+                picture_list.insert(tk.END, display_label(image))
             count_var.set(
                 f"{len(images)} unique source picture{'s' if len(images) != 1 else ''} "
                 "were used in the current wallpaper."
@@ -2391,6 +2588,38 @@ class SettingsApp(tk.Tk):
 
         open_button.configure(command=open_selected)
         open_folder_button.configure(command=lambda: open_selected(containing_folder=True))
+
+        def exclude_selected() -> None:
+            nonlocal excluded_now
+            if opening[0]:
+                return
+            if refresh_sources():
+                return
+            selected = picture_list.curselection()
+            if not selected:
+                messagebox.showinfo("Select a picture", "Select one or more source pictures to exclude.", parent=window)
+                return
+            name = self.profile_var.get()
+            paths = [str(images[index]) for index in selected]
+            try:
+                added = exclude_current_images(name, paths)
+            except Exception as exc:
+                messagebox.showerror("Could not exclude pictures", str(exc), parent=window)
+                return
+            self._sync_profile_exclusions(name)
+            self._refresh_excluded_tab()
+            if added:
+                kept = set(selected)
+                excluded_now = excluded_path_set(name)
+                picture_list.delete(0, tk.END)
+                for image in images:
+                    picture_list.insert(tk.END, display_label(image))
+                picture_list.selection_set(sorted(kept))
+                status_var.set(_excluded_count_status(len(added), action="excluded"))
+            else:
+                status_var.set("The selected pictures are already on the never-show-again list.")
+
+        never_button.configure(command=exclude_selected)
         ttk.Button(buttons, text="Refresh", command=refresh_sources).pack(side=tk.LEFT, padx=(6, 0))
 
         def close_window() -> None:
@@ -2407,6 +2636,7 @@ class SettingsApp(tk.Tk):
         self.current_pictures_list = picture_list
         self.open_picture_button = open_button
         self.open_picture_folder_button = open_folder_button
+        self.never_show_again_button = never_button
         self.current_picture_status_var = status_var
         self._refresh_current_pictures = refresh_sources
 

@@ -807,3 +807,35 @@ def test_oriented_draw_reuses_pictures_when_pool_is_smaller_than_slot_count(tmp_
         snapshot.signature, "bucket", 2, sequential=True, orientations=("landscape", "landscape")
     )
     assert chosen == [str(only.absolute()), str(only.absolute())]
+
+
+def test_selection_excluded_paths_are_never_drawn_and_cycle_wraps(tmp_path):
+    root = tmp_path / "photos"
+    paths = _touch_images(root, ("a.jpg", "b.jpg", "c.jpg"))
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+    rng = random.Random(7)
+
+    with index.selection() as selection:
+        selection.exclude([paths[0]])
+        first = selection.draw(snapshot.signature, "bucket", 2, rng=rng)
+        second = selection.draw(snapshot.signature, "bucket", 3, rng=rng)
+
+    drawn = first + second
+    assert paths[0] not in drawn
+    assert set(drawn) == {paths[1], paths[2]}
+    # The second draw needed three slots with only two available pictures:
+    # the pool wrapped around instead of resurrecting the excluded picture.
+    assert len(second) == 3
+    assert len(set(second)) == 2
+
+
+def test_available_count_subtracts_excluded_paths(tmp_path):
+    root = tmp_path / "photos"
+    paths = _touch_images(root, ("a.jpg", "b.jpg", "c.jpg"))
+    index = LibraryIndex(tmp_path / "working")
+    snapshot = index.refresh([str(root)], recursive=True)
+
+    assert index.available_count(snapshot.signature) == 3
+    assert index.available_count(snapshot.signature, [paths[0]]) == 2
+    assert index.available_count(snapshot.signature, [paths[0], paths[1], paths[2]]) == 0

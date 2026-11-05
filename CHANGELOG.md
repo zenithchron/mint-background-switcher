@@ -4,6 +4,23 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.18] - 2026-11-05
+
+### Added
+
+- Per-profile **Never Show Again (exclusion list)** on a new **Settings → Never Show Again** page, inspired by John's Background Switcher's "do not show again" control (JBS CTL-06):
+  - **Never Show Again (current wallpaper)** excludes every source picture of the currently applied wallpaper in one click — multi-picture layouts exclude all of their sources at once — using the sources recorded at the last rotation.
+  - The page lists the excluded pictures with a live count; entries are removed individually (**Remove Selected**, multi-select) or all at once (**Clear All...**, with confirmation).
+  - The **Current Pictures** dialog gains a **Never Show Again** button for selected entries (multi-select) and marks already-excluded sources with an `[excluded]` suffix.
+- Exclusions persist per profile in the config file (bounded to 1000 entries of at most 4096 characters each, de-duplicated) and survive saving or renaming a profile.
+- Excluded pictures are skipped on every rotation path (dry-run preview, cached library draws, and per-slot orientation matching); the remaining pool rotates as usual and wraps around without ever resurrecting an excluded picture. If every picture of a profile is excluded, the existing safe black fallback applies instead of an empty wallpaper.
+- Added unit coverage for config coercion/round-trip and bounds, add/remove/clear persistence, library draw exclusion with cycle wrap, service-level never-rotates / all-excluded black fallback / recorded-source exclusion, and 944×668 Xvfb Settings visibility, exclude, remove, clear, and save-preservation tests for the new page and dialog.
+
+### Changed
+
+- The Settings window now has eight task-based pages (Never Show Again sits between Conditions and Public Collections); the fixed 944×668 minimum geometry is unchanged and every page still fits it under the default and `clam` themes.
+- Bumped the package version to `0.2.18`.
+
 ## [0.2.17] - 2026-11-03
 
 ### Added

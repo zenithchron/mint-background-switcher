@@ -571,6 +571,7 @@ class LibraryIndex:
         rng: random.Random | None = None,
         sequential: bool = False,
         orientations: Sequence[str | None] | None = None,
+        excluded: frozenset[str] = frozenset(),
     ) -> list[str]:
         if count <= 0:
             return []
@@ -582,6 +583,7 @@ class LibraryIndex:
                 tuple(orientations),
                 rng=rng,
                 sequential=sequential,
+                excluded=excluded,
             )
         random_source = rng or random.SystemRandom()
         selected: list[str] = []
@@ -590,38 +592,36 @@ class LibraryIndex:
         if scan_id is None:
             return []
         while len(selected) < count:
-            fetch_limit = max(1, count - len(selected) + len(selected_in_batch))
-            rows = connection.execute(
-                "SELECT remaining.image_id, images.path FROM remaining "
-                "JOIN images ON images.id = remaining.image_id "
-                "WHERE remaining.scan_id = ? AND remaining.bucket = ? "
-                "ORDER BY remaining.rank, remaining.image_id LIMIT ?",
-                (scan_id, bucket, fetch_limit),
-            ).fetchall()
+            # Excluded entries still occupy queue slots, so a never-show-again
+            # list in effect fetches the whole remaining queue, not a window.
+            fetch_limit = None if excluded else max(1, count - len(selected) + len(selected_in_batch))
+            rows = self._queue_window_rows(connection, scan_id, bucket, fetch_limit)
             candidates = [
                 (int(row["image_id"]), str(row["path"]))
                 for row in rows
-                if str(row["path"]) not in selected_in_batch
+                if str(row["path"]) not in selected_in_batch and str(row["path"]) not in excluded
             ]
             if not candidates:
                 image_count = self._refill(connection, scan_id, bucket, random_source, sequential=sequential)
                 if image_count == 0:
                     break
-                rows = connection.execute(
-                    "SELECT remaining.image_id, images.path FROM remaining "
-                    "JOIN images ON images.id = remaining.image_id "
-                    "WHERE remaining.scan_id = ? AND remaining.bucket = ? "
-                    "ORDER BY remaining.rank, remaining.image_id LIMIT ?",
-                    (scan_id, bucket, fetch_limit),
-                ).fetchall()
+                rows = self._queue_window_rows(connection, scan_id, bucket, fetch_limit)
                 candidates = [
                     (int(row["image_id"]), str(row["path"]))
                     for row in rows
-                    if str(row["path"]) not in selected_in_batch
+                    if str(row["path"]) not in selected_in_batch and str(row["path"]) not in excluded
                 ]
                 if not candidates:
+                    # Cycle wrap: reuse this draw's own picks, but never
+                    # resurrect an excluded picture.
                     selected_in_batch.clear()
-                    candidates = [(int(row["image_id"]), str(row["path"])) for row in rows]
+                    candidates = [
+                        (int(row["image_id"]), str(row["path"]))
+                        for row in rows
+                        if str(row["path"]) not in excluded
+                    ]
+                    if not candidates:
+                        break
             needed = count - len(selected)
             chosen = candidates[:needed]
             if not chosen:
@@ -644,6 +644,7 @@ class LibraryIndex:
         *,
         rng: random.Random | None,
         sequential: bool,
+        excluded: frozenset[str] = frozenset(),
     ) -> list[str]:
         """Draw one candidate per slot, preferring each slot's monitor orientation.
 
@@ -666,6 +667,7 @@ class LibraryIndex:
                 required,
                 random_source,
                 sequential,
+                excluded=excluded,
             )
             if path is None:
                 break
@@ -682,6 +684,26 @@ class LibraryIndex:
             "WHERE remaining.scan_id = ? AND remaining.bucket = ? "
             "ORDER BY remaining.rank, remaining.image_id",
             (scan_id, bucket),
+        ).fetchall()
+
+    @staticmethod
+    def _queue_window_rows(
+        connection: sqlite3.Connection,
+        scan_id: int,
+        bucket: str,
+        fetch_limit: int | None,
+    ) -> list[sqlite3.Row]:
+        """Queued (image_id, path) pairs, optionally bounded to a window."""
+        query = (
+            "SELECT remaining.image_id, images.path FROM remaining "
+            "JOIN images ON images.id = remaining.image_id "
+            "WHERE remaining.scan_id = ? AND remaining.bucket = ? "
+            "ORDER BY remaining.rank, remaining.image_id"
+        )
+        if fetch_limit is None:
+            return connection.execute(query, (scan_id, bucket)).fetchall()
+        return connection.execute(
+            query + " LIMIT ?", (scan_id, bucket, fetch_limit)
         ).fetchall()
 
     def _resolve_orientation(self, connection: sqlite3.Connection, row: sqlite3.Row) -> str:
@@ -706,9 +728,12 @@ class LibraryIndex:
         required: str | None,
         random_source: random.Random,
         sequential: bool,
+        excluded: frozenset[str] = frozenset(),
     ) -> str | None:
         for _attempt in range(2):
             rows = self._queue_rows(connection, scan_id, bucket)
+            if excluded:
+                rows = [row for row in rows if str(row["path"]) not in excluded]
             if not rows:
                 if self._refill(connection, scan_id, bucket, random_source, sequential=sequential) == 0:
                     return None
@@ -755,6 +780,20 @@ class LibraryIndex:
                 ).fetchone()[0]
             )
 
+    def available_count(self, signature: str, excluded: Iterable[str] = ()) -> int:
+        """Scanned image count, optionally ignoring never-show-again paths."""
+        if not excluded:
+            with self._open() as connection:
+                scan_id = self._scan_id(connection, signature)
+                if scan_id is None:
+                    return 0
+                row = connection.execute(
+                    "SELECT COUNT(*) FROM images WHERE scan_id = ?", (scan_id,)
+                ).fetchone()
+                return int(row[0])
+        blocked = {str(path) for path in excluded if str(path).strip()}
+        return sum(1 for path in self.paths(signature) if path not in blocked)
+
     def _discard_in_transaction(self, connection: sqlite3.Connection, signature: str, path: str) -> None:
         scan_id = self._scan_id(connection, signature)
         if scan_id is None:
@@ -779,6 +818,15 @@ class LibrarySelection:
     def __init__(self, index: LibraryIndex):
         self._index = index
         self._connection: sqlite3.Connection | None = None
+        self._excluded: frozenset[str] = frozenset()
+
+    def exclude(self, paths: Iterable[str] = ()) -> None:
+        """Remember library paths that must never be drawn (never-show-again).
+
+        Replaces any previous exclusion set for this selection; call once
+        per switch with the profile's full exclusion set.
+        """
+        self._excluded = frozenset(str(path) for path in paths if str(path).strip())
 
     def __enter__(self) -> LibrarySelection:
         return self
@@ -812,6 +860,7 @@ class LibrarySelection:
             rng=rng,
             sequential=sequential,
             orientations=orientations,
+            excluded=self._excluded,
         )
 
     def discard(self, signature: str, path: str) -> None:

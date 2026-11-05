@@ -2,6 +2,8 @@ import json
 from datetime import datetime
 
 from mint_background_switcher.config import (
+    MAX_EXCLUDED_IMAGES,
+    MAX_EXCLUDED_PATH_LENGTH,
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
     MAX_IMAGE_TYPES,
@@ -665,3 +667,32 @@ def test_run_conditions_roundtrip_and_coercion():
     assert Profile.from_dict("P", {"idle_seconds": 999_999}).idle_seconds == 86_400
     assert Profile.from_dict("P", {"idle_seconds": True}).idle_seconds == 300
     assert Profile.from_dict("P", {"idle_seconds": "garbage"}).idle_seconds == 300
+
+
+def test_profile_excluded_images_round_trip_coerces_dedupes_and_bounds():
+    profile = Profile.from_dict(
+        "P",
+        {
+            "excluded_images": [
+                " /a/b.png ",
+                "/a/b.png",
+                "/c/d.png",
+                None,
+                "",
+                "x" * (MAX_EXCLUDED_PATH_LENGTH + 1),
+            ]
+        },
+    )
+    assert profile.excluded_images == ["/a/b.png", "/c/d.png"]
+    assert Profile.from_dict("P", {}).excluded_images == []
+    assert Profile.from_dict("P", {"excluded_images": "not-a-list"}).excluded_images == []
+
+    data = Profile(name="P", excluded_images=["/a/b.png", "/c/d.png"]).to_dict()
+    assert data["excluded_images"] == ["/a/b.png", "/c/d.png"]
+    assert Profile.from_dict("P", data).excluded_images == ["/a/b.png", "/c/d.png"]
+
+    capped = Profile.from_dict(
+        "P",
+        {"excluded_images": [f"/img/{idx}.png" for idx in range(MAX_EXCLUDED_IMAGES + 10)]},
+    )
+    assert len(capped.excluded_images) == MAX_EXCLUDED_IMAGES

@@ -233,11 +233,12 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             "Layout & Appearance",
             "Rotation & Shortcuts",
             "Conditions",
+            "Never Show Again",
             "Public Collections",
             "Storage",
             "Updates & About",
         ]
-        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 0, 1, 0]
+        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 0, 0, 1, 0]
         app.notebook.select(app.sources_tab)
         app.notebook.focus_force()
         app.update()
@@ -261,6 +262,8 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.suppress_remote_checkbutton, app.conditions_tab)
         assert is_descendant(app.idle_only_checkbutton, app.conditions_tab)
         assert is_descendant(app.suppress_locked_checkbutton, app.conditions_tab)
+        assert is_descendant(app.excluded_current_button, app.excluded_tab)
+        assert is_descendant(app.excluded_list, app.excluded_tab)
         assert is_descendant(app.collections_download_button, app.collections_tab)
         assert is_descendant(app.working_directory_entry, app.storage_tab)
         assert is_descendant(app.update_button, app.about_tab)
@@ -302,6 +305,14 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.idle_only_checkbutton,
                 app.idle_seconds_entry,
                 app.suppress_locked_checkbutton,
+            ),
+            str(app.excluded_tab): (
+                app.excluded_scope_label,
+                app.excluded_current_text,
+                app.excluded_current_button,
+                app.excluded_list,
+                app.excluded_remove_button,
+                app.excluded_clear_button,
             ),
             str(app.collections_tab): (
                 app.collections_scope_label,
@@ -392,6 +403,19 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 *context_controls,
                 *footer_controls,
                 *page_controls[str(app.conditions_tab)],
+            ):
+                assert_visible_inside_window(control)
+            assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
+            assert app.winfo_reqheight() <= settings_ui.SETTINGS_WINDOW_TARGET_HEIGHT
+
+            app.notebook.select(app.excluded_tab)
+            app.update_idletasks()
+            app.update()
+            for control in (
+                app.profile_context_frame,
+                *context_controls,
+                *footer_controls,
+                *page_controls[str(app.excluded_tab)],
             ):
                 assert_visible_inside_window(control)
             assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
@@ -1891,6 +1915,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
             "Layout & Appearance",
             "Rotation & Shortcuts",
             "Conditions",
+            "Never Show Again",
             "Public Collections",
             "Storage",
             "Updates & About",
@@ -3921,3 +3946,129 @@ def test_successful_rollback_reports_rollback_before_restart(monkeypatch, tmp_pa
     assert prompts[0][0] == "Rollback activated"
     assert "rolled back" in prompts[0][1].lower()
     assert "0.1.11" in prompts[0][1]
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_never_show_again_tab_excludes_removes_and_clears_current_wallpaper(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    picture = tmp_path / "wallpaper.png"
+    picture.write_bytes(b"picture")
+    monkeypatch.setattr(settings_ui, "current_source_images", lambda: [picture])
+    confirmed = []
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askyesno",
+        lambda title, message, **kwargs: (confirmed.append(title), True)[1],
+    )
+    expected = os.path.abspath(str(picture))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.excluded_tab)
+        app.update_idletasks()
+        app.update()
+
+        assert app.excluded_scope_label.winfo_ismapped()
+        assert app.excluded_current_text.get("1.0", "end-1c") == str(picture)
+        assert app.excluded_status_var.get() == "0 pictures will never show again for this profile."
+
+        app.excluded_current_button.invoke()
+        app.update()
+        assert app.excluded_list.get(0, settings_ui.tk.END) == (expected,)
+        assert settings_ui.get_excluded_images("Default") == [expected]
+        assert app.config_data.profiles["Default"].excluded_images == [expected]
+        assert app.excluded_status_var.get() == "Excluded 1 picture from the current wallpaper."
+
+        app.excluded_current_button.invoke()
+        app.update()
+        assert app.excluded_status_var.get() == "The current wallpaper's pictures are already excluded."
+
+        app.excluded_list.selection_set(0)
+        app.excluded_remove_button.invoke()
+        app.update()
+        assert settings_ui.get_excluded_images("Default") == []
+        assert app.excluded_status_var.get() == "Removed 1 picture from the never-show-again list."
+
+        app.excluded_current_button.invoke()
+        app.excluded_list.selection_set(0, settings_ui.tk.END)
+        app.excluded_clear_button.invoke()
+        app.update()
+        assert confirmed == ["Clear never-show-again list"]
+        assert settings_ui.get_excluded_images("Default") == []
+        assert app.excluded_status_var.get() == "Cleared 1 picture from the never-show-again list."
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_saving_or_renaming_profile_preserves_never_show_again_list(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    picture = tmp_path / "wallpaper.png"
+    picture.write_bytes(b"picture")
+    monkeypatch.setattr(settings_ui, "current_source_images", lambda: [picture])
+    saved = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **kwargs: saved.append((title, message)))
+    expected = os.path.abspath(str(picture))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.excluded_current_button.invoke()
+        app.update()
+        assert settings_ui.get_excluded_images("Default") == [expected]
+
+        assert app._save_current(show_success=False) is True
+        assert settings_ui.get_excluded_images("Default") == [expected]
+
+        # Rename path: the rebuilt profile carries the list from the loaded profile.
+        renamed = app._profile_from_fields("Renamed")
+        assert renamed.excluded_images == [expected]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_current_pictures_dialog_never_show_again_marks_and_excludes_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    sources = [first, second]
+    monkeypatch.setattr(settings_ui, "current_source_images", lambda: list(sources))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.current_pictures_button.invoke()
+        app.update_idletasks()
+        app.update()
+
+        assert app.never_show_again_button.winfo_ismapped()
+        assert app.current_pictures_list.get(0, settings_ui.tk.END) == (str(first), str(second))
+
+        app.current_pictures_list.selection_clear(0, settings_ui.tk.END)
+        app.current_pictures_list.selection_set(1)
+        app.never_show_again_button.invoke()
+        app.update()
+        assert app.current_picture_status_var.get() == "Excluded 1 picture from the current wallpaper."
+        assert settings_ui.get_excluded_images("Default") == [os.path.abspath(str(second))]
+        assert app.current_pictures_list.get(0, settings_ui.tk.END) == (
+            str(first),
+            f"{second} [excluded]",
+        )
+
+        app.never_show_again_button.invoke()
+        app.update()
+        assert app.current_picture_status_var.get() == (
+            "The selected pictures are already on the never-show-again list."
+        )
+    finally:
+        app.destroy()
