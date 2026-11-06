@@ -1230,6 +1230,18 @@ def pause() -> RuntimeState:
         return RuntimeState.from_dict(state.to_dict())
 
 
+def toggle_pause() -> RuntimeState:
+    """Flip the paused flag without applying a wallpaper.
+
+    Unlike :func:`resume`, toggling back to running does not immediately
+    switch pictures: the background loop applies the next rotation on its
+    normal cadence. This keeps the Pause/Resume hotkey predictable.
+    """
+    with state_transaction() as state:
+        state.paused = not state.paused
+        return RuntimeState.from_dict(state.to_dict())
+
+
 def _create_staged_output(output: Path) -> tuple[int, Path]:
     """Create a same-directory staging file while honoring the caller's umask."""
     for _ in range(100):

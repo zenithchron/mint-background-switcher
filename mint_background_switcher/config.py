@@ -86,6 +86,13 @@ DEFAULT_NIGHT_END = "06:00"
 MAX_SUPPRESS_PROCESS_LENGTH = 15
 DEFAULT_IDLE_SECONDS = 300
 MAX_IDLE_SECONDS = 86_400
+# Cinnamon keybinding strings are short ("<Primary><Alt>n"). Cap the length so
+# a malformed saved value can never balloon the config, and drop control
+# characters that would make the gsettings command ambiguous.
+MAX_HOTKEY_LENGTH = 64
+DEFAULT_BLACK_HOTKEY = "<Primary><Alt>b"
+DEFAULT_NEXT_HOTKEY = "<Primary><Alt>n"
+DEFAULT_PAUSE_HOTKEY = "<Primary><Alt>p"
 # "Never show again" exclusion list bounds: keep saved configs small and
 # selection filtering cheap; over-long paths are dropped rather than
 # truncated so a config can never hold a silently altered entry.
@@ -262,6 +269,21 @@ def _coerce_suppress_process(value: Any) -> str:
     return text
 
 
+def _coerce_hotkey(value: Any, default: str) -> str:
+    """Normalize a saved Cinnamon keybinding, falling back when unusable.
+
+    Empty, over-long, or control-bearing values are replaced by the default
+    so a malformed config can never produce an unbindable or ambiguous
+    gsettings command.
+    """
+    if not isinstance(value, str):
+        return default
+    text = value.strip()
+    if not text or len(text) > MAX_HOTKEY_LENGTH or any(ord(ch) < 32 for ch in text):
+        return default
+    return text
+
+
 def _coerce_idle_seconds(value: Any, default: int = DEFAULT_IDLE_SECONDS) -> int:
     if isinstance(value, bool):
         return default
@@ -299,7 +321,7 @@ class Profile:
     recursive: bool = True
     shared_folders: list[str] = field(default_factory=list)
     monitor_folders: dict[str, list[str]] = field(default_factory=dict)
-    black_hotkey: str = "<Primary><Alt>b"
+    black_hotkey: str = DEFAULT_BLACK_HOTKEY
     desktop: str = "auto"
     effect: str = "none"
     bar_color: str = "black"
@@ -333,6 +355,10 @@ class Profile:
     idle_seconds: int = DEFAULT_IDLE_SECONDS
     suppress_when_locked: bool = False
     excluded_images: list[str] = field(default_factory=list)
+    # Appended last so the legacy positional-argument order stays stable
+    # (see tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
+    next_hotkey: str = DEFAULT_NEXT_HOTKEY
+    pause_hotkey: str = DEFAULT_PAUSE_HOTKEY
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -378,7 +404,9 @@ class Profile:
             excluded_images=_coerce_excluded_images(data.get("excluded_images", [])),
             shared_folders=_coerce_str_list(data.get("shared_folders", [])),
             monitor_folders=_coerce_monitor_folders(data.get("monitor_folders", {})),
-            black_hotkey=str(data.get("black_hotkey", "<Primary><Alt>b")),
+            black_hotkey=_coerce_hotkey(data.get("black_hotkey"), DEFAULT_BLACK_HOTKEY),
+            next_hotkey=_coerce_hotkey(data.get("next_hotkey"), DEFAULT_NEXT_HOTKEY),
+            pause_hotkey=_coerce_hotkey(data.get("pause_hotkey"), DEFAULT_PAUSE_HOTKEY),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -422,6 +450,8 @@ class Profile:
             "shared_folders": self.shared_folders,
             "monitor_folders": self.monitor_folders,
             "black_hotkey": self.black_hotkey,
+            "next_hotkey": self.next_hotkey,
+            "pause_hotkey": self.pause_hotkey,
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,

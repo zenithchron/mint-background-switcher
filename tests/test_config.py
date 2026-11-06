@@ -7,6 +7,7 @@ from mint_background_switcher.config import (
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
     MAX_IMAGE_TYPES,
+    MAX_HOTKEY_LENGTH,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
@@ -696,3 +697,37 @@ def test_profile_excluded_images_round_trip_coerces_dedupes_and_bounds():
         {"excluded_images": [f"/img/{idx}.png" for idx in range(MAX_EXCLUDED_IMAGES + 10)]},
     )
     assert len(capped.excluded_images) == MAX_EXCLUDED_IMAGES
+
+
+def test_hotkey_bindings_round_trip_and_default_for_legacy_configs():
+    # Configs written before 0.2.19 have no next/pause bindings at all.
+    legacy = Profile.from_dict("P", {"black_hotkey": "<Ctrl>b"})
+    assert legacy.black_hotkey == "<Ctrl>b"
+    assert legacy.next_hotkey == "<Primary><Alt>n"
+    assert legacy.pause_hotkey == "<Primary><Alt>p"
+
+    profile = Profile(
+        name="P",
+        black_hotkey="<Ctrl>b",
+        next_hotkey="<Super>x",
+        pause_hotkey="<Alt>p",
+    )
+    data = profile.to_dict()
+    assert data["next_hotkey"] == "<Super>x"
+    assert data["pause_hotkey"] == "<Alt>p"
+    reloaded = Profile.from_dict("P", data)
+    assert (reloaded.black_hotkey, reloaded.next_hotkey, reloaded.pause_hotkey) == (
+        "<Ctrl>b",
+        "<Super>x",
+        "<Alt>p",
+    )
+
+
+def test_hotkey_bindings_reject_unusable_saved_values():
+    assert Profile.from_dict("P", {"next_hotkey": "   "}).next_hotkey == "<Primary><Alt>n"
+    assert Profile.from_dict("P", {"pause_hotkey": "bad\nbinding"}).pause_hotkey == "<Primary><Alt>p"
+    assert (
+        Profile.from_dict("P", {"black_hotkey": "<Ctrl>" * (MAX_HOTKEY_LENGTH // 4 + 1)}).black_hotkey
+        == "<Primary><Alt>b"
+    )
+    assert Profile.from_dict("P", {"next_hotkey": 42}).next_hotkey == "<Primary><Alt>n"

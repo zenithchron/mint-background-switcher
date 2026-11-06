@@ -256,6 +256,9 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.interval_entry, app.rotation_tab)
         assert is_descendant(app.sequential_checkbutton, app.rotation_tab)
         assert is_descendant(app.hotkey_entry, app.rotation_tab)
+        assert is_descendant(app.next_hotkey_entry, app.rotation_tab)
+        assert is_descendant(app.pause_hotkey_entry, app.rotation_tab)
+        assert is_descendant(app.register_hotkeys_button, app.rotation_tab)
         assert is_descendant(app.desktop_menu, app.rotation_tab)
         assert is_descendant(app.suppress_process_checkbutton, app.conditions_tab)
         assert is_descendant(app.suppress_battery_checkbutton, app.conditions_tab)
@@ -293,6 +296,9 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.night_start_entry,
                 app.night_end_entry,
                 app.hotkey_entry,
+                app.next_hotkey_entry,
+                app.pause_hotkey_entry,
+                app.register_hotkeys_button,
                 app.desktop_menu,
                 app.mirror_lockscreen_checkbutton,
             ),
@@ -3251,6 +3257,8 @@ def test_rename_profile_preserves_current_form_settings_and_saves(monkeypatch):
     setattr(dummy, "mode_var", _Var("per-monitor"))
     setattr(dummy, "recursive_var", _Var(False))
     setattr(dummy, "hotkey_var", _Var("<Primary><Alt>x"))
+    setattr(dummy, "next_hotkey_var", _Var("<Primary><Alt>n"))
+    setattr(dummy, "pause_hotkey_var", _Var("<Primary><Alt>p"))
     setattr(dummy, "desktop_var", _Var("mate"))
     setattr(dummy, "effect_var", _Var("grayscale"))
     setattr(dummy, "bar_color_var", _Var("auto"))
@@ -3273,6 +3281,8 @@ def test_rename_profile_preserves_current_form_settings_and_saves(monkeypatch):
     assert renamed.shared_folders == ["/new-shared"]
     assert renamed.monitor_folders == {"HDMI-1": ["/new-monitor"]}
     assert renamed.black_hotkey == "<Primary><Alt>x"
+    assert renamed.next_hotkey == "<Primary><Alt>n"
+    assert renamed.pause_hotkey == "<Primary><Alt>p"
     assert renamed.desktop == "mate"
     assert renamed.effect == "grayscale"
     assert renamed.bar_color == "auto"
@@ -4072,3 +4082,163 @@ def test_current_pictures_dialog_never_show_again_marks_and_excludes_selection(m
         )
     finally:
         app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_hotkey_entries_are_visible_and_persist(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        for control in (
+            app.next_hotkey_entry,
+            app.pause_hotkey_entry,
+            app.hotkey_entry,
+            app.register_hotkeys_button,
+        ):
+            assert control.winfo_ismapped()
+            assert control.winfo_width() >= control.winfo_reqwidth()
+            assert control.winfo_height() >= control.winfo_reqheight()
+
+        assert app.next_hotkey_var.get() == "<Primary><Alt>n"
+        assert app.pause_hotkey_var.get() == "<Primary><Alt>p"
+        assert app.hotkey_var.get() == "<Primary><Alt>b"
+
+        app.next_hotkey_var.set("<Ctrl>n")
+        app.pause_hotkey_var.set("<Alt>p")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.next_hotkey == "<Ctrl>n"
+        assert saved.pause_hotkey == "<Alt>p"
+        assert saved.black_hotkey == "<Primary><Alt>b"
+
+        app.next_hotkey_var.set("<Ctrl>x")
+        app.pause_hotkey_var.set("<Ctrl>y")
+        app._load_profile("Default")
+        assert app.next_hotkey_var.get() == "<Ctrl>n"
+        assert app.pause_hotkey_var.get() == "<Alt>p"
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_register_hotkeys_button_reports_saved_bindings(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    infos, errors = [], []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+    calls = []
+    monkeypatch.setattr(
+        settings_ui,
+        "register_all_cinnamon_hotkeys",
+        lambda: calls.append(1) or {"next": [], "pause-resume": [], "black-screen": []},
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update()
+        app.next_hotkey_var.set("<Ctrl>n")
+        app.register_hotkeys_button.invoke()
+        _pump_until(app, lambda: bool(infos) or bool(errors))
+        assert calls == [1]
+        assert errors == []
+        assert infos and infos[0][0] == "Hotkeys registered"
+        message = infos[0][1]
+        assert "Next: <Ctrl>n" in message
+        assert "Pause/Resume: <Primary><Alt>p" in message
+        assert "Black screen: <Primary><Alt>b" in message
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.next_hotkey == "<Ctrl>n"
+        assert app.register_hotkeys_button.cget("state") != "disabled"
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_register_hotkeys_reports_registration_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    infos, errors = [], []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+
+    def boom():
+        raise RuntimeError("gsettings is required to register a Cinnamon hotkey")
+
+    monkeypatch.setattr(settings_ui, "register_all_cinnamon_hotkeys", boom)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update()
+        app.register_hotkeys_button.invoke()
+        _pump_until(app, lambda: bool(infos) or bool(errors))
+        assert infos == []
+        assert errors and errors[0][0] == "Register hotkeys failed"
+        assert "gsettings is required" in errors[0][1]
+    finally:
+        app.destroy()
+
+
+def test_save_current_persists_hotkey_bindings(monkeypatch):
+    saved = []
+    monkeypatch.setattr(settings_ui, "save_config", lambda cfg: saved.append(cfg))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "profile_var", _Var("P"))
+    setattr(dummy, "profile_combo", _Combo())
+    setattr(dummy, "interval_var", _Var("10"))
+    setattr(dummy, "mode_var", _Var("shared"))
+    setattr(dummy, "recursive_var", _Var(True))
+    setattr(dummy, "min_image_size_var", _Var("0"))
+    setattr(dummy, "ignore_hidden_var", _Var(True))
+    setattr(dummy, "ignore_patterns_var", _Var(""))
+    setattr(dummy, "image_types_var", _Var("png,jpg"))
+    setattr(dummy, "sequential_var", _Var(False))
+    setattr(dummy, "match_orientation_var", _Var(False))
+    setattr(dummy, "rotate_on_startup_var", _Var(False))
+    setattr(dummy, "night_black_screen_var", _Var(False))
+    setattr(dummy, "night_start_var", _Var("22:00"))
+    setattr(dummy, "night_end_var", _Var("06:00"))
+    setattr(dummy, "mirror_lockscreen_var", _Var(False))
+    setattr(dummy, "suppress_process_var", _Var(False))
+    setattr(dummy, "suppress_process_name_var", _Var(""))
+    setattr(dummy, "suppress_battery_var", _Var(False))
+    setattr(dummy, "suppress_remote_var", _Var(False))
+    setattr(dummy, "idle_only_var", _Var(False))
+    setattr(dummy, "idle_seconds_var", _Var("300"))
+    setattr(dummy, "hotkey_var", _Var("<Ctrl>b"))
+    setattr(dummy, "next_hotkey_var", _Var("<Super>n"))
+    setattr(dummy, "pause_hotkey_var", _Var("<Super>p"))
+    setattr(dummy, "desktop_var", _Var("auto"))
+    setattr(dummy, "effect_var", _Var("none"))
+    setattr(dummy, "bar_color_var", _Var("black"))
+    setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
+    setattr(dummy, "shared_text", _Text("/shared"))
+    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
+
+    assert settings_ui.SettingsApp._save_current(dummy) is True
+    profile = saved[0].profiles["P"]
+    assert profile.black_hotkey == "<Ctrl>b"
+    assert profile.next_hotkey == "<Super>n"
+    assert profile.pause_hotkey == "<Super>p"

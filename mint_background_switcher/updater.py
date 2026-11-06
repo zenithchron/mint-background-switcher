@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - Linux Mint provides fcntl.
 
 from . import APP_ID
 from .autostart import AUTOSTART_MARKERS, disable_autostart, enable_autostart
-from .hotkeys import CUSTOM_PATH, _existing_custom_list, register_cinnamon_black_hotkey, shell_command
+from .hotkeys import HOTKEY_ACTIONS, registered_hotkey_actions, register_cinnamon_hotkey, shell_command
 from .paths import autostart_file
 from .storage import atomic_write_json_unlocked
 
@@ -544,7 +544,7 @@ def _restore_autostart_entries(snapshots: list[_FileSnapshot]) -> None:
 
 def black_hotkey_registered() -> bool:
     try:
-        return CUSTOM_PATH in _existing_custom_list()
+        return "black-screen" in registered_hotkey_actions()
     except Exception:
         return False
 
@@ -708,7 +708,7 @@ def _activate_record(
     record: InstallRecord,
     *,
     autostart_preference: AutostartPreference,
-    hotkey_was_registered: bool,
+    hotkey_actions: tuple[str, ...] = (),
 ) -> tuple[Path, tuple[str, ...]]:
     current = _current_link()
     launcher = managed_launcher()
@@ -746,11 +746,15 @@ def _activate_record(
                     os.replace(backup_launcher, launcher)
             _restore_symlink(current, previous_current)
         raise
-    if hotkey_was_registered:
+    for action_key in hotkey_actions:
         try:
-            register_cinnamon_black_hotkey(command=shell_command([str(launcher), "black-screen"]))
+            spec = HOTKEY_ACTIONS[action_key]
+        except KeyError:
+            continue
+        try:
+            register_cinnamon_hotkey(action_key, command=shell_command([str(launcher), spec.cli_command]))
         except Exception as exc:
-            warnings.append(f"Updated the application, but could not rebind the black-screen hotkey: {exc}")
+            warnings.append(f"Updated the application, but could not rebind the {spec.display_name} hotkey: {exc}")
     return launcher, tuple(warnings)
 
 
@@ -926,7 +930,7 @@ def install_release(release: ReleaseInfo, *, client: ReleaseClient | None = None
                 "refusing a rewritten release tag."
             )
         preference = read_autostart_preference()
-        hotkey_was_registered = black_hotkey_registered()
+        hotkey_actions = tuple(registered_hotkey_actions())
         existing = _record_for_release(release)
         if existing is not None:
             if client.resolve_tag_commit(release.tag) != release.commit_sha:
@@ -934,7 +938,7 @@ def install_release(release: ReleaseInfo, *, client: ReleaseClient | None = None
             launcher, warnings = _activate_record(
                 existing,
                 autostart_preference=preference,
-                hotkey_was_registered=hotkey_was_registered,
+                hotkey_actions=hotkey_actions,
             )
             return _install_result_with_background_restart(existing, previous, launcher, warnings)
 
@@ -973,7 +977,7 @@ def install_release(release: ReleaseInfo, *, client: ReleaseClient | None = None
         launcher, warnings = _activate_record(
             record,
             autostart_preference=preference,
-            hotkey_was_registered=hotkey_was_registered,
+            hotkey_actions=hotkey_actions,
         )
         return _install_result_with_background_restart(record, previous, launcher, warnings)
 
@@ -985,7 +989,7 @@ def rollback_install() -> InstallResult:
         if current is None or candidate is None:
             raise UpdateError("No previous managed version is available to roll back to.")
         preference = read_autostart_preference()
-        hotkey_was_registered = black_hotkey_registered()
+        hotkey_actions = tuple(registered_hotkey_actions())
         if _probe_installed_version(candidate.path / "venv" / "bin" / APP_ID) != candidate.version:
             raise UpdateError("The previous managed version failed validation; rollback was not activated.")
         if preference.enabled and preference.tray:
@@ -993,7 +997,7 @@ def rollback_install() -> InstallResult:
         launcher, warnings = _activate_record(
             candidate,
             autostart_preference=preference,
-            hotkey_was_registered=hotkey_was_registered,
+            hotkey_actions=hotkey_actions,
         )
         return InstallResult(candidate, current, launcher, warnings)
 

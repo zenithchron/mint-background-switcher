@@ -285,7 +285,7 @@ def test_install_release_atomically_manages_launcher_and_preserves_tray_autostar
     monkeypatch.setattr(updater, "_install_payload", _fake_payload_installer)
     monkeypatch.setattr(updater, "_probe_installed_version", lambda _path: "0.1.12")
     monkeypatch.setattr(updater, "_probe_tray_runtime", lambda _staging: None)
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
     background_restarts = []
     monkeypatch.setattr(
         updater,
@@ -344,7 +344,7 @@ def test_install_failure_leaves_active_install_launcher_and_autostart_unchanged(
     monkeypatch.setenv("MBS_INSTALL_ROOT", str(install_root))
     monkeypatch.setenv("MBS_USER_BIN_DIR", str(user_bin))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
     user_bin.mkdir(parents=True)
     launcher = user_bin / "mint-background-switcher"
     launcher.write_text("keep launcher\n", encoding="utf-8")
@@ -379,7 +379,7 @@ def test_missing_tray_runtime_aborts_before_activation(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_USER_BIN_DIR", str(user_bin))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
     monkeypatch.setattr(updater, "_install_payload", _fake_payload_installer)
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
     monkeypatch.setattr(
         updater,
         "_probe_tray_runtime",
@@ -414,7 +414,7 @@ def test_activation_failure_restores_previous_version_launcher_and_autostart(mon
     monkeypatch.setenv("MBS_USER_BIN_DIR", str(user_bin))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
     monkeypatch.setattr(updater, "_install_payload", _fake_payload_installer)
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
 
     first_archive = _make_release_archive(tmp_path / "first.tar.gz", "0.1.12")
     first_commit = "3" * 40
@@ -496,7 +496,7 @@ def test_existing_verified_install_rechecks_tag_before_reactivation(monkeypatch,
     monkeypatch.setenv("MBS_USER_BIN_DIR", str(tmp_path / "bin"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(updater, "_install_payload", _fake_payload_installer)
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
     archive = _make_release_archive(tmp_path / "release.tar.gz", "0.1.12")
     expected = "3" * 40
     moved = "4" * 40
@@ -516,7 +516,7 @@ def test_inactive_installed_version_rejects_rewritten_tag_without_network(monkey
     monkeypatch.setenv("MBS_USER_BIN_DIR", str(tmp_path / "bin"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(updater, "_install_payload", _fake_payload_installer)
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
 
     old_archive = _make_release_archive(tmp_path / "old.tar.gz", "0.1.11")
     old_commit = "1" * 40
@@ -576,7 +576,7 @@ def test_second_install_can_roll_back_to_previous_version(monkeypatch, tmp_path)
     monkeypatch.setenv("MBS_USER_BIN_DIR", str(tmp_path / "bin"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(updater, "_install_payload", _fake_payload_installer)
-    monkeypatch.setattr(updater, "black_hotkey_registered", lambda: False)
+    monkeypatch.setattr(updater, "registered_hotkey_actions", lambda: [])
 
     first_archive = _make_release_archive(tmp_path / "first.tar.gz", "0.1.12")
     first_commit = "1" * 40

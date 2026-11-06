@@ -14,9 +14,12 @@ from typing import Any, Callable
 from . import APP_NAME, __version__, public_collections, updater
 from .config import (
     BAR_COLOR_CHOICES,
+    DEFAULT_BLACK_HOTKEY,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
+    DEFAULT_NEXT_HOTKEY,
+    DEFAULT_PAUSE_HOTKEY,
     EFFECT_CHOICES,
     FIT_MODE_CHOICES,
     FIT_MODE_LABELS,
@@ -32,6 +35,7 @@ from .config import (
     parse_night_time,
     save_config,
 )
+from .hotkeys import register_all_cinnamon_hotkeys
 from .images import SUPPORTED_EXTENSIONS, SUPPORTED_TYPE_NAMES, is_usable_image
 from .monitor import Monitor, detect_monitors
 from .service import (
@@ -290,6 +294,8 @@ class SettingsApp(tk.Tk):
         self.idle_seconds_var = tk.StringVar(value=str(DEFAULT_IDLE_SECONDS))
         self.suppress_locked_var = tk.BooleanVar(value=False)
         self.hotkey_var = tk.StringVar()
+        self.next_hotkey_var = tk.StringVar()
+        self.pause_hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
@@ -774,13 +780,7 @@ class SettingsApp(tk.Tk):
             style="Heading.TLabel",
         )
         self.rotation_scope_label.pack(anchor="w", pady=(0, 6))
-        ttk.Label(
-            self.rotation_tab,
-            text="Control when this profile rotates and how Mint/Cinnamon reaches its safety action.",
-            justify=tk.LEFT,
-            wraplength=840,
-        ).pack(anchor="w", pady=(0, 8))
-        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=10)
+        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=6)
         rotation_schedule.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(rotation_schedule, text="Interval minutes:").grid(row=0, column=0, sticky="w")
         self.interval_entry = ttk.Entry(rotation_schedule, textvariable=self.interval_var, width=10)
@@ -820,24 +820,32 @@ class SettingsApp(tk.Tk):
         self.night_end_entry.pack(side=tk.LEFT)
         ttk.Label(
             rotation_schedule,
-            text="Local HH:MM times; the window may cross midnight. Rotation resumes by itself when it ends.",
+            text="Local HH:MM; may cross midnight; auto-resumes.",
             justify=tk.LEFT,
             wraplength=430,
         ).grid(row=4, column=2, sticky="w", padx=(16, 0))
         self.night_black_screen_var.trace_add("write", self._refresh_night_time_state)
         self._refresh_night_time_state()
 
-        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=10)
+        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=6)
         shortcuts.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(shortcuts, text="Black screen hotkey:").grid(row=0, column=0, sticky="w")
-        self.hotkey_entry = ttk.Entry(shortcuts, textvariable=self.hotkey_var, width=22)
-        self.hotkey_entry.grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Label(shortcuts, text="Next hotkey:").grid(row=0, column=0, sticky="w")
+        self.next_hotkey_entry = ttk.Entry(shortcuts, textvariable=self.next_hotkey_var, width=22)
+        self.next_hotkey_entry.grid(row=0, column=1, sticky="w", padx=5)
         ttk.Label(
             shortcuts,
-            text="Save the profile, then register this shortcut with the command-line hotkey action.",
+            text="Cinnamon keybindings, e.g. <Primary><Alt>n.",
             justify=tk.LEFT,
-            wraplength=520,
+            wraplength=430,
         ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+        ttk.Label(shortcuts, text="Pause/Resume hotkey:").grid(row=1, column=0, sticky="w")
+        self.pause_hotkey_entry = ttk.Entry(shortcuts, textvariable=self.pause_hotkey_var, width=22)
+        self.pause_hotkey_entry.grid(row=1, column=1, sticky="w", padx=5)
+        ttk.Label(shortcuts, text="Black screen hotkey:").grid(row=2, column=0, sticky="w")
+        self.hotkey_entry = ttk.Entry(shortcuts, textvariable=self.hotkey_var, width=22)
+        self.hotkey_entry.grid(row=2, column=1, sticky="w", padx=5)
+        self.register_hotkeys_button = ttk.Button(shortcuts, text="Register hotkeys", command=self._register_hotkeys)
+        self.register_hotkeys_button.grid(row=2, column=2, sticky="w", padx=(16, 0))
         shortcuts.columnconfigure(2, weight=1)
 
         desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=10)
@@ -1306,6 +1314,8 @@ class SettingsApp(tk.Tk):
         self.idle_seconds_var.set(str(profile.idle_seconds))
         self.suppress_locked_var.set(profile.suppress_when_locked)
         self.hotkey_var.set(profile.black_hotkey)
+        self.next_hotkey_var.set(profile.next_hotkey)
+        self.pause_hotkey_var.set(profile.pause_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
@@ -1577,6 +1587,14 @@ class SettingsApp(tk.Tk):
             raise ValueError(f"The idle time must be between 0 and {MAX_IDLE_SECONDS} seconds.")
         suppress_locked_var = vars(self).get("suppress_locked_var")
         suppress_when_locked = bool(suppress_locked_var.get()) if suppress_locked_var is not None else False
+        next_hotkey_var = vars(self).get("next_hotkey_var")
+        next_hotkey = (
+            str(next_hotkey_var.get()).strip() if next_hotkey_var is not None else ""
+        ) or DEFAULT_NEXT_HOTKEY
+        pause_hotkey_var = vars(self).get("pause_hotkey_var")
+        pause_hotkey = (
+            str(pause_hotkey_var.get()).strip() if pause_hotkey_var is not None else ""
+        ) or DEFAULT_PAUSE_HOTKEY
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -1629,7 +1647,9 @@ class SettingsApp(tk.Tk):
             polaroid_captions=polaroid_captions,
             shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
-            black_hotkey=self.hotkey_var.get().strip() or "<Primary><Alt>b",
+            black_hotkey=self.hotkey_var.get().strip() or DEFAULT_BLACK_HOTKEY,
+            next_hotkey=next_hotkey,
+            pause_hotkey=pause_hotkey,
             desktop=self.desktop_var.get(),
             effect=self.effect_var.get(),
             bar_color=self.bar_color_var.get(),
@@ -2105,6 +2125,7 @@ class SettingsApp(tk.Tk):
             self.black_button,
             self.export_button,
             self.current_pictures_button,
+            self.register_hotkeys_button,
         ):
             button.state(["disabled"] if busy else ["!disabled"])
         for control in (
@@ -2319,6 +2340,23 @@ class SettingsApp(tk.Tk):
                 if kind == "apply-progress":
                     count, _path = result
                     self.apply_button.configure(text=f"Scanning... {count}")
+                    continue
+                if kind == "hotkeys-done":
+                    if self._apply_worker is not None:
+                        self._apply_worker.join()
+                    self._apply_worker = None
+                    self._set_apply_busy(False)
+                    if error is not None:
+                        messagebox.showerror("Register hotkeys failed", str(error), parent=self)
+                    else:
+                        lines = "\n".join(f"{label}: {binding}" for label, binding in result)
+                        messagebox.showinfo(
+                            "Hotkeys registered",
+                            f"Cinnamon custom hotkeys for profile {self.profile_var.get()!r}:\n{lines}\n\n"
+                            "They take effect immediately; re-register after future updates "
+                            "from Settings or with the command-line register-hotkey action.",
+                            parent=self,
+                        )
                     continue
                 if kind in {"apply-done", "black-done"}:
                     if self._apply_worker is not None:
@@ -2918,6 +2956,35 @@ class SettingsApp(tk.Tk):
                 self._operation_results.put(("apply-done", result, None))
 
         worker = threading.Thread(target=run, name="mbs-settings-apply", daemon=False)
+        self._apply_worker = worker
+        try:
+            worker.start()
+        except Exception:
+            self._apply_worker = None
+            self._set_apply_busy(False)
+            raise
+
+    def _register_hotkeys(self) -> None:
+        if self._any_worker_busy():
+            return
+        if not self._save_current(show_success=False):
+            return
+        summary = (
+            ("Next", self.next_hotkey_var.get().strip() or DEFAULT_NEXT_HOTKEY),
+            ("Pause/Resume", self.pause_hotkey_var.get().strip() or DEFAULT_PAUSE_HOTKEY),
+            ("Black screen", self.hotkey_var.get().strip() or DEFAULT_BLACK_HOTKEY),
+        )
+        self._set_apply_busy(True)
+
+        def run() -> None:
+            try:
+                register_all_cinnamon_hotkeys()
+            except Exception as exc:
+                self._operation_results.put(("hotkeys-done", None, exc))
+            else:
+                self._operation_results.put(("hotkeys-done", summary, None))
+
+        worker = threading.Thread(target=run, name="mbs-settings-register-hotkeys", daemon=False)
         self._apply_worker = worker
         try:
             worker.start()

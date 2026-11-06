@@ -4,6 +4,24 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.19] - 2026-11-06
+
+### Added
+
+- **Rebindable global hotkeys** (JBS CTL-15), inspired by John's Background Switcher's customizable shortcuts: the single fixed black-screen hotkey becomes three per-profile Cinnamon custom hotkeys:
+  - **Next** (default `<Primary><Alt>n`) — advance to the next picture immediately, from anywhere.
+  - **Pause/Resume** (default `<Primary><Alt>p`) — flips the rotation pause state without switching pictures; on resume the loop applies the next rotation on its normal schedule.
+  - **Black screen** (default `<Primary><Alt>b`, the historic fixed binding).
+- **Settings → Rotation & Shortcuts → Shortcuts** shows all three bindings as editable fields plus a **Register hotkeys** button that registers (or re-registers) all three Cinnamon custom keybindings in one step, with a success dialog listing the active bindings and an error dialog on failure.
+- CLI: `register-hotkey` now accepts `--action next|pause-resume|black-screen` (default stays `black-screen`, the historic behavior) and `--all` to register every hotkey from the saved profile bindings at once; both support `--dry-run`, which prints the exact `gsettings` commands without applying them.
+- New `pause-toggle` command flips the pause state (and reports the resulting runtime state) for use from a terminal or a registered hotkey.
+
+### Changed
+
+- Existing profiles without the new fields fall back to the default bindings, and saved bindings are validated (non-empty, at most 64 characters, no control characters) with invalid values replaced by the defaults.
+- The managed updater now rebinds every registered hotkey — not only the black-screen hotkey — to the stable launcher after an update.
+- Bumped the package version to `0.2.19`.
+
 ## [0.2.18] - 2026-11-05
 
 ### Added

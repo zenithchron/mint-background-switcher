@@ -8,11 +8,11 @@ import json
 from . import __version__
 from .autostart import disable_autostart, enable_autostart, tray_command
 from .config import ensure_config, load_config
-from .hotkeys import register_cinnamon_black_hotkey
+from .hotkeys import HOTKEY_ACTIONS, register_all_cinnamon_hotkeys, register_cinnamon_hotkey
 from .monitor import detect_monitors
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
-from .service import black_screen, pause, resume, run_loop, save_current_wallpaper, switch_once
+from .service import black_screen, pause, resume, run_loop, save_current_wallpaper, switch_once, toggle_pause
 from .startup import safe_start
 from .state import load_state
 
@@ -64,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     black.add_argument("--dry-run", action="store_true")
 
     sub.add_parser("pause", help="Pause rotation")
+    sub.add_parser("pause-toggle", help="Toggle rotation pause/resume without switching pictures")
     resume_p = sub.add_parser("resume", help="Resume rotation and immediately advance")
     resume_p.add_argument("--profile")
     resume_p.add_argument("--dry-run", action="store_true")
@@ -100,7 +101,17 @@ def build_parser() -> argparse.ArgumentParser:
     rescue_mode.add_argument("--full", action="store_true", help="Also reset Cinnamon/Nemo dconf and monitors.xml")
     rescue.add_argument("--reboot", action="store_true")
 
-    hotkey = sub.add_parser("register-hotkey", help="Register Cinnamon black-screen hotkey")
+    hotkey = sub.add_parser(
+        "register-hotkey",
+        help="Register Cinnamon hotkeys (Next, Pause/Resume, Black screen)",
+    )
+    hotkey.add_argument(
+        "--action",
+        choices=sorted(HOTKEY_ACTIONS),
+        default="black-screen",
+        help="Which hotkey to register (default: black-screen, the historic behavior)",
+    )
+    hotkey.add_argument("--all", action="store_true", help="Register all three hotkeys using the saved profile bindings")
     hotkey.add_argument("--binding", default=None)
     hotkey.add_argument("--dry-run", action="store_true")
 
@@ -125,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "pause":
         state = pause()
+        print(json.dumps(state.to_dict(), indent=2, sort_keys=True))
+        return 0
+    if args.command == "pause-toggle":
+        state = toggle_pause()
         print(json.dumps(state.to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "resume":
@@ -185,12 +200,23 @@ def main(argv: list[str] | None = None) -> int:
             print(action)
         return 0
     if args.command == "register-hotkey":
-        commands = register_cinnamon_black_hotkey(binding=args.binding, dry_run=args.dry_run)
-        if args.dry_run:
-            for cmd in commands:
-                print(" ".join(cmd))
+        if args.all:
+            if args.binding is not None:
+                parser.error("--binding cannot be combined with --all")
+            results = register_all_cinnamon_hotkeys(dry_run=args.dry_run)
+            if args.dry_run:
+                for key, cmds in results.items():
+                    for cmd in cmds:
+                        print(f"#{key} " + " ".join(cmd))
+            else:
+                print("registered next, pause-resume, black-screen")
         else:
-            print("registered")
+            commands = register_cinnamon_hotkey(args.action, binding=args.binding, dry_run=args.dry_run)
+            if args.dry_run:
+                for cmd in commands:
+                    print(" ".join(cmd))
+            else:
+                print(f"registered {args.action}")
         return 0
     if args.command == "status":
         cfg = load_config()

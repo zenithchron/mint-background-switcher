@@ -2838,3 +2838,21 @@ def test_exclude_current_images_uses_recorded_sources(monkeypatch, tmp_path: Pat
 
     assert excluded == first.images
     assert get_excluded_images("P") == first.images
+
+
+def test_toggle_pause_flips_flag_without_switching(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+
+    state = service.toggle_pause()
+    assert state.paused is True
+    assert service.load_state().paused is True
+
+    state = service.toggle_pause()
+    assert state.paused is False
+    assert service.load_state().paused is False
+
+    # Toggling alone must not apply or generate any wallpaper.
+    assert service.load_state().last_images == []
+    assert list((tmp_path / "config").rglob("*.png")) == []
+    assert not (tmp_path / "cache").exists()
