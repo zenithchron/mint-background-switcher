@@ -4,6 +4,21 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.20] - 2026-11-07
+
+### Added
+
+- **Settings import / export** (JBS CFG-01), inspired by John's Background Switcher's config save/restore:
+  - **Settings → Storage → Import / Export** gains **Export Settings...** and **Import Settings...** buttons with an on-page status line and success/error dialogs.
+  - Export writes the complete settings — every profile, shared and per-monitor folders, and all per-profile options — as a versioned JSON document. Exporting onto the live `config.json` is refused, and a config file that was overwritten with an export document by mistake is recovered instead of reset to the defaults.
+  - Import restores a previous export (or a saved copy of `config.json`) in one step. The file is fully validated before anything is applied, and a confirmation dialog makes explicit that every profile and setting in this installation will be replaced. Cancelling either dialog leaves the current settings untouched.
+  - Imported values apply immediately: the settings editor shows the imported profiles right away, and the background loop picks the imported settings up on its next rotation.
+- CLI for automation: `mint-background-switcher export [DESTINATION]` writes the export to a file (or prints the document to stdout when no destination is given), and `mint-background-switcher import SOURCE [--dry-run]` validates a file and — without `--dry-run` — replaces the settings. An invalid file fails with a clear message and leaves the settings byte-for-byte unchanged.
+
+### Changed
+
+- Bumped the package version to `0.2.20`.
+
 ## [0.2.19] - 2026-11-06
 
 ### Added

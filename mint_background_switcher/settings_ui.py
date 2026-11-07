@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 import queue
 import shutil
@@ -11,7 +12,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Callable
 
-from . import APP_NAME, __version__, public_collections, updater
+from . import APP_NAME, __version__, config_io, public_collections, updater
 from .config import (
     BAR_COLOR_CHOICES,
     DEFAULT_BLACK_HOTKEY,
@@ -38,6 +39,7 @@ from .config import (
 from .hotkeys import register_all_cinnamon_hotkeys
 from .images import SUPPORTED_EXTENSIONS, SUPPORTED_TYPE_NAMES, is_usable_image
 from .monitor import Monitor, detect_monitors
+from .paths import config_file
 from .service import (
     SwitchCancelled,
     black_screen,
@@ -325,6 +327,7 @@ class SettingsApp(tk.Tk):
         working_directory = configured_working_directory(self.config_data)
         self.working_directory_var = tk.StringVar(value=str(working_directory))
         self.working_status_var = tk.StringVar(value=_active_working_directory_status(working_directory))
+        self.backup_status_var = tk.StringVar(value="No export or import done yet in this session.")
         self.monitor_folders_data: dict[str, list[str]] = {}
         self._update_busy = False
         self._update_worker: threading.Thread | None = None
@@ -1072,6 +1075,41 @@ class SettingsApp(tk.Tk):
             pady=(6, 0),
         )
         self.working_frame.columnconfigure(1, weight=1)
+
+        self.backup_frame = ttk.LabelFrame(self.storage_tab, text="Import / Export", padding=(8, 8))
+        self.backup_frame.pack(fill=tk.X, pady=(8, 0))
+        ttk.Label(
+            self.backup_frame,
+            text=(
+                "Export the full settings — every profile, folder, and per-profile option — to a JSON "
+                "file, or restore them from a previous export. Importing replaces every profile and "
+                "setting in this installation; the background loop picks up the imported settings on "
+                "its next rotation."
+            ),
+            justify=tk.LEFT,
+            wraplength=760,
+        ).grid(row=0, column=0, columnspan=3, sticky="ew")
+        self.export_settings_button = ttk.Button(
+            self.backup_frame,
+            text="Export Settings...",
+            command=self._export_settings,
+        )
+        self.export_settings_button.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.import_settings_button = ttk.Button(
+            self.backup_frame,
+            text="Import Settings...",
+            command=self._import_settings,
+        )
+        self.import_settings_button.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=(6, 0))
+        self.backup_status_label = ttk.Label(
+            self.backup_frame,
+            textvariable=self.backup_status_var,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=760,
+        )
+        self.backup_status_label.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        self.backup_frame.columnconfigure(2, weight=1)
 
         self.collections_scope_label = ttk.Label(
             self.collections_tab,
@@ -2124,6 +2162,8 @@ class SettingsApp(tk.Tk):
             self.collections_download_button,
             self.black_button,
             self.export_button,
+            self.export_settings_button,
+            self.import_settings_button,
             self.current_pictures_button,
             self.register_hotkeys_button,
         ):
@@ -2252,6 +2292,108 @@ class SettingsApp(tk.Tk):
         if self._optional_attr("_migration_busy", False):
             self._migration_cancel.set()
             self.working_status_var.set("Cancellation requested; waiting for the current verified copy step...")
+
+    def _default_export_filename(self) -> str:
+        return f"mbs-settings-{datetime.now():%Y%m%d-%H%M%S}.json"
+
+    @staticmethod
+    def _profile_count_text(count: int) -> str:
+        return f"{count} profile" if count == 1 else f"{count} profiles"
+
+    def _export_settings(self) -> None:
+        if self._any_worker_busy():
+            self.backup_status_var.set("Wait for the background work to finish, then export.")
+            return
+        destination = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export settings",
+            defaultextension=".json",
+            initialfile=self._default_export_filename(),
+            filetypes=[
+                ("Mint Background Switcher settings (*.json)", "*.json"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not destination:
+            return
+        try:
+            path = config_io.export_config(self.config_data, Path(destination))
+        except Exception as exc:
+            self.backup_status_var.set("Export failed.")
+            messagebox.showerror("Export failed", str(exc), parent=self)
+            return
+        count_text = self._profile_count_text(len(self.config_data.profiles))
+        self.backup_status_var.set(f"Exported {count_text} to {path}")
+        messagebox.showinfo(
+            "Settings exported",
+            (
+                f"Exported {count_text} to\n{path}\n\n"
+                "The export contains the saved settings; unsaved editor changes "
+                "are not included."
+            ),
+            parent=self,
+        )
+
+    def _import_settings(self) -> None:
+        if self._any_worker_busy():
+            self.backup_status_var.set("Wait for the background work to finish, then import.")
+            return
+        source = filedialog.askopenfilename(
+            parent=self,
+            title="Import settings",
+            filetypes=[
+                ("Mint Background Switcher settings (*.json)", "*.json"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not source:
+            return
+        try:
+            candidate = config_io.load_export(Path(source))
+        except Exception as exc:
+            self.backup_status_var.set("Import failed: the selected file is not a valid settings export.")
+            messagebox.showerror(
+                "Import failed",
+                f"The selected file is not a valid settings export:\n{exc}",
+                parent=self,
+            )
+            return
+        count_text = self._profile_count_text(len(candidate.profiles))
+        if not messagebox.askokcancel(
+            "Import settings",
+            (
+                f"Replace ALL profiles and settings with the contents of\n{source}?\n\n"
+                f"Importing makes {count_text} from that file the only settings in this "
+                "installation. Export a backup first if you want to restore the current "
+                "settings later."
+            ),
+            parent=self,
+        ):
+            return
+        try:
+            imported = config_io.import_settings(Path(source), config_file())
+        except Exception as exc:
+            self.backup_status_var.set("Import failed.")
+            messagebox.showerror("Import failed", str(exc), parent=self)
+            return
+        count_text = self._profile_count_text(len(imported.profiles))
+        self.config_data = imported
+        self.profile_var.set(imported.active_profile)
+        self._refresh_profiles()
+        self._load_profile(imported.active_profile)
+        working_directory = configured_working_directory(imported)
+        self.working_directory_var.set(str(working_directory))
+        self.working_status_var.set(_active_working_directory_status(working_directory))
+        self.backup_status_var.set(f"Imported {count_text} from {source}")
+        messagebox.showinfo(
+            "Settings imported",
+            (
+                f"Imported {count_text} from\n{source}\n\n"
+                "The imported settings are active; the background loop uses them from "
+                "its next rotation."
+            ),
+            parent=self,
+        )
 
     def _set_apply_busy(self, busy: bool) -> None:
         self._apply_busy = busy

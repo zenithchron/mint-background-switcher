@@ -1,8 +1,10 @@
 import gc
+import json
 import os
 from pathlib import Path
 import threading
 import time
+import tkinter as tk
 from types import SimpleNamespace
 
 import pytest
@@ -330,6 +332,9 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.storage_scope_label,
                 app.working_directory_entry,
                 app.working_use_button,
+                app.export_settings_button,
+                app.import_settings_button,
+                app.backup_status_label,
             ),
             str(app.about_tab): (app.about_scope_label, app.update_button, app.rollback_button),
         }
@@ -4242,3 +4247,261 @@ def test_save_current_persists_hotkey_bindings(monkeypatch):
     assert profile.black_hotkey == "<Ctrl>b"
     assert profile.next_hotkey == "<Super>n"
     assert profile.pause_hotkey == "<Super>p"
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_storage_page_shows_import_export_section(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.storage_tab)
+        app.update()
+        assert app.backup_frame.cget("text") == "Import / Export"
+        for control in (
+            app.backup_frame,
+            app.export_settings_button,
+            app.import_settings_button,
+            app.backup_status_label,
+        ):
+            assert is_descendant(control, app.storage_tab)
+            assert control.winfo_ismapped()
+        assert app.export_settings_button.cget("text") == "Export Settings..."
+        assert app.import_settings_button.cget("text") == "Import Settings..."
+        assert app.backup_status_var.get() == "No export or import done yet in this session."
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_export_settings_writes_file_and_reports_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    destination = tmp_path / "backup" / "mbs-settings.json"
+    infos = []
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: str(destination))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("export must not fail")),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        app._export_settings()
+        assert destination.exists()
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        assert document["config"] == app.config_data.to_dict()
+        assert "Exported 1 profile" in app.backup_status_var.get()
+        assert infos and "mbs-settings.json" in infos[0][1]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_export_settings_dialog_cancel_writes_nothing(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: "")
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        app._export_settings()
+        assert app.backup_status_var.get() == "No export or import done yet in this session."
+        assert not (tmp_path / "backup").exists()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_import_settings_replaces_config_and_refreshes_editor(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    donor = settings_ui.Config(
+        active_profile="Work",
+        working_directory="/working/imported",
+        profiles={
+            "Work": settings_ui.Profile(
+                name="Work",
+                shared_folders=["/pics/work"],
+                interval_minutes=30.0,
+                mode="span",
+                effect="grayscale",
+            ),
+            "Weekend": settings_ui.Profile(name="Weekend", shared_folders=["/pics/weekend"]),
+        },
+    )
+    donor_path = tmp_path / "donor.json"
+    settings_ui.config_io.export_config(donor, donor_path)
+    infos = []
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: str(donor_path))
+    monkeypatch.setattr(settings_ui.messagebox, "askokcancel", lambda *_a, **_k: True)
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        app._import_settings()
+        assert app.config_data.to_dict() == donor.to_dict()
+        assert app.profile_var.get() == "Work"
+        assert app.interval_var.get() == "30.0"
+        assert app.mode_var.get() == "span"
+        assert app.effect_var.get() == "grayscale"
+        assert app.shared_text.get("1.0", tk.END).strip() == "/pics/work"
+        assert tuple(app.profile_combo["values"]) == ("Weekend", "Work")
+        assert app.profile_scope_var.get() == "Profile settings for “Work”"
+        assert app.working_directory_var.get() == "/working/imported"
+        assert "Imported 2 profiles" in app.backup_status_var.get()
+        assert infos and "donor.json" in infos[0][1]
+        # The on-disk config was replaced, not merged.
+        assert settings_ui.load_config().to_dict() == donor.to_dict()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_import_settings_confirm_dialog_describes_full_replacement(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    donor = settings_ui.Config(
+        active_profile="W",
+        profiles={"W": settings_ui.Profile(name="W", shared_folders=["/pics/w"])},
+    )
+    donor_path = tmp_path / "donor.json"
+    settings_ui.config_io.export_config(donor, donor_path)
+    confirmations = []
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: str(donor_path))
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askokcancel",
+        lambda title, message, **_kw: confirmations.append((title, message)) or False,
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        app._import_settings()
+        assert confirmations
+        title, message = confirmations[0]
+        assert title == "Import settings"
+        assert str(donor_path) in message
+        assert "Replace ALL profiles and settings" in message
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_import_settings_cancel_leaves_config_unchanged(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    donor = settings_ui.Config(
+        active_profile="W",
+        profiles={"W": settings_ui.Profile(name="W", shared_folders=["/pics/w"])},
+    )
+    donor_path = tmp_path / "donor.json"
+    settings_ui.config_io.export_config(donor, donor_path)
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: str(donor_path))
+    monkeypatch.setattr(settings_ui.messagebox, "askokcancel", lambda *_a, **_k: False)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        before = app.config_data.to_dict()
+        config_path = tmp_path / "config" / "config.json"
+        before_bytes = config_path.read_bytes()
+        app._import_settings()
+        assert app.config_data.to_dict() == before
+        assert config_path.read_bytes() == before_bytes
+        assert app.backup_status_var.get() == "No export or import done yet in this session."
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_import_settings_invalid_file_reports_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    bad = tmp_path / "bad.json"
+    bad.write_text("this is not json", encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: str(bad))
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        before = app.config_data.to_dict()
+        app._import_settings()
+        assert errors and errors[0][0] == "Import failed"
+        assert "not a valid settings export" in errors[0][1]
+        assert app.config_data.to_dict() == before
+        assert app.backup_status_var.get() == "Import failed: the selected file is not a valid settings export."
+    finally:
+        app.destroy()
+
+
+def test_import_settings_blocked_while_worker_busy(monkeypatch):
+    opened = []
+    status = []
+    monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_k: opened.append(1) or "/x")
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_migration_busy", True)
+    setattr(dummy, "backup_status_var", SimpleNamespace(set=status.append, get=lambda: ""))
+
+    settings_ui.SettingsApp._import_settings(dummy)
+
+    assert not opened
+    assert status and "Wait for the background work to finish" in status[0]
+
+
+def test_export_settings_blocked_while_worker_busy(monkeypatch):
+    opened = []
+    status = []
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_k: opened.append(1) or "/x")
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "_migration_busy", True)
+    setattr(dummy, "backup_status_var", SimpleNamespace(set=status.append, get=lambda: ""))
+
+    settings_ui.SettingsApp._export_settings(dummy)
+
+    assert not opened
+    assert status and "Wait for the background work to finish" in status[0]
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_export_settings_refuses_live_config_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    config_path = tmp_path / "config" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(settings_ui.Config.default(folder="/pics").to_dict()), encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(settings_ui.filedialog, "asksaveasfilename", lambda **_kwargs: str(config_path))
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        before = config_path.read_bytes()
+        app._export_settings()
+        assert errors and errors[0][0] == "Export failed"
+        assert "refusing to export onto the live settings file" in errors[0][1]
+        assert config_path.read_bytes() == before
+        assert app.backup_status_var.get() == "Export failed."
+    finally:
+        app.destroy()

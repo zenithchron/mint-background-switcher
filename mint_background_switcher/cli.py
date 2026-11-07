@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from pathlib import Path
 
 from . import __version__
 from .autostart import disable_autostart, enable_autostart, tray_command
 from .config import ensure_config, load_config
+from .config_io import ConfigImportError, export_config, export_document, import_settings, load_export
 from .hotkeys import HOTKEY_ACTIONS, register_all_cinnamon_hotkeys, register_cinnamon_hotkey
 from .monitor import detect_monitors
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
@@ -117,6 +120,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="Print config/state/monitors")
     sub.add_parser("profiles", help="List profiles")
+
+    export = sub.add_parser(
+        "export",
+        help="Export the full settings (all profiles) to a JSON file or stdout",
+    )
+    export.add_argument(
+        "destination",
+        nargs="?",
+        default=None,
+        help="Output file; omit to print the export document to stdout",
+    )
+
+    importp = sub.add_parser(
+        "import",
+        help="Replace the settings with a previous export (every profile and setting is replaced)",
+    )
+    importp.add_argument("source", help="Settings export file (or a saved config.json copy) to import")
+    importp.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate the file and report what would be imported without changing anything",
+    )
     return parser
 
 
@@ -236,6 +261,32 @@ def main(argv: list[str] | None = None) -> int:
         for name in sorted(cfg.profiles):
             prefix = "*" if name == cfg.active_profile else " "
             print(f"{prefix} {name}")
+        return 0
+    if args.command == "export":
+        cfg = load_config()
+        try:
+            if args.destination:
+                path = export_config(cfg, Path(args.destination))
+                print(path)
+            else:
+                print(json.dumps(export_document(cfg), indent=2, sort_keys=True))
+        except (OSError, ValueError) as exc:
+            print(f"export failed: {exc}", file=sys.stderr)
+            return 1
+        return 0
+    if args.command == "import":
+        try:
+            candidate = load_export(Path(args.source)) if args.dry_run else import_settings(Path(args.source))
+        except ConfigImportError as exc:
+            print(f"import failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({
+            "dry_run": args.dry_run,
+            "profile_count": len(candidate.profiles),
+            "profiles": sorted(candidate.profiles),
+            "active_profile": candidate.active_profile,
+            "working_directory": candidate.working_directory,
+        }, indent=2, sort_keys=True))
         return 0
     parser.error(f"Unhandled command: {args.command}")
     return 2

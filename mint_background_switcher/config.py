@@ -490,6 +490,15 @@ class Config:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":
+        # Accept a wrapped export document written over the config file by
+        # mistake (e.g. `export config.json`); recover the inner config instead
+        # of silently resetting to the defaults.
+        if (
+            isinstance(data, dict)
+            and "format" in data
+            and isinstance(data.get("config"), dict)
+        ):
+            data = data["config"]
         profiles_data = data.get("profiles") or {}
         if not isinstance(profiles_data, dict):
             return cls.default()
