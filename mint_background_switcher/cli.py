@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .availability import CollectionUnavailableError
 from .autostart import disable_autostart, enable_autostart, tray_command
 from .config import ensure_config, load_config
 from .config_io import ConfigImportError, export_config, export_document, import_settings, load_export
@@ -154,7 +155,11 @@ def main(argv: list[str] | None = None) -> int:
         print(path)
         return 0
     if args.command == "next":
-        _print_result(switch_once(args.profile, dry_run=args.dry_run))
+        try:
+            _print_result(switch_once(args.profile, dry_run=args.dry_run))
+        except CollectionUnavailableError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         return 0
     if args.command == "black-screen":
         _print_result(black_screen(args.profile, dry_run=args.dry_run))
@@ -168,7 +173,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(state.to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "resume":
-        _print_result(resume(args.profile, dry_run=args.dry_run))
+        try:
+            _print_result(resume(args.profile, dry_run=args.dry_run))
+        except CollectionUnavailableError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         return 0
     if args.command == "save-current":
         print(save_current_wallpaper(args.destination, overwrite=args.force))

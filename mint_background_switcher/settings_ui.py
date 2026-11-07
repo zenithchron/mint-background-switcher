@@ -52,6 +52,7 @@ from .service import (
     save_current_wallpaper,
     switch_once,
 )
+from .availability import CollectionUnavailableError
 from .working_storage import (
     MARKER_FILENAME,
     WorkingDirectoryMigrationCancelled,
@@ -2500,6 +2501,31 @@ class SettingsApp(tk.Tk):
                             parent=self,
                         )
                     continue
+                if kind == "apply-rejected":
+                    if self._apply_worker is not None:
+                        self._apply_worker.join()
+                    self._apply_worker = None
+                    self._set_apply_busy(False)
+                    previous_config, reason = result
+                    # Roll the activation back so the previous profile keeps
+                    # operating; the user's profile list and fields follow.
+                    # Re-saving matters: the daemon and the next Settings
+                    # session read the config from disk.
+                    self.config_data = Config.from_dict(previous_config)
+                    save_config(self.config_data)
+                    self._refresh_profiles()
+                    self.profile_var.set(self.config_data.active_profile)
+                    self._load_profile(self.config_data.active_profile)
+                    messagebox.showwarning(
+                        "Profile switch rejected",
+                        (
+                            f"{reason}.\n\n"
+                            f"The previous profile {self.config_data.active_profile!r} "
+                            "remains active."
+                        ),
+                        parent=self,
+                    )
+                    continue
                 if kind in {"apply-done", "black-done"}:
                     if self._apply_worker is not None:
                         self._apply_worker.join()
@@ -3076,6 +3102,9 @@ class SettingsApp(tk.Tk):
     def _apply_next(self) -> None:
         if self._any_worker_busy():
             return
+        # Snapshot the config before the save so a rejected switch can roll
+        # back the activation and keep operating the previous profile.
+        previous_config = self.config_data.to_dict()
         if not self._save_current(show_success=False):
             return
         profile_name = self.profile_var.get()
@@ -3092,6 +3121,11 @@ class SettingsApp(tk.Tk):
                     cancelled=self._apply_cancel.is_set,
                     progress=progress,
                 )
+            except CollectionUnavailableError as exc:
+                # The selected profile's collection is on an unresponsive
+                # drive. Reject the switch; the poller rolls the activation
+                # back so the previous profile keeps operating.
+                self._operation_results.put(("apply-rejected", (previous_config, str(exc)), None))
             except Exception as exc:
                 self._operation_results.put(("apply-done", None, exc))
             else:

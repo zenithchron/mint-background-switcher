@@ -2856,3 +2856,96 @@ def test_toggle_pause_flips_flag_without_switching(monkeypatch, tmp_path: Path):
     assert service.load_state().last_images == []
     assert list((tmp_path / "config").rglob("*.png")) == []
     assert not (tmp_path / "cache").exists()
+
+
+def _unresponsive_probe():
+    return lambda folders: SimpleNamespace(
+        status="unresponsive", reason="no response within 5 second(s)"
+    )
+
+
+def test_switch_once_rejects_unresponsive_collection_without_touching_state(
+    monkeypatch, tmp_path: Path
+):
+    _setup_profile(monkeypatch, tmp_path)
+    before = load_state().to_dict()
+    monkeypatch.setattr(service, "probe_folders", _unresponsive_probe())
+    with pytest.raises(service.CollectionUnavailableError) as excinfo:
+        switch_once("P")
+    assert "P" in str(excinfo.value)
+    # The rejection must leave durable state and the working directory alone.
+    assert load_state().to_dict() == before
+    assert list((tmp_path / "cache").rglob("*.png")) == []
+
+
+def test_switch_once_dry_run_rejects_unresponsive_collection(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr(service, "probe_folders", _unresponsive_probe())
+    with pytest.raises(service.CollectionUnavailableError):
+        switch_once("P", dry_run=True)
+
+
+def test_switch_once_rejects_probe_infrastructure_error(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        service,
+        "probe_folders",
+        lambda folders: SimpleNamespace(status="error", reason="spawn failed"),
+    )
+    with pytest.raises(service.CollectionUnavailableError):
+        switch_once("P")
+
+
+def test_switch_once_probes_the_selected_profiles_folders(monkeypatch, tmp_path: Path):
+    # The probe must see the deduplicated union of the selected profile's
+    # shared and per-monitor folders — exactly what the switch will read.
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = str(tmp_path / "images")
+    per_monitor = str(tmp_path / "per-monitor")
+    probed: list = []
+    monkeypatch.setattr(
+        service,
+        "probe_folders",
+        lambda folders: probed.append(list(folders)) or SimpleNamespace(status="ok", reason=""),
+    )
+    cfg = load_config()
+    cfg.get_profile("P").monitor_folders = {"A": [per_monitor, image_dir]}
+    save_config(cfg)
+    switch_once("P", dry_run=True)
+    assert probed == [[image_dir, per_monitor]]
+
+
+def test_run_loop_keeps_wallpaper_and_retries_when_collection_unresponsive(
+    monkeypatch, tmp_path: Path, capsys
+):
+    _setup_profile(monkeypatch, tmp_path)
+    calls: list = []
+
+    def boom(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise service.CollectionUnavailableError(
+            "the picture collection for profile 'P' is unavailable "
+            "(no response within 5 second(s)); the switch was rejected"
+        )
+
+    monkeypatch.setattr(service, "switch_once", boom)
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 2:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # Two ticks were attempted and both rejected; the loop kept going and
+    # announced the kept wallpaper instead of the generic error prefix.
+    assert len(calls) == 2
+    out = capsys.readouterr().out
+    assert "keeping the current wallpaper" in out
+    assert "Mint Background Switcher error" not in out
+    assert len(sleeps) == 2

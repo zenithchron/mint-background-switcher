@@ -4,6 +4,20 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.21] - 2026-11-07
+
+### Fixed
+
+- **Profile switch to an unavailable drive no longer freezes the app.** When a profile's picture collection lives on a drive that is not currently available (a dead network mount, a disconnected share), filesystem calls on that path block in the kernel indefinitely with no error, so the first scan after switching to such a profile froze the settings window and the background loop. Every switch now starts with a bounded reachability probe of the profile's collection folders (5 second deadline, run in a short-lived child process that is abandoned — never waited on — if the mount is wedged):
+  - **Settings "Save & Apply Now"** — a switch to a profile with an unresponsive collection is rejected with a warning dialog; the activation is rolled back (in memory and on disk) and the previous profile remains active, so MBS keeps operating exactly as before.
+  - **Background loop** — a scheduled switch whose collection is unresponsive is skipped with a log line ("keeping the current wallpaper and retrying on the next tick"); the loop keeps running and picks the switch up automatically once the drive is reachable again.
+  - **CLI `next` / `resume`** — report a one-line error and a non-zero exit code instead of hanging.
+  - A folder that is merely *missing* (a plain local path that was removed) is intentionally **not** rejected: the established black-fallback / per-monitor fallback behavior is unchanged.
+
+### Changed
+
+- Bumped the package version to `0.2.21`.
+
 ## [0.2.20] - 2026-11-07
 
 ### Added

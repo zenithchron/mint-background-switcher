@@ -11,6 +11,13 @@ import pytest
 from PIL import Image
 
 from mint_background_switcher import settings_ui
+from mint_background_switcher.availability import CollectionUnavailableError
+from mint_background_switcher.config import (
+    Config,
+    Profile,
+    load_config,
+    save_config,
+)
 from mint_background_switcher.monitor import Monitor
 
 
@@ -2852,6 +2859,11 @@ def test_apply_next_aborts_when_save_fails(monkeypatch):
 
     dummy = object.__new__(settings_ui.SettingsApp)
     setattr(dummy, "profile_var", _Var("P"))
+    setattr(
+        dummy,
+        "config_data",
+        Config(active_profile="P", profiles={"P": Profile(name="P", desktop="unknown")}),
+    )
     setattr(dummy, "_save_current", lambda **_kwargs: False)
     monkeypatch.setattr(settings_ui, "switch_once", fail_if_called)
 
@@ -4503,5 +4515,71 @@ def test_export_settings_refuses_live_config_file(monkeypatch, tmp_path):
         assert "refusing to export onto the live settings file" in errors[0][1]
         assert config_path.read_bytes() == before
         assert app.backup_status_var.get() == "Export failed."
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_apply_rejected_when_collection_unresponsive_keeps_previous_profile(
+    monkeypatch, tmp_path
+):
+    ok_dir = tmp_path / "ok"
+    ok_dir.mkdir()
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    save_config(
+        Config(
+            active_profile="Default",
+            profiles={
+                "Default": Profile(
+                    name="Default", shared_folders=[str(ok_dir)], desktop="unknown"
+                ),
+                "Network": Profile(
+                    name="Network", shared_folders=[str(tmp_path / "dead")], desktop="unknown"
+                ),
+            },
+        )
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        # Point the UI at the profile whose collection sits on a (simulated)
+        # dead drive and apply it.
+        app.profile_var.set("Network")
+        app._load_profile("Network")
+        applied: list = []
+        warnings: list = []
+        monkeypatch.setattr(
+            settings_ui,
+            "switch_once",
+            lambda profile, **_kwargs: applied.append(profile)
+            or (_ for _ in ()).throw(
+                CollectionUnavailableError(
+                    "the picture collection for profile 'Network' is unavailable "
+                    "(no response within 5 second(s)); the switch was rejected"
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showwarning",
+            lambda title, message, **_kwargs: warnings.append((title, message)),
+        )
+
+        app._apply_next()
+        _pump_until(app, lambda: not app._apply_busy)
+
+        # The switch was attempted...
+        assert applied == ["Network"]
+        # ...rejected, and the previous profile is active in the UI,
+        # in the live config, and on disk.
+        assert app.config_data.active_profile == "Default"
+        assert app.profile_var.get() == "Default"
+        assert load_config().active_profile == "Default"
+        assert warnings
+        assert warnings[0][0] == "Profile switch rejected"
+        assert "Network" in warnings[0][1]
     finally:
         app.destroy()

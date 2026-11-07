@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .availability import CollectionUnavailableError, probe_folders
 from .config import (
     MAX_EXCLUDED_IMAGES,
     Config,
@@ -594,6 +595,49 @@ def night_schedule_action(profile: Profile, state: RuntimeState, now: datetime) 
     return "off"
 
 
+def _profile_collection_folders(profile: Profile) -> list[str]:
+    """Every folder (or single image file) the profile's sources can reference."""
+    folders: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        key = str(raw).strip()
+        if key and key not in seen:
+            seen.add(key)
+            folders.append(key)
+
+    for raw in profile.shared_folders:
+        add(raw)
+    for monitor_folders in profile.monitor_folders.values():
+        for raw in monitor_folders:
+            add(raw)
+    return folders
+
+
+def _reject_unresponsive_collection(profile_name: str | None = None) -> None:
+    """Reject a switch whose picture collection is on an unresponsive drive.
+
+    A collection root that blocks in the kernel (a dead network mount) makes
+    any in-process scan hang forever with no exception, freezing the caller.
+    The probe is bounded in a child process, so an unresponsive mount
+    surfaces as a quick typed failure and the switch is rejected while the
+    previous profile keeps operating. A *missing* local folder is not
+    rejected here — it keeps the established black-fallback / per-monitor
+    fallback behavior.
+    """
+    cfg = load_config()
+    profile = cfg.get_profile(profile_name)
+    folders = _profile_collection_folders(profile)
+    if not folders:
+        return
+    probe = probe_folders(folders)
+    if probe.status in ("unresponsive", "error"):
+        raise CollectionUnavailableError(
+            f"the picture collection for profile {profile.name!r} is unavailable "
+            f"({probe.reason}); the switch was rejected"
+        )
+
+
 def switch_once(
     profile_name: str | None = None,
     *,
@@ -603,6 +647,7 @@ def switch_once(
     cancelled: Callable[[], bool] | None = None,
     progress: Callable[[int, str], None] | None = None,
 ) -> SwitchResult:
+    _reject_unresponsive_collection(profile_name)
     selection_scope = _SelectionScope()
     if dry_run:
         transient_state = RuntimeState.from_dict(load_state().to_dict())
@@ -1389,6 +1434,11 @@ def run_loop(
                     print("Night schedule ended; resuming rotation", flush=True)
                     if result.lockscreen_note:
                         print(result.lockscreen_note, flush=True)
+                except CollectionUnavailableError as exc:
+                    print(
+                        f"{exc}; keeping the current wallpaper and retrying on the next tick",
+                        flush=True,
+                    )
                 except Exception as exc:
                     print(f"Mint Background Switcher error: {exc}", flush=True)
         if state.black_screen:
@@ -1417,6 +1467,11 @@ def run_loop(
                     print(f"Generated {result.wallpaper} for {len(result.monitors)} monitor(s)", flush=True)
                     if result.lockscreen_note:
                         print(result.lockscreen_note, flush=True)
+                except CollectionUnavailableError as exc:
+                    print(
+                        f"{exc}; keeping the current wallpaper and retrying on the next tick",
+                        flush=True,
+                    )
                 except Exception as exc:
                     print(f"Mint Background Switcher error: {exc}", flush=True)
         if suppressed_reasons:
