@@ -40,6 +40,13 @@ from .images import (
 )
 from .library_index import IndexSnapshot, LibraryIndex, LibrarySelection, orientation_matches
 from .monitor import Monitor, detect_monitors, monitor_orientation
+from .overlays import (
+    OverlayPanel,
+    apply_overlays,
+    overlays_enabled,
+    panel_for_span,
+    panels_for_monitors,
+)
 from .paths import generated_wallpaper_path
 from .run_conditions import active_run_conditions
 from .sources import (
@@ -65,6 +72,7 @@ class SwitchResult:
     action: str
     lockscreen_note: str = ""
     web_sources: list[dict[str, str]] = field(default_factory=list)
+    overlay_note: str = ""
 
 
 class SwitchCancelled(RuntimeError):
@@ -651,12 +659,26 @@ def _apply_composed_wallpaper(
     dry_run: bool,
     rng: random.Random | None,
     cancelled: Callable[[], bool] | None,
-) -> str:
+    monitors: Sequence[Monitor],
+    overlay_panels: list[OverlayPanel] | None = None,
+) -> tuple[str, str]:
+    """Finalize a composed wallpaper: effect, overlays, then activate it.
+
+    Returns the (lockscreen_note, overlay_note) pair for the result.
+    Overlay failures are fail-open: rotation continues without the
+    picture-info panel instead of failing the switch.
+    """
     _cancel_if_requested(cancelled)
     apply_effect(wallpaper, profile.effect, rng=rng)
     _cancel_if_requested(cancelled)
+    overlay_note = ""
+    if overlay_panels and overlays_enabled(profile):
+        try:
+            overlay_note = apply_overlays(wallpaper, overlay_panels, profile, monitors).note
+        except Exception:
+            overlay_note = "Overlay skipped: the wallpaper could not be re-read for overlay rendering."
     DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
-    return _mirror_lockscreen(profile, wallpaper, dry_run=dry_run)
+    return _mirror_lockscreen(profile, wallpaper, dry_run=dry_run), overlay_note
 
 
 @dataclass(slots=True)
@@ -832,6 +854,7 @@ def _switch_once_with_state(
     images_used: list[str] = []
     action: str = "next"
     lockscreen_note: str = ""
+    overlay_note: str = ""
     if profile.mode == "span":
         pool = _load_image_pool(
             [*profile.shared_folders, *web_folders],
@@ -867,7 +890,16 @@ def _switch_once_with_state(
             )
             wallpaper = compose_span(monitors, image, wallpaper_path, bar_color=profile.bar_color, fit_mode=profile.fit_mode)
             images_used = [image]
-            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            overlay_panels = [panel_for_span(monitors, image)]
+            lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                profile,
+                wallpaper,
+                dry_run=dry_run,
+                rng=rng,
+                cancelled=cancelled,
+                monitors=monitors,
+                overlay_panels=overlay_panels,
+            )
     elif profile.mode == "montage":
         pool = _load_image_pool(
             [*profile.shared_folders, *web_folders],
@@ -913,7 +945,16 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            # Multi-picture layouts have no single picture to describe;
+            # overlays apply to per-picture panels only (Overlays tab).
+            lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                profile,
+                wallpaper,
+                dry_run=dry_run,
+                rng=rng,
+                cancelled=cancelled,
+                monitors=monitors,
+            )
     elif profile.mode == "collage":
         pool = _load_image_pool(
             [*profile.shared_folders, *web_folders],
@@ -988,7 +1029,16 @@ def _switch_once_with_state(
                         break
                     continue
                 images_used = chosen
-                lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+                # Multi-picture layouts have no single picture to describe;
+                # overlays apply to per-picture panels only (Overlays tab).
+                lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                    profile,
+                    wallpaper,
+                    dry_run=dry_run,
+                    rng=rng,
+                    cancelled=cancelled,
+                    monitors=monitors,
+                )
                 break
     elif profile.mode == "postcard":
         pool = _load_image_pool(
@@ -1062,7 +1112,16 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     continue
                 images_used = chosen
-                lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+                # Multi-picture layouts have no single picture to describe;
+                # overlays apply to per-picture panels only (Overlays tab).
+                lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                    profile,
+                    wallpaper,
+                    dry_run=dry_run,
+                    rng=rng,
+                    cancelled=cancelled,
+                    monitors=monitors,
+                )
                 break
     elif profile.mode == "polaroid":
         pool = _load_image_pool(
@@ -1135,7 +1194,16 @@ def _switch_once_with_state(
                     _discard_from_pool(pool, exc.image_path)
                     continue
                 images_used = chosen
-                lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+                # Multi-picture layouts have no single picture to describe;
+                # overlays apply to per-picture panels only (Overlays tab).
+                lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                    profile,
+                    wallpaper,
+                    dry_run=dry_run,
+                    rng=rng,
+                    cancelled=cancelled,
+                    monitors=monitors,
+                )
                 break
     elif profile.mode == "same":
         pool = _load_image_pool(
@@ -1179,7 +1247,16 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            overlay_panels = panels_for_monitors(monitors, selections)
+            lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                profile,
+                wallpaper,
+                dry_run=dry_run,
+                rng=rng,
+                cancelled=cancelled,
+                monitors=monitors,
+                overlay_panels=overlay_panels,
+            )
     elif profile.mode == "shared":
         pool = _load_image_pool(
             [*profile.shared_folders, *web_folders],
@@ -1224,7 +1301,16 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            overlay_panels = panels_for_monitors(monitors, selections)
+            lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                profile,
+                wallpaper,
+                dry_run=dry_run,
+                rng=rng,
+                cancelled=cancelled,
+                monitors=monitors,
+                overlay_panels=overlay_panels,
+            )
     else:
         pools_by_monitor: dict[str, _ImagePool] = {}
         missing_monitors: list[str] = []
@@ -1276,7 +1362,16 @@ def _switch_once_with_state(
                 bar_color=profile.bar_color,
                 fit_mode=profile.fit_mode,
             )
-            lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
+            overlay_panels = panels_for_monitors(monitors, selections)
+            lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                profile,
+                wallpaper,
+                dry_run=dry_run,
+                rng=rng,
+                cancelled=cancelled,
+                monitors=monitors,
+                overlay_panels=overlay_panels,
+            )
 
     if next_slot is not None:
         state.wallpaper_slot = next_slot
@@ -1295,6 +1390,7 @@ def _switch_once_with_state(
         action=action,
         lockscreen_note=lockscreen_note,
         web_sources=[status.to_dict() for status in web_source_statuses],
+        overlay_note=overlay_note,
     )
 
 
@@ -1528,6 +1624,8 @@ def run_loop(
                 )
                 if result.lockscreen_note:
                     print(result.lockscreen_note, flush=True)
+                if result.overlay_note:
+                    print(result.overlay_note, flush=True)
             except Exception as exc:
                 print(f"Mint Background Switcher error: {exc}", flush=True)
         elif night_action == "exit":
@@ -1547,6 +1645,8 @@ def run_loop(
                     print("Night schedule ended; resuming rotation", flush=True)
                     if result.lockscreen_note:
                         print(result.lockscreen_note, flush=True)
+                    if result.overlay_note:
+                        print(result.overlay_note, flush=True)
                 except CollectionUnavailableError as exc:
                     print(
                         f"{exc}; keeping the current wallpaper and retrying on the next tick",
@@ -1580,6 +1680,8 @@ def run_loop(
                     print(f"Generated {result.wallpaper} for {len(result.monitors)} monitor(s)", flush=True)
                     if result.lockscreen_note:
                         print(result.lockscreen_note, flush=True)
+                    if result.overlay_note:
+                        print(result.overlay_note, flush=True)
                 except CollectionUnavailableError as exc:
                     print(
                         f"{exc}; keeping the current wallpaper and retrying on the next tick",

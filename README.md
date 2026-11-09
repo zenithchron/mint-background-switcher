@@ -16,7 +16,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
-- Settings with a persistent Profile, Layout, and Save Profile strip above eight task-based pages: Sources, Layout & Appearance, Rotation & Shortcuts, Conditions, Never Show Again, Public Collections, Storage, and Updates & About.
+- Settings with a persistent Profile, Layout, and Save Profile strip above nine task-based pages: Sources, Layout & Appearance, Overlays, Rotation & Shortcuts, Conditions, Never Show Again, Public Collections, Storage, and Updates & About.
 - Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, twelve selectable solid or procedurally textured backgrounds, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
 - Selectable, validated working-file storage for generated wallpapers and the image-library index.
@@ -32,6 +32,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.
 - Per-profile display fit modes for fitted panels and montage/collage cells: fit with bars (default, historical), center, scale to fit, stretch, scale and crop (overscale), and scale and blur edges.
 - Optional per-profile **Mirror wallpaper to the lock screen** toggle: GNOME gets an explicit lock-screen image on every rotation (Cinnamon already shows the desktop wallpaper on its lock screen; other desktops keep their own lock screen).
+- Per-profile **picture overlays** under **Settings → Overlays**: optional title / photographer / date text drawn on top of the wallpaper for Shared, Same, Per-monitor, and Span layouts (multi-picture layouts never draw overlays), with per-profile **no-draw zones** (whole-desktop or per-monitor, pixel coordinates, up to 8) that the overlay panel always respects. Rendering happens at physical panel resolution, so overlays stay sharp on fractional-scale displays; anything that prevents drawing (a full zone, missing metadata, an error) skips that panel only and is reported as an `overlays` note. CLI: `mint-background-switcher overlay-info <image>` and `overlay-preview <image> [--out FILE] [--width N] [--height N] [--profile NAME]`.
 - Per-profile **run conditions** that pause scheduled switching while a local condition holds: a named process is running, the laptop is on battery, a remote (VNC) session is active, the session has not been idle long enough, or the session is locked / the screensaver is active. Explicit switches (Save & Apply Now, `next`, resuming) always apply, and a condition that cannot be detected never blocks.
 - Safe login autostart that waits for Cinnamon before rotating.
 - Black-screen/privacy mode that stays black until resumed.
@@ -41,6 +42,11 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.23 - 2026-11-09
+
+- Added per-profile **picture overlays** (JBS OVR-01..OVR-05) under **Settings → Overlays** (new page): optional title / photographer / date text drawn on top of the composed wallpaper for Shared, Same, Per-monitor, and Span layouts (multi-picture layouts never draw overlays), plus up to 8 per-profile **no-draw zones** in pixel coordinates (whole-desktop or per-monitor) that the overlay panel always respects. Overlays compose with the selected display fit mode and render at physical panel resolution, so they stay sharp on fractional-scale displays; anything that prevents drawing skips that panel only and is reported as an `overlays` note by Save & Apply Now, the background loop, and the CLI.
+- CLI: `mint-background-switcher overlay-info <image>` (title/photographer/date as JSON) and `overlay-preview <image> [--out FILE] [--width N] [--height N] [--profile NAME]` (standalone preview image). Bumped the package version to `0.2.23`.
 
 ### 0.2.22 - 2026-11-08
 

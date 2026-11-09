@@ -14,6 +14,7 @@ from .config import ensure_config, load_config
 from .config_io import ConfigImportError, export_config, export_document, import_settings, load_export
 from .hotkeys import HOTKEY_ACTIONS, register_all_cinnamon_hotkeys, register_cinnamon_hotkey
 from .monitor import detect_monitors
+from .overlays import overlays_enabled, read_picture_info, render_overlay_preview
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
 from .service import (
@@ -62,6 +63,8 @@ def _print_result(result) -> None:
     print(f"applied={result.applied}")
     if result.lockscreen_note:
         print(f"lock_screen={result.lockscreen_note}")
+    if result.overlay_note:
+        print(f"overlays={result.overlay_note}")
     if result.web_sources:
         print("web_sources:")
         for status in result.web_sources:
@@ -182,6 +185,26 @@ def build_parser() -> argparse.ArgumentParser:
     ws_refresh = web_source_sub.add_parser("refresh", help="Download/update the profile's web sources now")
     ws_refresh.add_argument("--profile")
     ws_refresh.add_argument("--dry-run", action="store_true", help="Report cache state without downloading")
+
+    overlay_info = sub.add_parser(
+        "overlay-info",
+        help="Print the picture title, photographer, and date that MBS would show for one image",
+    )
+    overlay_info.add_argument("image", help="Picture file")
+
+    overlay_preview = sub.add_parser(
+        "overlay-preview",
+        help="Render a preview image of the picture overlay for one picture",
+    )
+    overlay_preview.add_argument("image", help="Picture file")
+    overlay_preview.add_argument("--out", default=None, help="Output file (default: overlay-preview alongside the picture)")
+    overlay_preview.add_argument("--width", type=int, default=1920, help="Preview width in pixels (default: 1920)")
+    overlay_preview.add_argument("--height", type=int, default=1080, help="Preview height in pixels (default: 1080)")
+    overlay_preview.add_argument(
+        "--profile",
+        default=None,
+        help="Profile whose overlay settings to use (default: active profile; if overlays are disabled, all fields are shown)",
+    )
     return parser
 
 
@@ -360,6 +383,48 @@ def main(argv: list[str] | None = None) -> int:
         except (ValueError, WorkingDirectoryError) as exc:
             print(f"web-source failed: {exc}", file=sys.stderr)
             return 1
+    if args.command == "overlay-info":
+        info = read_picture_info(Path(args.image))
+        print(json.dumps({
+            "title": info.title,
+            "photographer": info.artist,
+            "date": info.date_text,
+        }, indent=2, sort_keys=True))
+        return 0
+    if args.command == "overlay-preview":
+        try:
+            image_path = Path(args.image).expanduser()
+            if not image_path.is_file():
+                print(f"overlay-preview failed: no such file: {image_path}", file=sys.stderr)
+                return 1
+            cfg = load_config(create=False)
+            profile = cfg.get_profile(args.profile)
+            if overlays_enabled(profile):
+                show_title = profile.overlay_title
+                show_artist = profile.overlay_artist
+                show_date = profile.overlay_date
+                zones = profile.no_draw_zones
+            else:
+                show_title = show_artist = show_date = True
+                zones = []
+            out = Path(args.out).expanduser() if args.out else image_path.with_name(f"overlay-preview{image_path.suffix or '.png'}")
+            render_overlay_preview(
+                image_path,
+                out,
+                width=args.width,
+                height=args.height,
+                fit_mode=profile.fit_mode,
+                bar_color=profile.bar_color,
+                show_title=show_title,
+                show_artist=show_artist,
+                show_date=show_date,
+                zones=zones,
+            )
+            print(out)
+        except (ValueError, OSError, WorkingDirectoryError) as exc:
+            print(f"overlay-preview failed: {exc}", file=sys.stderr)
+            return 1
+        return 0
     parser.error(f"Unhandled command: {args.command}")
     return 2
 

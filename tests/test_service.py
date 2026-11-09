@@ -2215,6 +2215,36 @@ def test_run_loop_rotates_on_first_cycle_by_default(monkeypatch, tmp_path: Path)
     assert len(calls) == 2
 
 
+def test_run_loop_prints_overlay_note(monkeypatch, tmp_path: Path, capsys):
+    # The background loop surfaces the overlay outcome exactly like the
+    # lockscreen note (documented contract: Save & Apply Now, loop, CLI).
+    _setup_profile(monkeypatch, tmp_path)
+    note = "Overlay: picture info drawn on 1 panel."
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: SimpleNamespace(
+            wallpaper=str(tmp_path / "generated.png"),
+            monitors=["monitor-a"],
+            lockscreen_note="",
+            overlay_note=note,
+        ),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 1:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+    assert note in capsys.readouterr().out
+
+
 def test_run_loop_skip_first_keeps_current_background_until_next_interval(monkeypatch, tmp_path: Path):
     _setup_profile(monkeypatch, tmp_path)
 

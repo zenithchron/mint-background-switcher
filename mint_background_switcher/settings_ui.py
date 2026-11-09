@@ -54,6 +54,7 @@ from .service import (
     switch_once,
 )
 from .sources import MAX_WEB_SOURCES, validate_web_url
+from .overlays import MAX_NO_DRAW_ZONES, MAX_ZONE_COORD, NoDrawZone
 from .availability import CollectionUnavailableError
 from .working_storage import (
     MARKER_FILENAME,
@@ -298,6 +299,11 @@ class SettingsApp(tk.Tk):
         self.idle_only_var = tk.BooleanVar(value=False)
         self.idle_seconds_var = tk.StringVar(value=str(DEFAULT_IDLE_SECONDS))
         self.suppress_locked_var = tk.BooleanVar(value=False)
+        self.overlay_title_var = tk.BooleanVar(value=False)
+        self.overlay_artist_var = tk.BooleanVar(value=False)
+        self.overlay_date_var = tk.BooleanVar(value=False)
+        self.no_draw_zones_status_var = tk.StringVar(value="")
+        self._no_draw_zones_display: list[tuple[str, int, int, int, int]] = []
         self.hotkey_var = tk.StringVar()
         self.next_hotkey_var = tk.StringVar()
         self.pause_hotkey_var = tk.StringVar()
@@ -452,6 +458,7 @@ class SettingsApp(tk.Tk):
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
         self.sources_tab = ttk.Frame(self.notebook, padding=9)
         self.layout_tab = ttk.Frame(self.notebook, padding=12)
+        self.overlays_tab = ttk.Frame(self.notebook, padding=12)
         self.rotation_tab = ttk.Frame(self.notebook, padding=12)
         self.conditions_tab = ttk.Frame(self.notebook, padding=12)
         self.excluded_tab = ttk.Frame(self.notebook, padding=12)
@@ -462,6 +469,7 @@ class SettingsApp(tk.Tk):
         self.general_tab = self.sources_tab
         self.notebook.add(self.sources_tab, text="Sources", underline=0)
         self.notebook.add(self.layout_tab, text="Layout & Appearance", underline=0)
+        self.notebook.add(self.overlays_tab, text="Overlays", underline=0)
         self.notebook.add(self.rotation_tab, text="Rotation & Shortcuts", underline=0)
         self.notebook.add(self.conditions_tab, text="Conditions", underline=0)
         self.notebook.add(self.excluded_tab, text="Never Show Again", underline=0)
@@ -804,6 +812,82 @@ class SettingsApp(tk.Tk):
         self.monitor_text = tk.Text(monitor_frame, height=6, width=48)
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
         self._refresh_layout_workspace()
+
+        self.overlays_scope_label = ttk.Label(
+            self.overlays_tab,
+            textvariable=self.profile_scope_var,
+            style="Heading.TLabel",
+        )
+        self.overlays_scope_label.pack(anchor="w", pady=(0, 4))
+        ttk.Label(
+            self.overlays_tab,
+            text=(
+                "Draw the picture's title, photographer, and date on top of the wallpaper. "
+                "Works with the Shared, Same, Per-monitor, and Span layouts; multi-picture layouts "
+                "(Montage, Collage, Postcard, Polaroid) never draw overlays. Text is rendered at "
+                "panel resolution, so it stays sharp on scaled displays."
+            ),
+            justify=tk.LEFT,
+            wraplength=720,
+        ).pack(anchor="w", pady=(0, 6))
+        overlay_info_frame = ttk.LabelFrame(self.overlays_tab, text="Picture information", padding=(10, 6))
+        overlay_info_frame.pack(fill=tk.X, pady=(0, 8))
+        self.overlay_title_checkbutton = ttk.Checkbutton(
+            overlay_info_frame,
+            text="Show picture title (file name when the picture stores no title)",
+            variable=self.overlay_title_var,
+        )
+        self.overlay_title_checkbutton.pack(anchor="w")
+        self.overlay_artist_checkbutton = ttk.Checkbutton(
+            overlay_info_frame,
+            text="Show photographer",
+            variable=self.overlay_artist_var,
+        )
+        self.overlay_artist_checkbutton.pack(anchor="w")
+        self.overlay_date_checkbutton = ttk.Checkbutton(
+            overlay_info_frame,
+            text="Show picture date (file date when the picture stores no date)",
+            variable=self.overlay_date_var,
+        )
+        self.overlay_date_checkbutton.pack(anchor="w")
+        overlay_zones_frame = ttk.LabelFrame(self.overlays_tab, text="No-draw zones", padding=(10, 6))
+        overlay_zones_frame.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(
+            overlay_zones_frame,
+            text=(
+                "The overlay panel is never drawn inside these regions. Coordinates are pixels, "
+                "monitor-local for a chosen screen, or whole-desktop for All screens."
+            ),
+            justify=tk.LEFT,
+            wraplength=720,
+        ).pack(anchor="w", pady=(0, 4))
+        self.no_draw_zones_list = tk.Listbox(overlay_zones_frame, height=4, width=66)
+        self.no_draw_zones_list.pack(fill=tk.X, pady=(0, 4))
+        zone_entry_row = ttk.Frame(overlay_zones_frame)
+        zone_entry_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(zone_entry_row, text="Screen:").pack(side=tk.LEFT)
+        self.no_draw_monitor_combo = ttk.Combobox(
+            zone_entry_row,
+            state="readonly",
+            width=16,
+            values=["All screens", *self.monitor_names],
+        )
+        self.no_draw_monitor_combo.set("All screens")
+        self.no_draw_monitor_combo.pack(side=tk.LEFT, padx=(4, 10))
+        self.no_draw_x_entry = ttk.Entry(zone_entry_row, width=6)
+        self.no_draw_y_entry = ttk.Entry(zone_entry_row, width=6)
+        self.no_draw_w_entry = ttk.Entry(zone_entry_row, width=6)
+        self.no_draw_h_entry = ttk.Entry(zone_entry_row, width=6)
+        for label_text, entry in (("X:", self.no_draw_x_entry), ("Y:", self.no_draw_y_entry), ("W:", self.no_draw_w_entry), ("H:", self.no_draw_h_entry)):
+            ttk.Label(zone_entry_row, text=label_text).pack(side=tk.LEFT)
+            entry.pack(side=tk.LEFT, padx=(2, 8))
+        self.add_no_draw_zone_button = ttk.Button(zone_entry_row, text="Add zone", command=self._add_no_draw_zone)
+        self.add_no_draw_zone_button.pack(side=tk.LEFT, padx=(4, 4))
+        self.remove_no_draw_zone_button = ttk.Button(
+            zone_entry_row, text="Remove selected", command=self._remove_selected_no_draw_zone
+        )
+        self.remove_no_draw_zone_button.pack(side=tk.LEFT)
+        ttk.Label(self.overlays_tab, textvariable=self.no_draw_zones_status_var, justify=tk.LEFT).pack(anchor="w")
 
         self.rotation_scope_label = ttk.Label(
             self.rotation_tab,
@@ -1405,6 +1489,15 @@ class SettingsApp(tk.Tk):
             web_text.insert(tk.END, "\n".join(entry["url"] for entry in profile.web_sources))
             self.web_url_entry.delete(0, tk.END)
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
+        self.overlay_title_var.set(profile.overlay_title)
+        self.overlay_artist_var.set(profile.overlay_artist)
+        self.overlay_date_var.set(profile.overlay_date)
+        self._no_draw_zones_display = [
+            (zone.monitor, zone.left, zone.top, zone.width, zone.height)
+            for zone in profile.no_draw_zones
+        ]
+        self._refresh_no_draw_zones_list()
+        self.no_draw_zones_status_var.set("")
         self._refresh_excluded_tab()
 
     def _refresh_excluded_tab(self) -> None:
@@ -1721,6 +1814,22 @@ class SettingsApp(tk.Tk):
                 raise ValueError(
                     "Invalid web source URL(s) — use direct http/https image URLs:\n" + shown + extra
                 )
+        # Overlay fields live on the Overlays page; carry the saved values forward when the
+        # widgets are absent (partial construction) so saving never fails or wipes zones.
+        overlay_title_var = vars(self).get("overlay_title_var")
+        overlay_title = bool(overlay_title_var.get()) if overlay_title_var is not None else False
+        overlay_artist_var = vars(self).get("overlay_artist_var")
+        overlay_artist = bool(overlay_artist_var.get()) if overlay_artist_var is not None else False
+        overlay_date_var = vars(self).get("overlay_date_var")
+        overlay_date = bool(overlay_date_var.get()) if overlay_date_var is not None else False
+        zones_display = vars(self).get("_no_draw_zones_display")
+        if zones_display is None:
+            no_draw_zones = list(existing.no_draw_zones) if existing is not None else []
+        else:
+            no_draw_zones = [
+                NoDrawZone(monitor, left, top, width, height)
+                for monitor, left, top, width, height in zones_display
+            ]
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -1765,6 +1874,10 @@ class SettingsApp(tk.Tk):
             polaroid_tilt=polaroid_tilt,
             excluded_images=excluded_images,
             web_sources=web_sources,
+            overlay_title=overlay_title,
+            overlay_artist=overlay_artist,
+            overlay_date=overlay_date,
+            no_draw_zones=no_draw_zones,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
@@ -2326,6 +2439,60 @@ class SettingsApp(tk.Tk):
         except Exception as exc:
             messagebox.showerror("Could not add folder", str(exc))
 
+    def _zone_display_label(self, monitor: str, left: int, top: int, width: int, height: int) -> str:
+        screen = "All screens" if not monitor else monitor
+        return f"{screen} — x={left}, y={top}, w={width}, h={height}"
+
+    def _refresh_no_draw_zones_list(self) -> None:
+        self.no_draw_zones_list.delete(0, tk.END)
+        for zone in self._no_draw_zones_display:
+            self.no_draw_zones_list.insert(tk.END, self._zone_display_label(*zone))
+
+    def _add_no_draw_zone(self) -> None:
+        monitor = self.no_draw_monitor_combo.get()
+        monitor = "" if monitor == "All screens" else monitor
+        values: dict[str, int] = {}
+        for name, entry in (
+            ("X", self.no_draw_x_entry),
+            ("Y", self.no_draw_y_entry),
+            ("W", self.no_draw_w_entry),
+            ("H", self.no_draw_h_entry),
+        ):
+            text = entry.get().strip()
+            try:
+                values[name] = int(text)
+            except ValueError:
+                self.no_draw_zones_status_var.set(f"{name} must be a whole number of pixels.")
+                return
+        left, top, width, height = values["X"], values["Y"], values["W"], values["H"]
+        if not 0 <= left <= MAX_ZONE_COORD or not 0 <= top <= MAX_ZONE_COORD:
+            self.no_draw_zones_status_var.set(f"X and Y must be between 0 and {MAX_ZONE_COORD:,} pixels.")
+            return
+        if not 1 <= width <= MAX_ZONE_COORD or not 1 <= height <= MAX_ZONE_COORD:
+            self.no_draw_zones_status_var.set(f"Width and height must be between 1 and {MAX_ZONE_COORD:,} pixels.")
+            return
+        zone = (monitor, left, top, width, height)
+        if zone in self._no_draw_zones_display:
+            self.no_draw_zones_status_var.set("That zone is already in the list.")
+            return
+        if len(self._no_draw_zones_display) >= MAX_NO_DRAW_ZONES:
+            self.no_draw_zones_status_var.set(f"At most {MAX_NO_DRAW_ZONES} zones can be saved per profile.")
+            return
+        self._no_draw_zones_display.append(zone)
+        self._refresh_no_draw_zones_list()
+        for entry in (self.no_draw_x_entry, self.no_draw_y_entry, self.no_draw_w_entry, self.no_draw_h_entry):
+            entry.delete(0, tk.END)
+        self.no_draw_zones_status_var.set(f"Added zone: {self._zone_display_label(*zone)}. Save the profile to keep it.")
+
+    def _remove_selected_no_draw_zone(self) -> None:
+        selection = self.no_draw_zones_list.curselection()
+        if not selection:
+            self.no_draw_zones_status_var.set("Select a zone in the list first.")
+            return
+        removed = self._no_draw_zones_display.pop(selection[0])
+        self._refresh_no_draw_zones_list()
+        self.no_draw_zones_status_var.set(f"Removed zone: {self._zone_display_label(*removed)}. Save the profile to keep it.")
+
     def _any_worker_busy(self) -> bool:
         return bool(
             self._optional_attr("_update_busy", False)
@@ -2784,6 +2951,9 @@ class SettingsApp(tk.Tk):
                         lockscreen_note = getattr(result, "lockscreen_note", "") or ""
                         if lockscreen_note:
                             detail = f"{detail}\n\n{lockscreen_note}"
+                        overlay_note = getattr(result, "overlay_note", "") or ""
+                        if overlay_note:
+                            detail = f"{detail}\n\n{overlay_note}"
                         messagebox.showinfo(title, detail, parent=self)
         except queue.Empty:
             pass

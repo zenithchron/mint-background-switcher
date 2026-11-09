@@ -240,6 +240,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert [app.notebook.tab(page, "text") for page in pages] == [
             "Sources",
             "Layout & Appearance",
+            "Overlays",
             "Rotation & Shortcuts",
             "Conditions",
             "Never Show Again",
@@ -247,7 +248,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             "Storage",
             "Updates & About",
         ]
-        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 0, 0, 1, 0]
+        assert [app.notebook.tab(page, "underline") for page in pages] == [0, 0, 0, 0, 0, 0, 0, 1, 0]
         app.notebook.select(app.sources_tab)
         app.notebook.focus_force()
         app.update()
@@ -262,6 +263,12 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.match_orientation_checkbutton, app.sources_tab)
         assert is_descendant(app.effect_menu, app.layout_tab)
         assert is_descendant(app.bar_color_menu, app.layout_tab)
+        assert is_descendant(app.overlay_title_checkbutton, app.overlays_tab)
+        assert is_descendant(app.overlay_artist_checkbutton, app.overlays_tab)
+        assert is_descendant(app.overlay_date_checkbutton, app.overlays_tab)
+        assert is_descendant(app.no_draw_zones_list, app.overlays_tab)
+        assert is_descendant(app.add_no_draw_zone_button, app.overlays_tab)
+        assert is_descendant(app.remove_no_draw_zone_button, app.overlays_tab)
         assert is_descendant(app.interval_entry, app.rotation_tab)
         assert is_descendant(app.sequential_checkbutton, app.rotation_tab)
         assert is_descendant(app.hotkey_entry, app.rotation_tab)
@@ -296,6 +303,20 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.shared_text,
             ),
             str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu, app.fit_mode_menu),
+            str(app.overlays_tab): (
+                app.overlays_scope_label,
+                app.overlay_title_checkbutton,
+                app.overlay_artist_checkbutton,
+                app.overlay_date_checkbutton,
+                app.no_draw_zones_list,
+                app.no_draw_monitor_combo,
+                app.no_draw_x_entry,
+                app.no_draw_y_entry,
+                app.no_draw_w_entry,
+                app.no_draw_h_entry,
+                app.add_no_draw_zone_button,
+                app.remove_no_draw_zone_button,
+            ),
             str(app.rotation_tab): (
                 app.rotation_scope_label,
                 app.interval_entry,
@@ -1931,6 +1952,7 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
         assert tab_labels == [
             "Sources",
             "Layout & Appearance",
+            "Overlays",
             "Rotation & Shortcuts",
             "Conditions",
             "Never Show Again",
@@ -4259,6 +4281,62 @@ def test_save_current_persists_hotkey_bindings(monkeypatch):
     assert profile.black_hotkey == "<Ctrl>b"
     assert profile.next_hotkey == "<Super>n"
     assert profile.pause_hotkey == "<Super>p"
+
+
+def test_save_current_partial_app_carries_forward_no_draw_zones(monkeypatch):
+    # A partially constructed app (no Overlays page widgets) must save cleanly
+    # and keep the saved profile's no-draw zones instead of wiping them.
+    saved = []
+    monkeypatch.setattr(settings_ui, "save_config", lambda cfg: saved.append(cfg))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "profile_var", _Var("P"))
+    setattr(dummy, "profile_combo", _Combo())
+    setattr(dummy, "interval_var", _Var("10"))
+    setattr(dummy, "mode_var", _Var("shared"))
+    setattr(dummy, "recursive_var", _Var(True))
+    setattr(dummy, "min_image_size_var", _Var("0"))
+    setattr(dummy, "ignore_hidden_var", _Var(True))
+    setattr(dummy, "ignore_patterns_var", _Var(""))
+    setattr(dummy, "image_types_var", _Var("png,jpg"))
+    setattr(dummy, "sequential_var", _Var(False))
+    setattr(dummy, "match_orientation_var", _Var(False))
+    setattr(dummy, "rotate_on_startup_var", _Var(False))
+    setattr(dummy, "night_black_screen_var", _Var(False))
+    setattr(dummy, "night_start_var", _Var("22:00"))
+    setattr(dummy, "night_end_var", _Var("06:00"))
+    setattr(dummy, "mirror_lockscreen_var", _Var(False))
+    setattr(dummy, "suppress_process_var", _Var(False))
+    setattr(dummy, "suppress_process_name_var", _Var(""))
+    setattr(dummy, "suppress_battery_var", _Var(False))
+    setattr(dummy, "suppress_remote_var", _Var(False))
+    setattr(dummy, "idle_only_var", _Var(False))
+    setattr(dummy, "idle_seconds_var", _Var("300"))
+    setattr(dummy, "hotkey_var", _Var("<Ctrl>b"))
+    setattr(dummy, "next_hotkey_var", _Var("<Super>n"))
+    setattr(dummy, "pause_hotkey_var", _Var("<Super>p"))
+    setattr(dummy, "desktop_var", _Var("auto"))
+    setattr(dummy, "effect_var", _Var("none"))
+    setattr(dummy, "bar_color_var", _Var("black"))
+    setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
+    setattr(dummy, "shared_text", _Text("/shared"))
+    setattr(dummy, "monitor_text", _Text(""))
+    setattr(
+        dummy,
+        "config_data",
+        settings_ui.Config(
+            active_profile="P",
+            profiles={
+                "P": settings_ui.Profile(
+                    name="P",
+                    no_draw_zones=[settings_ui.NoDrawZone("A", 1, 2, 3, 4)],
+                )
+            },
+        ),
+    )
+
+    assert settings_ui.SettingsApp._save_current(dummy) is True
+    assert saved[0].profiles["P"].no_draw_zones == [settings_ui.NoDrawZone("A", 1, 2, 3, 4)]
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")

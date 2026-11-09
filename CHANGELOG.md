@@ -4,6 +4,21 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.23] - 2026-11-09
+
+### Added
+
+- **Desktop picture overlays** (JBS OVR-01..OVR-05) — optional picture information drawn on top of the composed wallpaper:
+  - **Settings → Overlays** (new page, between Layout & Appearance and Rotation & Shortcuts): per-profile toggles for **Show picture title** (EXIF title, falling back to the file name), **Show photographer** (EXIF artist), and **Show picture date** (EXIF date, falling back to the file date), plus a **No-draw zones** editor (up to 8 zones per profile; whole-desktop or per-monitor; coordinates in pixels with Add zone / Remove selected and visible validation feedback).
+  - Overlays compose with every single-picture layout — Shared, Same, Per-monitor, and Span — on top of whatever the selected display fit mode produced; multi-picture layouts (Montage, Collage, Postcard, Polaroid) never draw overlays. Panels are rendered at physical panel resolution, so text stays sharp and proportionally sized on fractional-scale (e.g. 125%) displays.
+  - **Fail-open by design**: a zone, missing metadata, or any drawing error skips the affected panel only — rotation always succeeds, and the outcome is reported by **Save & Apply Now**, the background loop, and the CLI (`overlays=` line).
+  - CLI for automation: `mint-background-switcher overlay-info <image>` (print title/photographer/date as JSON) and `mint-background-switcher overlay-preview <image> [--out FILE] [--width N] [--height N] [--profile NAME]` (render a standalone preview image of the overlay).
+
+### Changed
+
+- The Settings window now has nine task-based pages (Overlays added); the fixed 944×668 minimum geometry is unchanged.
+- Bumped the package version to `0.2.23`.
+
 ## [0.2.22] - 2026-11-08
 
 ### Added

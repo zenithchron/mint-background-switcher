@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from .paths import config_file, xdg_config_dir
 from .sources import MAX_WEB_SOURCES, coerce_web_sources
+from .overlays import NoDrawZone, coerce_no_draw_zones
 from .storage import (
     atomic_write_json_unlocked,
     locked_file,
@@ -367,6 +368,11 @@ class Profile:
     next_hotkey: str = DEFAULT_NEXT_HOTKEY
     pause_hotkey: str = DEFAULT_PAUSE_HOTKEY
     web_sources: list[dict[str, str]] = field(default_factory=list)
+    # Picture overlay (JBS OVR-01..OVR-04)
+    overlay_title: bool = False
+    overlay_artist: bool = False
+    overlay_date: bool = False
+    no_draw_zones: list[NoDrawZone] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -416,6 +422,10 @@ class Profile:
             next_hotkey=_coerce_hotkey(data.get("next_hotkey"), DEFAULT_NEXT_HOTKEY),
             pause_hotkey=_coerce_hotkey(data.get("pause_hotkey"), DEFAULT_PAUSE_HOTKEY),
             web_sources=coerce_web_sources(data.get("web_sources", [])),
+            overlay_title=_coerce_bool(data.get("overlay_title", False)),
+            overlay_artist=_coerce_bool(data.get("overlay_artist", False)),
+            overlay_date=_coerce_bool(data.get("overlay_date", False)),
+            no_draw_zones=coerce_no_draw_zones(data.get("no_draw_zones", [])),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -462,6 +472,10 @@ class Profile:
             "next_hotkey": self.next_hotkey,
             "pause_hotkey": self.pause_hotkey,
             "web_sources": [dict(entry) for entry in self.web_sources],
+            "overlay_title": self.overlay_title,
+            "overlay_artist": self.overlay_artist,
+            "overlay_date": self.overlay_date,
+            "no_draw_zones": [zone.to_dict() for zone in self.no_draw_zones],
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,
