@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .paths import config_file, xdg_config_dir
-from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, lock_path_for, read_json_unlocked
+from .sources import MAX_WEB_SOURCES, coerce_web_sources
+from .storage import (
+    atomic_write_json_unlocked,
+    locked_file,
+    locked_read_json,
+    lock_path_for,
+    read_json_unlocked,
+)
 
 CONFIG_VERSION = 2
 VALID_MODES = {
@@ -359,6 +366,7 @@ class Profile:
     # (see tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
     next_hotkey: str = DEFAULT_NEXT_HOTKEY
     pause_hotkey: str = DEFAULT_PAUSE_HOTKEY
+    web_sources: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -407,6 +415,7 @@ class Profile:
             black_hotkey=_coerce_hotkey(data.get("black_hotkey"), DEFAULT_BLACK_HOTKEY),
             next_hotkey=_coerce_hotkey(data.get("next_hotkey"), DEFAULT_NEXT_HOTKEY),
             pause_hotkey=_coerce_hotkey(data.get("pause_hotkey"), DEFAULT_PAUSE_HOTKEY),
+            web_sources=coerce_web_sources(data.get("web_sources", [])),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -452,6 +461,7 @@ class Profile:
             "black_hotkey": self.black_hotkey,
             "next_hotkey": self.next_hotkey,
             "pause_hotkey": self.pause_hotkey,
+            "web_sources": [dict(entry) for entry in self.web_sources],
             "desktop": self.desktop,
             "effect": self.effect,
             "bar_color": self.bar_color,

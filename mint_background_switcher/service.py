@@ -9,9 +9,10 @@ import shutil
 import stat
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .availability import CollectionUnavailableError, probe_folders
 from .config import (
@@ -41,6 +42,14 @@ from .library_index import IndexSnapshot, LibraryIndex, LibrarySelection, orient
 from .monitor import Monitor, detect_monitors, monitor_orientation
 from .paths import generated_wallpaper_path
 from .run_conditions import active_run_conditions
+from .sources import (
+    MAX_WEB_SOURCES,
+    WebSourceCancelled,
+    WebSourceStatus,
+    refresh_web_sources,
+    validate_web_url,
+    web_source_cache_dir,
+)
 from .state import RuntimeState, draw_many, load_state, state_transaction
 from .storage import atomic_write_json_unlocked, locked_file, lock_path_for, read_json_unlocked
 from .working_storage import ensure_configured_working_directory
@@ -55,6 +64,7 @@ class SwitchResult:
     applied: bool
     action: str
     lockscreen_note: str = ""
+    web_sources: list[dict[str, str]] = field(default_factory=list)
 
 
 class SwitchCancelled(RuntimeError):
@@ -114,8 +124,8 @@ def _exclusion_match_set(profile: Profile) -> frozenset[str]:
     return frozenset(matches)
 
 
-def _mutate_excluded_images(profile_name: str | None, mutate: Callable[[Profile], list[str]]) -> list[str]:
-    """Apply one never-show-again change to the freshest saved config."""
+def _mutate_profile(profile_name: str | None, mutate: Callable[[Profile], Any]) -> Any:
+    """Apply one change to the profile in the freshest saved config."""
     path = config_file()
     with locked_file(lock_path_for(path)):
         config = Config.from_dict(read_json_unlocked(path)) if path.exists() else Config.default()
@@ -123,6 +133,11 @@ def _mutate_excluded_images(profile_name: str | None, mutate: Callable[[Profile]
         result = mutate(profile)
         atomic_write_json_unlocked(path, config.to_dict())
     return result
+
+
+def _mutate_excluded_images(profile_name: str | None, mutate: Callable[[Profile], list[str]]) -> list[str]:
+    """Apply one never-show-again change to the freshest saved config."""
+    return _mutate_profile(profile_name, mutate)
 
 
 def get_excluded_images(profile_name: str | None = None) -> list[str]:
@@ -181,6 +196,97 @@ def clear_excluded_images(profile_name: str | None) -> int:
         return removed
 
     return len(_mutate_excluded_images(profile_name, _clear))
+
+
+def _web_sources_pool_folders(
+    profile: Profile,
+    working_directory: Path,
+    *,
+    dry_run: bool,
+    cancelled: Callable[[], bool] | None,
+) -> tuple[list[str], list[WebSourceStatus]]:
+    """Resolve the profile's web sources to a cache folder for the rotation pool.
+
+    Web sources are fail-open: refresh failures are recorded per source and
+    simply produce no images from that source this switch. A dry run reports
+    cache state without any network access.
+    """
+    if not profile.web_sources:
+        return [], []
+    try:
+        statuses = refresh_web_sources(profile, working_directory, dry_run=dry_run, cancelled=cancelled)
+    except WebSourceCancelled as exc:
+        raise SwitchCancelled(str(exc)) from exc
+    cache_dir = web_source_cache_dir(working_directory)
+    try:
+        has_files = any(entry.is_file() for entry in cache_dir.iterdir())
+    except OSError:
+        has_files = False
+    return ([str(cache_dir)] if has_files else []), statuses
+
+
+def list_web_sources(profile_name: str | None = None) -> list[dict[str, str]]:
+    """Return the profile's web source entries (read-only)."""
+    return [dict(entry) for entry in load_config(create=False).get_profile(profile_name).web_sources]
+
+
+def add_web_source(profile_name: str | None, raw_url: str) -> list[dict[str, str]]:
+    """Add one direct image URL to the profile's web sources."""
+    url = validate_web_url(raw_url)
+    if url is None:
+        raise ValueError(f"not a valid direct image URL (use http:// or https://): {raw_url!r}")
+
+    def _add(profile: Profile) -> list[dict[str, str]]:
+        for entry in profile.web_sources:
+            if entry["url"] == url:
+                raise ValueError(f"already listed: {url}")
+        if len(profile.web_sources) >= MAX_WEB_SOURCES:
+            raise ValueError(f"a profile can list at most {MAX_WEB_SOURCES} web sources")
+        profile.web_sources = [*profile.web_sources, {"type": "url", "url": url}]
+        return [dict(entry) for entry in profile.web_sources]
+
+    return _mutate_profile(profile_name, _add)
+
+
+def remove_web_source(profile_name: str | None, raw_url: str) -> list[dict[str, str]]:
+    """Remove one direct image URL from the profile's web sources."""
+    url = validate_web_url(raw_url)
+    if url is None:
+        raise ValueError(f"not a valid direct image URL (use http:// or https://): {raw_url!r}")
+
+    def _remove(profile: Profile) -> list[dict[str, str]]:
+        if not any(entry["url"] == url for entry in profile.web_sources):
+            raise ValueError(f"not listed in this profile: {url}")
+        profile.web_sources = [entry for entry in profile.web_sources if entry["url"] != url]
+        return [dict(entry) for entry in profile.web_sources]
+
+    return _mutate_profile(profile_name, _remove)
+
+
+def refresh_web_sources_now(
+    profile_name: str | None = None,
+    *,
+    dry_run: bool = False,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[WebSourceStatus]:
+    """Resolve the profile's web sources to cached files now.
+
+    A non-dry run forces a re-download (ignoring the 24-hour window) so the
+    command works as "get the latest pictures now". A dry run reports which
+    sources have a cached copy without touching the network.
+    """
+    config = load_config(create=False)
+    profile = config.get_profile(profile_name)
+    if not profile.web_sources:
+        return []
+    working_directory = ensure_configured_working_directory(config)
+    return refresh_web_sources(
+        profile,
+        working_directory,
+        dry_run=dry_run,
+        force_refresh=not dry_run,
+        cancelled=cancelled,
+    )
 
 
 def exclude_current_images(
@@ -701,6 +807,12 @@ def _switch_once_with_state(
     profile = cfg.get_profile(profile_name)
     excluded_paths = _exclusion_match_set(profile)
     working_directory = ensure_configured_working_directory(cfg)
+    web_folders, web_source_statuses = _web_sources_pool_folders(
+        profile,
+        working_directory,
+        dry_run=dry_run,
+        cancelled=cancelled,
+    )
     index = None if dry_run else LibraryIndex(working_directory)
     selection = selection_scope.begin(index)
     if selection is not None and excluded_paths:
@@ -722,7 +834,7 @@ def _switch_once_with_state(
     lockscreen_note: str = ""
     if profile.mode == "span":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -758,7 +870,7 @@ def _switch_once_with_state(
             lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "montage":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -804,7 +916,7 @@ def _switch_once_with_state(
             lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "collage":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -880,7 +992,7 @@ def _switch_once_with_state(
                 break
     elif profile.mode == "postcard":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -954,7 +1066,7 @@ def _switch_once_with_state(
                 break
     elif profile.mode == "polaroid":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -1027,7 +1139,7 @@ def _switch_once_with_state(
                 break
     elif profile.mode == "same":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -1070,7 +1182,7 @@ def _switch_once_with_state(
             lockscreen_note = _apply_composed_wallpaper(profile, wallpaper, dry_run=dry_run, rng=rng, cancelled=cancelled)
     elif profile.mode == "shared":
         pool = _load_image_pool(
-            profile.shared_folders,
+            [*profile.shared_folders, *web_folders],
             profile.recursive,
             dry_run=dry_run,
             index=index,
@@ -1117,7 +1229,7 @@ def _switch_once_with_state(
         pools_by_monitor: dict[str, _ImagePool] = {}
         missing_monitors: list[str] = []
         for monitor in monitors:
-            folders = profile.folders_for_monitor(monitor.name)
+            folders = [*profile.folders_for_monitor(monitor.name), *web_folders]
             pool = _load_image_pool(
                 folders,
                 profile.recursive,
@@ -1182,6 +1294,7 @@ def _switch_once_with_state(
         applied=not dry_run,
         action=action,
         lockscreen_note=lockscreen_note,
+        web_sources=[status.to_dict() for status in web_source_statuses],
     )
 
 

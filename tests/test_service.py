@@ -2949,3 +2949,125 @@ def test_run_loop_keeps_wallpaper_and_retries_when_collection_unresponsive(
     assert "keeping the current wallpaper" in out
     assert "Mint Background Switcher error" not in out
     assert len(sleeps) == 2
+
+
+class _WebFakeDesktopSetter:
+    def __init__(self, dry_run: bool = False):
+        self.dry_run = dry_run
+
+    def apply(self, *_args, **_kwargs):
+        return ["fake"]
+
+    def apply_black(self, *_args, **_kwargs):
+        return ["fake-black"]
+
+    def supports_solid_black(self, *_args, **_kwargs):
+        return False
+
+
+def _web_source_test_env(monkeypatch, tmp_path: Path, profile: Profile) -> None:
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    monkeypatch.setattr(service, "DesktopSetter", _WebFakeDesktopSetter)
+    save_config(Config(active_profile="P", profiles={"P": profile}))
+
+
+def test_switch_once_rotates_web_source_images_and_reports_status(monkeypatch, tmp_path: Path):
+    from mint_background_switcher.sources import WebSourceStatus
+
+    web_dir = tmp_path / "webcache"
+    web_dir.mkdir()
+    web_image = web_dir / "photo.png"
+    Image.new("RGB", (100, 80), (200, 40, 90)).save(web_image)
+    url = "https://example.com/a.jpg"
+    _web_source_test_env(
+        monkeypatch,
+        tmp_path,
+        Profile(name="P", web_sources=[{"type": "url", "url": url}]),
+    )
+
+    calls: dict = {}
+
+    def fake_refresh(profile, working_directory, *, dry_run=False, force_refresh=False, cancelled=None):
+        calls["dry_run"] = dry_run
+        return [WebSourceStatus(url=url, status="cached", path=str(web_image))]
+
+    monkeypatch.setattr(service, "refresh_web_sources", fake_refresh)
+    monkeypatch.setattr(service, "web_source_cache_dir", lambda working_directory: web_dir)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    # a web-only pool rotates the cached web image and reports the source status
+    assert calls["dry_run"] is False
+    assert result.action == "next"
+    assert result.applied is True
+    assert result.images == [str(web_image.resolve())]
+    assert result.web_sources == [
+        {"url": url, "status": "cached", "path": str(web_image), "detail": ""}
+    ]
+
+
+def test_switch_once_web_source_dry_run_reports_cache_without_network(monkeypatch, tmp_path: Path):
+    from mint_background_switcher.sources import WebSourceStatus
+
+    web_dir = tmp_path / "webcache"
+    web_dir.mkdir()
+    web_image = web_dir / "photo.png"
+    Image.new("RGB", (100, 80), (200, 40, 90)).save(web_image)
+    url = "https://example.com/a.jpg"
+    _web_source_test_env(
+        monkeypatch,
+        tmp_path,
+        Profile(name="P", web_sources=[{"type": "url", "url": url}]),
+    )
+
+    dry_flags: list[bool] = []
+
+    def fake_refresh(profile, working_directory, *, dry_run=False, force_refresh=False, cancelled=None):
+        dry_flags.append(dry_run)
+        return [WebSourceStatus(url=url, status="cached", path=str(web_image))]
+
+    monkeypatch.setattr(service, "refresh_web_sources", fake_refresh)
+    monkeypatch.setattr(service, "web_source_cache_dir", lambda working_directory: web_dir)
+
+    result = switch_once("P", dry_run=True, rng=random.Random(1))
+
+    assert dry_flags == [True]
+    assert result.action == "next"
+    assert result.applied is False
+    assert result.web_sources[0]["status"] == "cached"
+
+
+def test_switch_once_still_rotates_local_folders_when_web_source_fails(monkeypatch, tmp_path: Path):
+    from mint_background_switcher.sources import WebSourceStatus
+
+    image_dir = tmp_path / "images"
+    _write_images(image_dir)
+    web_dir = tmp_path / "webcache"  # deliberately left empty: nothing cached
+    url = "https://example.com/a.jpg"
+    _web_source_test_env(
+        monkeypatch,
+        tmp_path,
+        Profile(
+            name="P",
+            shared_folders=[str(image_dir)],
+            web_sources=[{"type": "url", "url": url}],
+        ),
+    )
+
+    def fake_refresh(profile, working_directory, *, dry_run=False, force_refresh=False, cancelled=None):
+        return [WebSourceStatus(url=url, status="failed", detail="connection timed out")]
+
+    monkeypatch.setattr(service, "refresh_web_sources", fake_refresh)
+    monkeypatch.setattr(service, "web_source_cache_dir", lambda working_directory: web_dir)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(3))
+
+    # a failed web source is reported but never blocks the local folders
+    assert result.action == "next"
+    assert result.images
+    assert all(image.startswith(str(image_dir)) for image in result.images)
+    assert result.web_sources == [
+        {"url": url, "status": "failed", "path": None, "detail": "connection timed out"}
+    ]

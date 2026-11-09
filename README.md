@@ -27,6 +27,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Save the current generated multi-monitor background to a PNG file from Settings or the CLI.
 - View every unique original picture used in the current wallpaper, open a selected source or its containing folder, and keep selected pictures out of future rotation with a per-profile **Never Show Again** list (one click for the whole current wallpaper, individual remove, and clear-all with confirmation).
 - User-triggered Public Collections downloads from NASA and rights-filtered Wikimedia Commons CC0/public-domain sets, with provenance manifests and optional profile-source setup.
+- Per-profile **Web picture sources** under **Settings → Sources → Web picture sources**: up to 20 direct image URLs (http/https) per profile, downloaded and cached in the working folder, and rotated exactly like local pictures; unreachable or non-image URLs are reported per source and never block rotation (CLI: `web-source add|remove|list|refresh [--dry-run]`).
 - Optional per-profile random selection, grayscale, half-color desaturation, 1.5× saturation, 1.25× contrast, 1.15× brightening, 0.85× darkening, sepia, inverted-colors, soft-focus blur, vignette, and three-month calendar wallpaper effects.
 - Black, automatically color-matched, or blurred scaled-image letterbox fills that keep each source picture whole.
 - Per-profile display fit modes for fitted panels and montage/collage cells: fit with bars (default, historical), center, scale to fit, stretch, scale and crop (overscale), and scale and blur edges.
@@ -40,6 +41,15 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.22 - 2026-11-08
+
+- Added per-profile **Web picture sources** (JBS SRC-03, first non-local source) under **Settings → Sources → Web picture sources**: up to 20 direct image URLs (http/https) with Add URL / Remove Selected / Refresh now and visible success/error feedback; downloaded images are cached in the working folder and rotate in every mode exactly like local pictures, and an unreachable, oversized, or non-image URL is reported for that source only — rotation is never blocked.
+- CLI: `mint-background-switcher web-source add <url> | remove <url> | list | refresh [--dry-run]` (all with `--profile NAME`); `next` and Save & Apply Now report a `web_sources` status section. The stable source interface (per-profile entry list + shared cache directory) is the extension point for later keyless providers; bumped the package version to `0.2.22`.
+
+### 0.2.21 - 2026-11-07
+
+- Fixed a hang: switching to a profile whose picture collection is on an unavailable drive (dead network mount, disconnected share) no longer freezes the app — the switch is rejected with a warning (Settings rolls the activation back and keeps the previous profile active; the background loop skips the tick and retries automatically; CLI `next`/`resume` exit with a one-line error). A merely missing local folder keeps the established black-fallback behavior.
 
 ### 0.2.20 - 2026-11-07
 

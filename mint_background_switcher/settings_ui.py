@@ -48,10 +48,12 @@ from .service import (
     exclude_current_images,
     excluded_path_set,
     get_excluded_images,
+    refresh_web_sources_now,
     remove_excluded_images,
     save_current_wallpaper,
     switch_once,
 )
+from .sources import MAX_WEB_SOURCES, validate_web_url
 from .availability import CollectionUnavailableError
 from .working_storage import (
     MARKER_FILENAME,
@@ -344,6 +346,9 @@ class SettingsApp(tk.Tk):
         self._collection_busy = False
         self._collection_worker: threading.Thread | None = None
         self._collection_cancel = threading.Event()
+        self._web_refresh_busy = False
+        self._web_refresh_worker: threading.Thread | None = None
+        self._web_refresh_cancel = threading.Event()
         self._current_pictures_window: tk.Toplevel | None = None
         self._refresh_current_pictures: Callable[[], bool] | None = None
         self._excluded_display: list[str] = []
@@ -445,7 +450,7 @@ class SettingsApp(tk.Tk):
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        self.sources_tab = ttk.Frame(self.notebook, padding=10)
+        self.sources_tab = ttk.Frame(self.notebook, padding=9)
         self.layout_tab = ttk.Frame(self.notebook, padding=12)
         self.rotation_tab = ttk.Frame(self.notebook, padding=12)
         self.conditions_tab = ttk.Frame(self.notebook, padding=12)
@@ -476,7 +481,7 @@ class SettingsApp(tk.Tk):
             text="Choose local folders and pictures for this profile. Source files remain read-only.",
             justify=tk.LEFT,
             wraplength=840,
-        ).pack(anchor="w", pady=(0, 8))
+        ).pack(anchor="w", pady=(0, 4))
 
         source_options = ttk.LabelFrame(self.sources_tab, text="Folder scanning", padding=(8, 5))
         source_options.pack(fill=tk.X, pady=(0, 4))
@@ -534,7 +539,7 @@ class SettingsApp(tk.Tk):
         source_options.columnconfigure(2, weight=1)
 
         shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
-        shared_frame.pack(fill=tk.BOTH, expand=True, pady=8)
+        shared_frame.pack(fill=tk.BOTH, expand=True, pady=4)
         ttk.Label(
             shared_frame,
             text=(
@@ -542,7 +547,7 @@ class SettingsApp(tk.Tk):
                 "Postcard, Polaroid, and Span modes."
             ),
         ).pack(anchor="w", pady=(0, 4))
-        self.shared_text = tk.Text(shared_frame, height=5, width=40)
+        self.shared_text = tk.Text(shared_frame, height=3, width=40)
         self.shared_text.pack(fill=tk.BOTH, expand=True)
         shared_buttons = ttk.Frame(shared_frame)
         shared_buttons.pack(fill=tk.X, pady=4)
@@ -564,6 +569,28 @@ class SettingsApp(tk.Tk):
             command=self._add_shared_folder_from_root,
         )
         self.shared_browse_drives_button.pack(side=tk.LEFT)
+
+        web_frame = ttk.LabelFrame(
+            self.sources_tab,
+            text="Web picture sources — direct image URLs (http/https), cached in the working folder",
+        )
+        web_frame.pack(fill=tk.X, pady=(0, 2))
+        self.web_sources_text = tk.Text(web_frame, height=1, width=40)
+        self.web_sources_text.pack(fill=tk.X)
+        web_entry_row = ttk.Frame(web_frame)
+        web_entry_row.pack(fill=tk.X)
+        self.web_url_entry = ttk.Entry(web_entry_row)
+        self.web_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.web_add_url_button = ttk.Button(web_entry_row, text="Add URL", command=self._add_web_source_from_entry)
+        self.web_add_url_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_remove_button = ttk.Button(
+            web_entry_row,
+            text="Remove Selected",
+            command=self._remove_selected_web_source,
+        )
+        self.web_remove_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_refresh_button = ttk.Button(web_entry_row, text="Refresh Now", command=self._refresh_web_sources)
+        self.web_refresh_button.pack(side=tk.LEFT, padx=(4, 0))
 
         self.layout_scope_label = ttk.Label(
             self.layout_tab,
@@ -1372,6 +1399,11 @@ class SettingsApp(tk.Tk):
         self.polaroid_captions_var.set(profile.polaroid_captions)
         self.shared_text.delete("1.0", tk.END)
         self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
+        web_text = vars(self).get("web_sources_text")
+        if web_text is not None:
+            web_text.delete("1.0", tk.END)
+            web_text.insert(tk.END, "\n".join(entry["url"] for entry in profile.web_sources))
+            self.web_url_entry.delete(0, tk.END)
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
         self._refresh_excluded_tab()
 
@@ -1660,6 +1692,35 @@ class SettingsApp(tk.Tk):
         # current profile's list forward so saving or renaming never silently wipes it.
         existing = self.config_data.profiles.get(self.profile_var.get())
         excluded_images = list(existing.excluded_images) if existing is not None else []
+        # Web sources live on the Sources page; carry the saved list forward when the
+        # widget is absent (partial construction) so saving never silently wipes URLs.
+        web_sources_text = vars(self).get("web_sources_text")
+        if web_sources_text is None:
+            web_sources = list(existing.web_sources) if existing is not None else []
+        else:
+            web_sources: list[dict[str, str]] = []
+            invalid_web_urls: list[str] = []
+            seen_web_urls: set[str] = set()
+            for raw_line in str(web_sources_text.get("1.0", tk.END)).split("\n"):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                url = validate_web_url(line)
+                if url is None:
+                    invalid_web_urls.append(line)
+                    continue
+                if url in seen_web_urls:
+                    continue
+                seen_web_urls.add(url)
+                web_sources.append({"type": "url", "url": url})
+            if len(web_sources) > MAX_WEB_SOURCES:
+                raise ValueError(f"A profile can list at most {MAX_WEB_SOURCES} web sources.")
+            if invalid_web_urls:
+                shown = "\n".join(invalid_web_urls[:5])
+                extra = f"\n…and {len(invalid_web_urls) - 5} more." if len(invalid_web_urls) > 5 else ""
+                raise ValueError(
+                    "Invalid web source URL(s) — use direct http/https image URLs:\n" + shown + extra
+                )
         return Profile(
             name=name,
             interval_minutes=float(self.interval_var.get()),
@@ -1703,6 +1764,7 @@ class SettingsApp(tk.Tk):
             polaroid_span=polaroid_span,
             polaroid_tilt=polaroid_tilt,
             excluded_images=excluded_images,
+            web_sources=web_sources,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
@@ -1977,6 +2039,135 @@ class SettingsApp(tk.Tk):
             parent=self,
         )
 
+    def _web_source_urls_from_text(self) -> list[str]:
+        text = vars(self).get("web_sources_text")
+        if text is None:
+            return []
+        return [line.strip() for line in str(text.get("1.0", tk.END)).split("\n") if line.strip()]
+
+    def _add_web_source_from_entry(self) -> None:
+        if self._any_worker_busy():
+            return
+        raw = self.web_url_entry.get().strip()
+        if not raw:
+            messagebox.showinfo(
+                "Enter a web source URL",
+                "Type a direct image URL (http:// or https://), then choose Add URL.",
+                parent=self,
+            )
+            return
+        url = validate_web_url(raw)
+        if url is None:
+            messagebox.showerror(
+                "Invalid web source URL",
+                f"Not a usable direct image URL (use http:// or https://):\n{raw}",
+                parent=self,
+            )
+            return
+        existing = self._web_source_urls_from_text()
+        if url in existing:
+            messagebox.showinfo("Web source already listed", f"That URL is already listed:\n{url}", parent=self)
+            return
+        if len(existing) >= MAX_WEB_SOURCES:
+            messagebox.showerror(
+                "Too many web sources",
+                f"A profile can list at most {MAX_WEB_SOURCES} web sources.",
+                parent=self,
+            )
+            return
+        self._append_text_line(self.web_sources_text, url)
+        self.web_url_entry.delete(0, tk.END)
+        messagebox.showinfo(
+            "Web source added",
+            f"Added:\n{url}\n\nChoose Save Profile to keep this profile change.",
+            parent=self,
+        )
+
+    def _remove_selected_web_source(self) -> None:
+        if self._any_worker_busy():
+            return
+        text = self.web_sources_text
+        try:
+            selection = text.tag_ranges(tk.SEL)
+        except tk.TclError:
+            selection = ()
+        if not selection:
+            messagebox.showinfo(
+                "Select a web source first",
+                "Select a URL line in the list, then choose Remove Selected.",
+                parent=self,
+            )
+            return
+        line_start = text.index(f"{selection[0]} linestart")
+        line_end = text.index(f"{selection[0]} lineend")
+        removed = text.get(line_start, f"{line_end}").strip()
+        text.delete(line_start, f"{line_end} linend")
+        messagebox.showinfo(
+            "Web source removed",
+            f"Removed:\n{removed}\n\nChoose Save Profile to keep this profile change.",
+            parent=self,
+        )
+
+    def _web_sources_text_matches_saved(self) -> bool:
+        if vars(self).get("web_sources_text") is None:
+            return True
+        profile = self.config_data.profiles.get(self.profile_var.get())
+        saved = [entry["url"] for entry in profile.web_sources] if profile is not None else []
+        current: list[str] = []
+        seen: set[str] = set()
+        for line in self._web_source_urls_from_text():
+            url = validate_web_url(line)
+            if url is not None and url not in seen:
+                seen.add(url)
+                current.append(url)
+        return current == saved
+
+    def _refresh_web_sources(self) -> None:
+        if self._any_worker_busy() or self._web_refresh_busy:
+            return
+        if not self._web_sources_text_matches_saved():
+            messagebox.showinfo(
+                "Unsaved web sources",
+                "Choose Save Profile first so the listed URLs are kept, then Refresh Now.",
+                parent=self,
+            )
+            return
+        name = self.profile_var.get()
+        try:
+            profile = load_config(create=False).get_profile(name)
+        except Exception as exc:
+            messagebox.showerror("Could not refresh web sources", str(exc), parent=self)
+            return
+        if not profile.web_sources:
+            messagebox.showinfo(
+                "No web sources listed",
+                f"This profile lists no web sources yet. Add direct image URLs on this page, choose "
+                f"Save Profile, then Refresh Now.",
+                parent=self,
+            )
+            return
+        self._web_refresh_cancel.clear()
+        self._web_refresh_busy = True
+        self._refresh_worker_controls()
+
+        def run() -> None:
+            try:
+                statuses = refresh_web_sources_now(name, cancelled=self._web_refresh_cancel.is_set)
+            except Exception as exc:
+                self._operation_results.put(("web-refresh-done", None, exc))
+            else:
+                self._operation_results.put(("web-refresh-done", statuses, None))
+
+        worker = threading.Thread(target=run, name="mbs-web-source-refresh", daemon=False)
+        self._web_refresh_worker = worker
+        try:
+            worker.start()
+        except Exception:
+            self._web_refresh_worker = None
+            self._web_refresh_busy = False
+            self._refresh_worker_controls()
+            raise
+
     def _optional_attr(self, name: str, default=None):
         try:
             return object.__getattribute__(self, name)
@@ -2141,6 +2332,7 @@ class SettingsApp(tk.Tk):
             or self._optional_attr("_apply_busy", False)
             or self._optional_attr("_migration_busy", False)
             or self._optional_attr("_collection_busy", False)
+            or self._optional_attr("_web_refresh_busy", False)
         )
 
     def _refresh_worker_controls(self) -> None:
@@ -2167,6 +2359,9 @@ class SettingsApp(tk.Tk):
             self.import_settings_button,
             self.current_pictures_button,
             self.register_hotkeys_button,
+            self.web_add_url_button,
+            self.web_remove_button,
+            self.web_refresh_button,
         ):
             button.state(["disabled"] if busy else ["!disabled"])
         for control in (
@@ -2479,6 +2674,42 @@ class SettingsApp(tk.Tk):
                         ),
                         parent=self,
                     )
+                    continue
+                if kind == "web-refresh-done":
+                    if self._web_refresh_worker is not None:
+                        self._web_refresh_worker.join()
+                    self._web_refresh_worker = None
+                    self._web_refresh_busy = False
+                    self._refresh_worker_controls()
+                    if error is not None:
+                        messagebox.showerror("Web source refresh failed", str(error), parent=self)
+                        continue
+                    statuses = result
+                    refreshed = sum(1 for s in statuses if s.status == "refreshed")
+                    cached = sum(1 for s in statuses if s.status == "cached")
+                    stale = sum(1 for s in statuses if s.status == "stale-kept")
+                    failed = [s for s in statuses if s.status == "failed"]
+                    if failed:
+                        first = failed[0]
+                        messagebox.showwarning(
+                            "Web source refresh finished with failures",
+                            (
+                                f"Refreshed {refreshed}, kept {cached} fresh"
+                                + (f", {stale} kept its cached copy" if stale else "")
+                                + f", {len(failed)} failed.\n\nFirst failure:\n{first.url}\n{first.detail[:200]}"
+                            ),
+                            parent=self,
+                        )
+                    else:
+                        messagebox.showinfo(
+                            "Web sources refreshed",
+                            (
+                                f"Refreshed {refreshed}, kept {cached} fresh"
+                                + (f", {stale} kept its cached copy (URL offline)" if stale else "")
+                                + "."
+                            ),
+                            parent=self,
+                        )
                     continue
                 if kind == "apply-progress":
                     count, _path = result

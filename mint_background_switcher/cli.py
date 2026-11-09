@@ -16,9 +16,22 @@ from .hotkeys import HOTKEY_ACTIONS, register_all_cinnamon_hotkeys, register_cin
 from .monitor import detect_monitors
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
-from .service import black_screen, pause, resume, run_loop, save_current_wallpaper, switch_once, toggle_pause
+from .service import (
+    add_web_source,
+    black_screen,
+    list_web_sources,
+    pause,
+    refresh_web_sources_now,
+    remove_web_source,
+    resume,
+    run_loop,
+    save_current_wallpaper,
+    switch_once,
+    toggle_pause,
+)
 from .startup import safe_start
 from .state import load_state
+from .working_storage import WorkingDirectoryError
 
 
 def _monitor_to_dict(monitor) -> dict:
@@ -49,6 +62,15 @@ def _print_result(result) -> None:
     print(f"applied={result.applied}")
     if result.lockscreen_note:
         print(f"lock_screen={result.lockscreen_note}")
+    if result.web_sources:
+        print("web_sources:")
+        for status in result.web_sources:
+            line = f"  {status['status']}: {status['url']}"
+            if status.get("path"):
+                line += f" -> {status['path']}"
+            if status.get("detail"):
+                line += f" ({status['detail']})"
+            print(line)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,6 +165,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate the file and report what would be imported without changing anything",
     )
+
+    web_source = sub.add_parser(
+        "web-source",
+        help="Manage direct image URL web sources for a profile",
+    )
+    web_source_sub = web_source.add_subparsers(dest="web_source_command", required=True)
+    ws_add = web_source_sub.add_parser("add", help="Add a direct image URL (http/https) to the profile")
+    ws_add.add_argument("url")
+    ws_add.add_argument("--profile")
+    ws_remove = web_source_sub.add_parser("remove", help="Remove a web source URL from the profile")
+    ws_remove.add_argument("url")
+    ws_remove.add_argument("--profile")
+    ws_list = web_source_sub.add_parser("list", help="List the profile's web sources")
+    ws_list.add_argument("--profile")
+    ws_refresh = web_source_sub.add_parser("refresh", help="Download/update the profile's web sources now")
+    ws_refresh.add_argument("--profile")
+    ws_refresh.add_argument("--dry-run", action="store_true", help="Report cache state without downloading")
     return parser
 
 
@@ -297,6 +336,30 @@ def main(argv: list[str] | None = None) -> int:
             "working_directory": candidate.working_directory,
         }, indent=2, sort_keys=True))
         return 0
+    if args.command == "web-source":
+        try:
+            profile_name = load_config(create=False).get_profile(args.profile).name
+            if args.web_source_command == "add":
+                sources = add_web_source(args.profile, args.url)
+            elif args.web_source_command == "remove":
+                sources = remove_web_source(args.profile, args.url)
+            elif args.web_source_command == "list":
+                sources = list_web_sources(args.profile)
+            else:
+                sources = None
+            if sources is not None:
+                print(json.dumps({"profile": profile_name, "web_sources": sources}, indent=2, sort_keys=True))
+                return 0
+            statuses = refresh_web_sources_now(args.profile, dry_run=args.dry_run)
+            print(json.dumps({
+                "profile": profile_name,
+                "dry_run": args.dry_run,
+                "web_sources": [status.to_dict() for status in statuses],
+            }, indent=2, sort_keys=True))
+            return 0
+        except (ValueError, WorkingDirectoryError) as exc:
+            print(f"web-source failed: {exc}", file=sys.stderr)
+            return 1
     parser.error(f"Unhandled command: {args.command}")
     return 2
 

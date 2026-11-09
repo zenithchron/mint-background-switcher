@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from mint_background_switcher import __version__, cli
@@ -80,3 +82,26 @@ def test_register_hotkey_all_rejects_explicit_binding(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli.main(["register-hotkey", "--all", "--binding", "<Ctrl>b", "--dry-run"])
     assert exc.value.code == 2
+
+
+def test_web_source_add_list_remove_round_trip(monkeypatch, tmp_path, capsys):
+    from mint_background_switcher.config import Config, Profile, save_config
+
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    assert cli.main(["web-source", "add", "https://example.com/a.jpg"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"profile": "P", "web_sources": [{"type": "url", "url": "https://example.com/a.jpg"}]}
+
+    # duplicates and invalid URLs are rejected without mutating the profile
+    assert cli.main(["web-source", "add", "https://example.com/a.jpg"]) == 1
+    assert cli.main(["web-source", "add", "ftp://example.com/a.jpg"]) == 1
+    assert cli.main(["web-source", "list"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["web_sources"] == [{"type": "url", "url": "https://example.com/a.jpg"}]
+
+    assert cli.main(["web-source", "remove", "https://example.com/a.jpg"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["web_sources"] == []
+    assert cli.main(["web-source", "remove", "https://example.com/a.jpg"]) == 1

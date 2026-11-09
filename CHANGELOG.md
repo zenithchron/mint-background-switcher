@@ -4,6 +4,22 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.22] - 2026-11-08
+
+### Added
+
+- **Web picture sources** (JBS SRC-03) — the first non-local picture source and the source-plugin architecture it is built on:
+  - **Settings → Sources → Web picture sources**: a per-profile list of direct image URLs (`http`/`https`, one image file per URL, up to 20 per profile) with **Add URL**, **Remove Selected**, and **Refresh now** buttons. Every action gives visible success/error feedback, and the list persists with the profile like every other source setting.
+  - Configured URLs are downloaded into `<working folder>/web_sources/` (atomic writes, SHA-256-named files, 64 MiB download cap, 30 s timeout, an identifiable user agent) and then join the rotation pool exactly like local folders — every display mode, per-monitor assignment, effects, and the Never Show Again list all work on them.
+  - **Fail-open by design**: an unreachable, oversized, or non-image URL is reported for that source only and never blocks rotation; a previously downloaded copy keeps rotating while the URL is offline. Each URL is re-downloaded at most once every 24 hours; **Refresh now** re-downloads immediately. Cache files for removed URLs are pruned so removed sources stop rotating.
+  - CLI for automation: `mint-background-switcher web-source add <url> [--profile NAME]`, `web-source remove <url> [--profile NAME]`, `web-source list [--profile NAME]`, and `web-source refresh [--profile NAME] [--dry-run]` (dry runs report cache state without touching the network). `next` and `Save & Apply Now` now include a `web_sources` status section showing each URL's outcome (`refreshed`, `cached`, `stale-kept`, or `failed`).
+  - The source interface (per-profile entry list + shared cache directory) is stable, so later releases can add keyless providers (for example public image search) without touching the rotation pipeline, which only ever sees local folders.
+
+### Changed
+
+- Compacted the Sources settings page spacing (shared-sources list now 3 lines instead of 5) to fit the new Web picture sources section inside the fixed 944×668 settings window.
+- Bumped the package version to `0.2.22`.
+
 ## [0.2.21] - 2026-11-07
 
 ### Fixed
