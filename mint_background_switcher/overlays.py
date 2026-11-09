@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Mapping, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
-from PIL.ExifTags import IFD
 
 from .monitor import Monitor
 
@@ -201,7 +200,7 @@ def read_picture_info(image_path: str | Path) -> PictureInfo:
         with Image.open(path) as source:
             exif = source.getexif()
             base = exif if exif is not None else Image.Exif()
-            sub = base.get_ifd(IFD.Exif)
+            sub = base.get_ifd(0x8769)  # Exif sub-IFD pointer (PIL.ExifTags.IFD.Exif; the IFD table does not exist in Pillow 9.1)
             title = _clean_text(base.get(0x010E) or sub.get(0x010E) or "")
             artist = _clean_text(base.get(0x013B) or sub.get(0x013B) or "")
             raw_date = sub.get(0x9003) or sub.get(0x9004) or base.get(0x0132) or ""

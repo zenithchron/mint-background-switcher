@@ -41,8 +41,6 @@ def _make_jpeg(path: Path, *, title=None, artist=None, date=None, size=(160, 120
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, color).save(path, quality=90)
     if title or artist or date:
-        from PIL.ExifTags import IFD
-
         image = Image.open(path)
         exif = image.getexif()
         if title:
@@ -50,7 +48,8 @@ def _make_jpeg(path: Path, *, title=None, artist=None, date=None, size=(160, 120
         if artist:
             exif[0x013B] = artist
         if date:
-            exif.get_ifd(IFD.Exif)[0x9003] = date
+            # 0x8769 = Exif sub-IFD pointer (PIL.ExifTags.IFD.Exif; absent in Pillow 9.1).
+            exif.get_ifd(0x8769)[0x9003] = date
         image.save(path, quality=90, exif=exif)
     return path
 
