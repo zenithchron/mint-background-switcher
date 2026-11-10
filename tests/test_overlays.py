@@ -50,6 +50,10 @@ def _make_jpeg(path: Path, *, title=None, artist=None, date=None, size=(160, 120
         if date:
             # 0x8769 = Exif sub-IFD pointer (PIL.ExifTags.IFD.Exif; absent in Pillow 9.1).
             exif.get_ifd(0x8769)[0x9003] = date
+            # Base-level DateTime (0x0132) as a fallback: Pillow 9.1 does not
+            # round-trip sub-IFDs, so read_picture_info's base-level read keeps
+            # the date available on the minimum supported Pillow too.
+            exif[0x0132] = date
         image.save(path, quality=90, exif=exif)
     return path
 

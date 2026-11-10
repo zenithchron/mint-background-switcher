@@ -311,6 +311,12 @@ class TwoRowNotebook(ttk.Frame):
         self._bottom.grid(row=1, column=0, sticky="ew")
         self.page_area = ttk.Frame(self)
         self.page_area.grid(row=2, column=0, sticky="nsew")
+        # Weighted row/column so pages clip to the window like the old
+        # ttk.Notebook did: grid cells then shrink to the content area instead
+        # of keeping a page's full requested width and overflowing the window
+        # when font metrics (e.g. CI DejaVu) make a page wider than 944 px.
+        self.page_area.rowconfigure(0, weight=1)
+        self.page_area.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
         self.columnconfigure(0, weight=1)
         self._page_row: dict[str, ttk.Notebook] = {}
