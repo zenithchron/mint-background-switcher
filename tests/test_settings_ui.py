@@ -464,6 +464,160 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_tab_bar_is_two_rows_with_expected_split(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        top_row, bottom_row = app.notebook.rows
+        assert top_row.winfo_ismapped()
+        assert bottom_row.winfo_ismapped()
+        assert top_row.winfo_height() > 0
+        assert bottom_row.winfo_height() > 0
+
+        top_tabs = [top_row.tab(tab_id, "text") for tab_id in top_row.tabs()]
+        bottom_tabs = [bottom_row.tab(tab_id, "text") for tab_id in bottom_row.tabs()]
+        assert top_tabs == ["Sources", "Layout & Appearance", "Overlays", "Rotation & Shortcuts"]
+        assert bottom_tabs == ["Conditions", "Never Show Again", "Public Collections", "Storage", "Updates & About"]
+
+        # All nine pages share the single content area under the two tab rows.
+        for page in (
+            app.sources_tab,
+            app.layout_tab,
+            app.overlays_tab,
+            app.rotation_tab,
+            app.conditions_tab,
+            app.excluded_tab,
+            app.collections_tab,
+            app.storage_tab,
+            app.about_tab,
+        ):
+            assert page.winfo_manager() in ("", "grid")
+            assert page.master is app.notebook.page_area
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_tab_selection_syncs_between_rows(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        top_row, bottom_row = app.notebook.rows
+        dim_style = settings_ui.TwoRowNotebook.DIM_STYLE
+
+        # Startup state: Sources active in the top row, bottom row dimmed.
+        # Each row's first tab is also that row's natively highlighted tab.
+        app.update_idletasks()
+        app.update()
+        assert app.notebook.select() == str(app.sources_tab)
+        top_tabs_by_id = {tab_id: top_row.tab(tab_id, "text") for tab_id in top_row.tabs()}
+        bottom_tabs_by_id = {tab_id: bottom_row.tab(tab_id, "text") for tab_id in bottom_row.tabs()}
+        assert top_tabs_by_id[str(top_row.select())] == "Sources"
+        assert bottom_tabs_by_id[str(bottom_row.select())] == "Conditions"
+        assert top_row.cget("style") == "TNotebook"
+        assert bottom_row.cget("style") == dim_style
+
+        # Programmatic selection of a bottom-row page switches the active row.
+        app.notebook.select(app.about_tab)
+        app.update_idletasks()
+        app.update()
+        assert app.notebook.select() == str(app.about_tab)
+        assert app.about_tab.winfo_ismapped()
+        assert not app.sources_tab.winfo_ismapped()
+        assert top_row.cget("style") == dim_style
+        assert bottom_row.cget("style") == "TNotebook"
+
+        # A native selection change in the inactive row (a tab click that
+        # moves that row's own selection) switches to the clicked page.
+        overlays_tab_id = [tab_id for tab_id in top_row.tabs() if top_row.tab(tab_id, "text") == "Overlays"][0]
+        top_row.select(overlays_tab_id)
+        app.update_idletasks()
+        app.update()
+        assert app.notebook.select() == str(app.overlays_tab)
+        assert app.overlays_tab.winfo_ismapped()
+        assert not app.about_tab.winfo_ismapped()
+        assert top_row.cget("style") == "TNotebook"
+        assert bottom_row.cget("style") == dim_style
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_click_on_dimmed_rows_and_tab_traversal_across_rows(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        _top_row, bottom_row = app.notebook.rows
+
+        # The bottom row's natively selected tab is Conditions while Sources
+        # is active; clicking that already-selected tab must activate it even
+        # though no <<NotebookTabChanged>> event fires for it.
+        app.update_idletasks()
+        app.update()
+        assert app.notebook.select() == str(app.sources_tab)
+        bottom_row.event_generate("<ButtonRelease-1>")
+        app.update_idletasks()
+        app.update()
+        assert app.notebook.select() == str(app.conditions_tab)
+        assert app.conditions_tab.winfo_ismapped()
+        assert not app.sources_tab.winfo_ismapped()
+
+        # Ctrl+Tab cycles across the row boundary: top row, then bottom row.
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        app.notebook.focus_force()
+        app.update()
+        for expected in (app.conditions_tab, app.excluded_tab):
+            app.event_generate("<Control-Tab>")
+            app.update()
+            assert app.notebook.select() == str(expected)
+        # Simulate the physical Shift+Tab: X11 delivers it as ISO_Left_Tab
+        # with Shift|Control state (0x5).
+        app.event_generate("<Key>", keysym="Tab", state=5)
+        app.update()
+        assert app.notebook.select() == str(app.conditions_tab)
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_every_tab_still_opens_its_page(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        pages = [
+            app.sources_tab,
+            app.layout_tab,
+            app.overlays_tab,
+            app.rotation_tab,
+            app.conditions_tab,
+            app.excluded_tab,
+            app.collections_tab,
+            app.storage_tab,
+            app.about_tab,
+        ]
+        for page in pages:
+            app.notebook.select(page)
+            app.update_idletasks()
+            app.update()
+            assert app.notebook.select() == str(page)
+            assert page.winfo_ismapped()
+            for other in pages:
+                if other is not page:
+                    assert not other.winfo_ismapped()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
 def test_layout_workspace_tracks_profile_loading_and_pending_layout_changes(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))

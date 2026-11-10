@@ -43,6 +43,10 @@ The Settings redesign is being delivered in independently verified increments. S
 
 ## Change log
 
+### 0.2.24 - 2026-11-10
+
+- The Settings window's nine pages now open from a **two-row tab bar** (top: Sources, Layout & Appearance, Overlays, Rotation & Shortcuts; bottom: Conditions, Never Show Again, Public Collections, Storage, Updates & About): selecting a tab in either row shows its page and dims the other row, Ctrl+Tab / Ctrl+Shift+Tab cycles pages across both rows, and every tab's behavior, accelerator letters, and the save/apply flow are unchanged. Page spacing was compacted so all nine pages still fit unclipped in the fixed 944×668 window (default and clam themes). Bumped the package version to `0.2.24`.
+
 ### 0.2.23 - 2026-11-09
 
 - Added per-profile **picture overlays** (JBS OVR-01..OVR-05) under **Settings → Overlays** (new page): optional title / photographer / date text drawn on top of the composed wallpaper for Shared, Same, Per-monitor, and Span layouts (multi-picture layouts never draw overlays), plus up to 8 per-profile **no-draw zones** in pixel coordinates (whole-desktop or per-monitor) that the overlay panel always respects. Overlays compose with the selected display fit mode and render at physical panel resolution, so they stay sharp on fractional-scale displays; anything that prevents drawing skips that panel only and is reported as an `overlays` note by Save & Apply Now, the background loop, and the CLI.

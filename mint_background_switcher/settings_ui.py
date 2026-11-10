@@ -270,6 +270,217 @@ def _settings_window_geometry(
     return width, height, x, y, min_width, min_height
 
 
+class TwoRowNotebook(ttk.Frame):
+    """Two-row tab bar for the settings pages.
+
+    ``ttk.Notebook`` lays out its tabs in a single row, so this frame
+    stacks two Notebook widgets as two tab rows. Each row's tab owns a
+    one-pixel placeholder page; the real pages are managed in a single
+    shared content area (:attr:`page_area`) and the page of the
+    selected tab is raised to the front. Selecting a tab in either row
+    highlights that row and dims the other one, so the active page is
+    always obvious.
+
+    The small Notebook-style API used by callers and tests is kept:
+    ``select()``, ``select(page)``, ``tabs()``, ``tab(page, option)``
+    and ``enable_traversal()``. Keyboard traversal (Ctrl+Tab /
+    Ctrl+Shift+Tab) cycles through all pages in the canonical tab
+    order, exactly like a single notebook did.
+    """
+
+    DIM_STYLE = "MbsDimmedTabRow.TNotebook"
+    DIM_FOREGROUND = "#8f8f8f"
+
+    def __init__(self, parent) -> None:
+        super().__init__(parent)
+        style = ttk.Style(self)
+        style.configure(self.DIM_STYLE)
+        style.configure(self.DIM_STYLE + ".Tab", foreground=self.DIM_FOREGROUND)
+        style.map(
+            self.DIM_STYLE + ".Tab",
+            foreground=[
+                ("disabled", self.DIM_FOREGROUND),
+                ("active", self.DIM_FOREGROUND),
+                ("pressed", self.DIM_FOREGROUND),
+                ("selected", self.DIM_FOREGROUND),
+            ],
+        )
+        self._top = ttk.Notebook(self)
+        self._bottom = ttk.Notebook(self)
+        self._top.grid(row=0, column=0, sticky="ew")
+        self._bottom.grid(row=1, column=0, sticky="ew")
+        self.page_area = ttk.Frame(self)
+        self.page_area.grid(row=2, column=0, sticky="nsew")
+        self.rowconfigure(2, weight=1)
+        self.columnconfigure(0, weight=1)
+        self._page_row: dict[str, ttk.Notebook] = {}
+        self._page_tab: dict[str, str] = {}
+        self._labels: dict[str, tuple[str, int]] = {}
+        self._by_path: dict[str, Any] = {}
+        self._order: list[str] = []
+        self._row_sel: dict[int, str] = {}
+        self.current: Any = None
+        self._traversal_ready = False
+        self.bind("<Control-Tab>", lambda _event: self._cycle(1))
+        self.bind("<Control-Shift-Tab>", lambda _event: self._cycle(-1))
+        # X11 reports Shift+Tab as the ISO_Left_Tab keysym; bind both so the
+        # reverse traversal works on X11, Wayland, and macOS alike.
+        self.bind("<Control-Shift-ISO_Left_Tab>", lambda _event: self._cycle(-1))
+
+    @property
+    def rows(self) -> tuple[ttk.Notebook, ttk.Notebook]:
+        """The two tab-row notebooks, top row first."""
+
+        return self._top, self._bottom
+
+    def add_tab(self, page, text: str, underline: int = 0, row: str = "top") -> str:
+        """Register an already-created page frame as a tab of the given row.
+
+        The page must be a child of :attr:`page_area`; it is gridded into
+        the shared content area here. Returns the row's tab id.
+        """
+
+        if row not in ("top", "bottom"):
+            raise ValueError(f"unknown tab row: {row}")
+        notebook = self._top if row == "top" else self._bottom
+        placeholder = tk.Frame(notebook, height=1)
+        notebook.add(placeholder, text=text, underline=underline)
+        tab_id = str(notebook.tabs()[-1])
+        self._row_sel[id(notebook)] = str(notebook.select())
+        page_path = str(page)
+        self._page_row[page_path] = notebook
+        self._page_tab[page_path] = tab_id
+        self._labels[page_path] = (text, underline)
+        self._by_path[page_path] = page
+        self._order.append(page_path)
+        page.grid(row=0, column=0, sticky="nsew")
+        if self.current is None:
+            self._set_current(page_path)
+        else:
+            page.grid_forget()
+        return tab_id
+
+    def select(self, page=None) -> str:
+        """Select a page (widget or path); without an argument report it.
+
+        Mirrors ``ttk.Notebook.select``: returns the selected page's path.
+        """
+
+        if page is None:
+            return str(self.current) if self.current is not None else ""
+        page_path = str(page)
+        if page_path not in self._page_row:
+            raise tk.TclError(f"invalid tab page: {page_path}")
+        self._set_current(page_path)
+        return page_path
+
+    def tabs(self) -> list[str]:
+        """All page paths in the canonical (top row, then bottom row) order."""
+
+        return list(self._order)
+
+    def tab(self, page, option: str):
+        """Return a tab option (``text`` or ``underline``) for a page."""
+
+        page_path = str(page)
+        try:
+            text, underline = self._labels[page_path]
+        except KeyError:
+            raise tk.TclError(f"invalid tab page: {page_path}") from None
+        if option == "text":
+            return text
+        if option == "underline":
+            return underline
+        raise tk.TclError(f"unknown option {option}")
+
+    def enable_traversal(self) -> None:
+        """Wire tab-change sync and keyboard traversal.
+
+        Call once, after all :meth:`add_tab` calls.
+        """
+
+        if self._traversal_ready:
+            return
+        self._traversal_ready = True
+        for notebook in (self._top, self._bottom):
+            notebook.bind(
+                "<<NotebookTabChanged>>",
+                lambda _event, row_notebook=notebook: self._on_tab_change(row_notebook),
+                add=True,
+            )
+            notebook.bind(
+                "<ButtonRelease-1>",
+                lambda _event, row_notebook=notebook: self._on_row_click(row_notebook),
+            )
+            # Traversal is bound here as well as on the frame: after a tab
+            # click, keyboard focus is on the inner notebook, and real key
+            # events are delivered to the focused window, whose bindtags do
+            # not include intermediate frames.
+            notebook.bind("<Control-Tab>", lambda _event: self._cycle(1))
+            notebook.bind("<Control-Shift-Tab>", lambda _event: self._cycle(-1))
+            notebook.bind("<Control-Shift-ISO_Left_Tab>", lambda _event: self._cycle(-1))
+        if self.current is None and self._order:
+            self._set_current(self._order[0])
+
+    def _on_row_click(self, notebook: ttk.Notebook) -> None:
+        """Activate the row the user clicked, even if its tab is already its native selection.
+
+        A click on the tab a row already shows selected generates no
+        ``<<NotebookTabChanged>>`` event, so the row must be activated
+        explicitly when the current page lives in the other row.
+        """
+
+        selected = str(notebook.select())
+        for page_path, tab_id in self._page_tab.items():
+            if self._page_row[page_path] is notebook and tab_id == selected:
+                self._row_sel[id(notebook)] = selected
+                if str(self.current) != page_path:
+                    self._set_current(page_path)
+                return
+
+    def _set_current(self, page_path: str) -> None:
+        new_page = self._by_path[page_path]
+        old_page = self.current
+        self.current = new_page
+        notebook = self._page_row[page_path]
+        self._top.configure(style=self.DIM_STYLE if notebook is self._bottom else "TNotebook")
+        self._bottom.configure(style=self.DIM_STYLE if notebook is self._top else "TNotebook")
+        self._row_sel[id(notebook)] = self._page_tab[page_path]
+        if str(notebook.select()) != self._page_tab[page_path]:
+            notebook.select(self._page_tab[page_path])
+        if old_page is new_page:
+            new_page.tkraise()
+            return
+        if old_page is not None and old_page.winfo_manager() == "grid":
+            old_page.grid_forget()
+        if new_page.winfo_manager() != "grid":
+            new_page.grid(row=0, column=0, sticky="nsew")
+        new_page.tkraise()
+
+    def _on_tab_change(self, notebook: ttk.Notebook) -> None:
+        selected = str(notebook.select())
+        if self._row_sel.get(id(notebook)) == selected:
+            # Re-assertion of a selection this frame already knows about
+            # (initial tab, or our own programmatic select) — not user input.
+            return
+        self._row_sel[id(notebook)] = selected
+        for page_path, tab_id in self._page_tab.items():
+            if self._page_row[page_path] is notebook and tab_id == selected:
+                if str(self.current) != page_path:
+                    self._set_current(page_path)
+                return
+
+    def _cycle(self, direction: int) -> str:
+        if not self._order:
+            return "break"
+        if self.current is None:
+            next_index = 0
+        else:
+            next_index = (self._order.index(str(self.current)) + direction) % len(self._order)
+        self._set_current(self._order[next_index])
+        return "break"
+
+
 class SettingsApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -454,28 +665,31 @@ class SettingsApp(tk.Tk):
         self.profile_save_button.grid(row=0, column=8, sticky="e", padx=(8, 0))
         self.profile_context_frame.columnconfigure(5, weight=1)
 
-        self.notebook = ttk.Notebook(root)
+        self.notebook = TwoRowNotebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        self.sources_tab = ttk.Frame(self.notebook, padding=9)
-        self.layout_tab = ttk.Frame(self.notebook, padding=12)
-        self.overlays_tab = ttk.Frame(self.notebook, padding=12)
-        self.rotation_tab = ttk.Frame(self.notebook, padding=12)
-        self.conditions_tab = ttk.Frame(self.notebook, padding=12)
-        self.excluded_tab = ttk.Frame(self.notebook, padding=12)
-        self.collections_tab = ttk.Frame(self.notebook, padding=12)
-        self.storage_tab = ttk.Frame(self.notebook, padding=12)
-        self.about_tab = ttk.Frame(self.notebook, padding=12)
+        # The nine pages live in the shared content area below the two tab rows.
+        page_area = self.notebook.page_area
+        self.sources_tab = ttk.Frame(page_area, padding=9)
+        self.layout_tab = ttk.Frame(page_area, padding=12)
+        self.overlays_tab = ttk.Frame(page_area, padding=12)
+        self.rotation_tab = ttk.Frame(page_area, padding=12)
+        self.conditions_tab = ttk.Frame(page_area, padding=12)
+        self.excluded_tab = ttk.Frame(page_area, padding=12)
+        self.collections_tab = ttk.Frame(page_area, padding=12)
+        self.storage_tab = ttk.Frame(page_area, padding=12)
+        self.about_tab = ttk.Frame(page_area, padding=12)
         # Retain the old attribute for third-party automation while the visible page is task-named.
         self.general_tab = self.sources_tab
-        self.notebook.add(self.sources_tab, text="Sources", underline=0)
-        self.notebook.add(self.layout_tab, text="Layout & Appearance", underline=0)
-        self.notebook.add(self.overlays_tab, text="Overlays", underline=0)
-        self.notebook.add(self.rotation_tab, text="Rotation & Shortcuts", underline=0)
-        self.notebook.add(self.conditions_tab, text="Conditions", underline=0)
-        self.notebook.add(self.excluded_tab, text="Never Show Again", underline=0)
-        self.notebook.add(self.collections_tab, text="Public Collections", underline=0)
-        self.notebook.add(self.storage_tab, text="Storage", underline=1)
-        self.notebook.add(self.about_tab, text="Updates & About", underline=0)
+        # Two rows: task-grouped top row, then the remaining pages, so no tab wraps or crowds.
+        self.notebook.add_tab(self.sources_tab, text="Sources", underline=0, row="top")
+        self.notebook.add_tab(self.layout_tab, text="Layout & Appearance", underline=0, row="top")
+        self.notebook.add_tab(self.overlays_tab, text="Overlays", underline=0, row="top")
+        self.notebook.add_tab(self.rotation_tab, text="Rotation & Shortcuts", underline=0, row="top")
+        self.notebook.add_tab(self.conditions_tab, text="Conditions", underline=0, row="bottom")
+        self.notebook.add_tab(self.excluded_tab, text="Never Show Again", underline=0, row="bottom")
+        self.notebook.add_tab(self.collections_tab, text="Public Collections", underline=0, row="bottom")
+        self.notebook.add_tab(self.storage_tab, text="Storage", underline=1, row="bottom")
+        self.notebook.add_tab(self.about_tab, text="Updates & About", underline=0, row="bottom")
         self.notebook.enable_traversal()
 
         self.sources_scope_label = ttk.Label(
@@ -483,16 +697,16 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_scope_var,
             style="Heading.TLabel",
         )
-        self.sources_scope_label.pack(anchor="w", pady=(0, 6))
+        self.sources_scope_label.pack(anchor="w", pady=(0, 4))
         ttk.Label(
             self.sources_tab,
             text="Choose local folders and pictures for this profile. Source files remain read-only.",
             justify=tk.LEFT,
             wraplength=840,
-        ).pack(anchor="w", pady=(0, 4))
+        ).pack(anchor="w", pady=(0, 3))
 
-        source_options = ttk.LabelFrame(self.sources_tab, text="Folder scanning", padding=(8, 5))
-        source_options.pack(fill=tk.X, pady=(0, 4))
+        source_options = ttk.LabelFrame(self.sources_tab, text="Folder scanning", padding=(8, 4))
+        source_options.pack(fill=tk.X, pady=(0, 3))
         self.recursive_checkbutton = ttk.Checkbutton(
             source_options,
             text="Scan folders recursively",
@@ -505,60 +719,60 @@ class SettingsApp(tk.Tk):
             variable=self.ignore_hidden_var,
         )
         self.ignore_hidden_checkbutton.grid(row=0, column=2, sticky="w")
-        ttk.Label(source_options, text="Minimum image size:").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(source_options, text="Minimum image size:").grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.min_image_size_entry = ttk.Entry(source_options, textvariable=self.min_image_size_var, width=6)
-        self.min_image_size_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.min_image_size_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(4, 0))
         ttk.Label(
             source_options,
             text="px on the smallest side; 0 means no limit. Smaller pictures are skipped when the library is scanned.",
-        ).grid(row=1, column=2, sticky="w", pady=(5, 0))
-        ttk.Label(source_options, text="Ignore name patterns:").grid(row=2, column=0, sticky="w", pady=(5, 0))
+        ).grid(row=1, column=2, sticky="w", pady=(4, 0))
+        ttk.Label(source_options, text="Ignore name patterns:").grid(row=2, column=0, sticky="w", pady=(4, 0))
         self.ignore_patterns_entry = ttk.Entry(
             source_options,
             textvariable=self.ignore_patterns_var,
             width=11,
         )
-        self.ignore_patterns_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.ignore_patterns_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(4, 0))
         ttk.Label(
             source_options,
             text="wildcards, comma-separated; for example thumb*.jpg",
-        ).grid(row=2, column=2, sticky="w", pady=(5, 0))
+        ).grid(row=2, column=2, sticky="w", pady=(4, 0))
         self.match_orientation_checkbutton = ttk.Checkbutton(
             source_options,
             text="Match monitor orientation",
             variable=self.match_orientation_var,
         )
-        self.match_orientation_checkbutton.grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        self.match_orientation_checkbutton.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Label(
             source_options,
             text="prefer landscape pictures on landscape monitors and portrait pictures on portrait monitors",
-        ).grid(row=3, column=2, sticky="w", pady=(5, 0))
-        ttk.Label(source_options, text="Image types:").grid(row=4, column=0, sticky="w", pady=(5, 0))
+        ).grid(row=3, column=2, sticky="w", pady=(4, 0))
+        ttk.Label(source_options, text="Image types:").grid(row=4, column=0, sticky="w", pady=(4, 0))
         self.image_types_entry = ttk.Entry(
             source_options,
             textvariable=self.image_types_var,
             width=12,
         )
-        self.image_types_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.image_types_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(4, 0))
         ttk.Label(
             source_options,
             text="comma-separated; for example jpg, png; empty means all supported types",
-        ).grid(row=4, column=2, sticky="w", pady=(5, 0))
+        ).grid(row=4, column=2, sticky="w", pady=(4, 0))
         source_options.columnconfigure(2, weight=1)
 
-        shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=8)
-        shared_frame.pack(fill=tk.BOTH, expand=True, pady=4)
+        shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=6)
+        shared_frame.pack(fill=tk.BOTH, expand=True, pady=3)
         ttk.Label(
             shared_frame,
             text=(
                 "Folders and individual pictures used by Shared, Same, Montage, Collage, "
                 "Postcard, Polaroid, and Span modes."
             ),
-        ).pack(anchor="w", pady=(0, 4))
-        self.shared_text = tk.Text(shared_frame, height=3, width=40)
+        ).pack(anchor="w", pady=(0, 2))
+        self.shared_text = tk.Text(shared_frame, height=1, width=40)
         self.shared_text.pack(fill=tk.BOTH, expand=True)
         shared_buttons = ttk.Frame(shared_frame)
-        shared_buttons.pack(fill=tk.X, pady=4)
+        shared_buttons.pack(fill=tk.X, pady=2)
         self.shared_add_folder_button = ttk.Button(
             shared_buttons,
             text="Add folder...",
@@ -582,7 +796,7 @@ class SettingsApp(tk.Tk):
             self.sources_tab,
             text="Web picture sources — direct image URLs (http/https), cached in the working folder",
         )
-        web_frame.pack(fill=tk.X, pady=(0, 2))
+        web_frame.pack(fill=tk.X, pady=(0, 1))
         self.web_sources_text = tk.Text(web_frame, height=1, width=40)
         self.web_sources_text.pack(fill=tk.X)
         web_entry_row = ttk.Frame(web_frame)
@@ -784,7 +998,7 @@ class SettingsApp(tk.Tk):
         )
         self.polaroid_captions_checkbutton.pack(side=tk.LEFT, padx=(24, 0))
 
-        monitor_frame = ttk.LabelFrame(self.layout_panels["per-monitor"], text="Per-monitor folders", padding=8)
+        monitor_frame = ttk.LabelFrame(self.layout_panels["per-monitor"], text="Per-monitor folders", padding=6)
         monitor_frame.pack(fill=tk.BOTH, expand=True)
         monitors = self.detected_monitors
         self.monitor_names = [m.name for m in monitors]
@@ -808,8 +1022,8 @@ class SettingsApp(tk.Tk):
         ttk.Button(monitor_frame, text="Remove per-monitor folder...", command=self._remove_monitor_folder_from_dialog).pack(
             anchor="w", pady=(0, 2)
         )
-        ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(6, 0))
-        self.monitor_text = tk.Text(monitor_frame, height=6, width=48)
+        ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(4, 0))
+        self.monitor_text = tk.Text(monitor_frame, height=3, width=48)
         self.monitor_text.pack(fill=tk.BOTH, expand=True)
         self._refresh_layout_workspace()
 
@@ -894,9 +1108,9 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_scope_var,
             style="Heading.TLabel",
         )
-        self.rotation_scope_label.pack(anchor="w", pady=(0, 6))
-        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=6)
-        rotation_schedule.pack(fill=tk.X, pady=(0, 8))
+        self.rotation_scope_label.pack(anchor="w", pady=(0, 2))
+        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=5)
+        rotation_schedule.pack(fill=tk.X, pady=(0, 5))
         ttk.Label(rotation_schedule, text="Interval minutes:").grid(row=0, column=0, sticky="w")
         self.interval_entry = ttk.Entry(rotation_schedule, textvariable=self.interval_var, width=10)
         self.interval_entry.grid(row=0, column=1, sticky="w", padx=5)
@@ -912,19 +1126,19 @@ class SettingsApp(tk.Tk):
             text="Rotate pictures in folder order instead of random",
             variable=self.sequential_var,
         )
-        self.sequential_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        self.sequential_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 0))
         self.rotate_on_startup_checkbutton = ttk.Checkbutton(
             rotation_schedule,
             text="Rotate at startup (off keeps the current background after login)",
             variable=self.rotate_on_startup_var,
         )
-        self.rotate_on_startup_checkbutton.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        self.rotate_on_startup_checkbutton.grid(row=2, column=0, columnspan=3, sticky="w", pady=(3, 0))
         self.night_black_screen_checkbutton = ttk.Checkbutton(
             rotation_schedule,
             text="Keep the desktop black during a nightly window",
             variable=self.night_black_screen_var,
         )
-        self.night_black_screen_checkbutton.grid(row=3, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        self.night_black_screen_checkbutton.grid(row=3, column=0, columnspan=3, sticky="w", pady=(3, 0))
         ttk.Label(rotation_schedule, text="Night window:").grid(row=4, column=0, sticky="w", padx=(20, 0))
         night_window_frame = ttk.Frame(rotation_schedule)
         night_window_frame.grid(row=4, column=1, sticky="w", padx=5)
@@ -942,8 +1156,8 @@ class SettingsApp(tk.Tk):
         self.night_black_screen_var.trace_add("write", self._refresh_night_time_state)
         self._refresh_night_time_state()
 
-        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=6)
-        shortcuts.pack(fill=tk.X, pady=(0, 8))
+        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=5)
+        shortcuts.pack(fill=tk.X, pady=(0, 5))
         ttk.Label(shortcuts, text="Next hotkey:").grid(row=0, column=0, sticky="w")
         self.next_hotkey_entry = ttk.Entry(shortcuts, textvariable=self.next_hotkey_var, width=22)
         self.next_hotkey_entry.grid(row=0, column=1, sticky="w", padx=5)
@@ -963,7 +1177,7 @@ class SettingsApp(tk.Tk):
         self.register_hotkeys_button.grid(row=2, column=2, sticky="w", padx=(16, 0))
         shortcuts.columnconfigure(2, weight=1)
 
-        desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=10)
+        desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=8)
         desktop_integration.pack(fill=tk.X)
         ttk.Label(desktop_integration, text="Desktop:").grid(row=0, column=0, sticky="w")
         self.desktop_menu = ttk.OptionMenu(
@@ -988,7 +1202,7 @@ class SettingsApp(tk.Tk):
             text="Mirror wallpaper to the lock screen",
             variable=self.mirror_lockscreen_var,
         )
-        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 0))
         ttk.Label(
             desktop_integration,
             text="GNOME writes the lock-screen image on each rotation; Cinnamon already mirrors it.",
@@ -1069,7 +1283,7 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_scope_var,
             style="Heading.TLabel",
         )
-        self.excluded_scope_label.pack(anchor="w", pady=(0, 6))
+        self.excluded_scope_label.pack(anchor="w", pady=(0, 4))
         ttk.Label(
             self.excluded_tab,
             text=(
@@ -1078,12 +1292,12 @@ class SettingsApp(tk.Tk):
             ),
             justify=tk.LEFT,
             wraplength=860,
-        ).pack(anchor="w", pady=(0, 8))
-        excluded_current_frame = ttk.LabelFrame(self.excluded_tab, text="Current wallpaper", padding=(10, 6))
-        excluded_current_frame.pack(fill=tk.X, pady=(0, 8))
+        ).pack(anchor="w", pady=(0, 6))
+        excluded_current_frame = ttk.LabelFrame(self.excluded_tab, text="Current wallpaper", padding=(10, 5))
+        excluded_current_frame.pack(fill=tk.X, pady=(0, 6))
         self.excluded_current_text = tk.Text(
             excluded_current_frame,
-            height=3,
+            height=2,
             width=80,
             wrap=tk.WORD,
             state=tk.DISABLED,
@@ -1094,13 +1308,13 @@ class SettingsApp(tk.Tk):
             text="Never Show Again (current wallpaper)",
             command=self._exclude_current_wallpaper,
         )
-        self.excluded_current_button.pack(anchor="w", pady=(6, 0))
-        excluded_frame = ttk.LabelFrame(self.excluded_tab, text="Excluded pictures", padding=(10, 6))
+        self.excluded_current_button.pack(anchor="w", pady=(4, 0))
+        excluded_frame = ttk.LabelFrame(self.excluded_tab, text="Excluded pictures", padding=(10, 5))
         excluded_frame.pack(fill=tk.BOTH, expand=True)
         self.excluded_status_var = tk.StringVar()
         ttk.Label(excluded_frame, textvariable=self.excluded_status_var).pack(anchor="w")
         excluded_list_row = ttk.Frame(excluded_frame)
-        excluded_list_row.pack(fill=tk.BOTH, expand=True, pady=(4, 6))
+        excluded_list_row.pack(fill=tk.BOTH, expand=True, pady=(3, 4))
         self.excluded_list = tk.Listbox(excluded_list_row, height=5, selectmode=tk.EXTENDED, exportselection=False)
         excluded_scrollbar = ttk.Scrollbar(excluded_list_row, orient=tk.VERTICAL, command=self.excluded_list.yview)
         self.excluded_list.configure(yscrollcommand=excluded_scrollbar.set)
@@ -1111,7 +1325,7 @@ class SettingsApp(tk.Tk):
             text="Remove Selected",
             command=self._remove_selected_excluded,
         )
-        self.excluded_remove_button.pack(anchor="w", pady=(0, 4))
+        self.excluded_remove_button.pack(anchor="w", pady=(0, 2))
         self.excluded_clear_button = ttk.Button(
             excluded_frame,
             text="Clear All...",
@@ -1235,7 +1449,7 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
             wraplength=840,
         )
-        self.collections_profile_label.pack(anchor="w", pady=(0, 4))
+        self.collections_profile_label.pack(anchor="w", pady=(0, 2))
 
         ttk.Label(
             self.collections_tab,
@@ -1246,11 +1460,11 @@ class SettingsApp(tk.Tk):
             ),
             justify=tk.LEFT,
             wraplength=860,
-        ).pack(anchor="w", pady=(0, 6))
+        ).pack(anchor="w", pady=(0, 4))
         automatic = ttk.LabelFrame(
             self.collections_tab,
             text="Automatic collections — no account required",
-            padding=(10, 6),
+            padding=(10, 5),
         )
         automatic.pack(fill=tk.X)
         ttk.Label(automatic, text="Collection:").grid(row=0, column=0, sticky="w")
@@ -1278,7 +1492,7 @@ class SettingsApp(tk.Tk):
             textvariable=self.collections_description_var,
             justify=tk.LEFT,
             wraplength=800,
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 6))
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 4))
         ttk.Label(automatic, text="Collection library folder:").grid(row=2, column=0, sticky="w")
         self.collections_root_entry = ttk.Entry(automatic, textvariable=self.collections_root_var)
         self.collections_root_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6)
@@ -1288,20 +1502,20 @@ class SettingsApp(tk.Tk):
             command=self._browse_collections_root,
         )
         self.collections_browse_button.grid(row=2, column=3, sticky="w")
+        collection_actions = ttk.Frame(automatic)
+        collection_actions.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(3, 0))
         self.collections_add_source_checkbutton = ttk.Checkbutton(
-            automatic,
+            collection_actions,
             text="Add the downloaded collection folder to the selected profile and save it",
             variable=self.collections_add_source_var,
         )
-        self.collections_add_source_checkbutton.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 2))
-        collection_actions = ttk.Frame(automatic)
-        collection_actions.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        self.collections_add_source_checkbutton.pack(side=tk.LEFT)
         self.collections_download_button = ttk.Button(
             collection_actions,
             text="Download Collection",
             command=self._download_public_collection,
         )
-        self.collections_download_button.pack(side=tk.LEFT)
+        self.collections_download_button.pack(side=tk.LEFT, padx=(8, 0))
         self.collections_cancel_button = ttk.Button(
             collection_actions,
             text="Cancel Download",
@@ -1320,25 +1534,25 @@ class SettingsApp(tk.Tk):
         recommended = ttk.LabelFrame(
             self.collections_tab,
             text="Additional recommended sources — manual access or personal API key required",
-            padding=(10, 6),
+            padding=(10, 5),
         )
-        recommended.pack(fill=tk.X, pady=(8, 0))
+        recommended.pack(fill=tk.X, pady=(6, 0))
         self.collection_source_buttons = []
         for row, source in enumerate(public_collections.RECOMMENDED_SOURCES):
-            ttk.Label(recommended, text=source.name, width=24).grid(row=row, column=0, sticky="nw", pady=3)
-            ttk.Label(recommended, text=source.description, wraplength=570, justify=tk.LEFT).grid(
+            ttk.Label(recommended, text=source.name, width=24).grid(row=row, column=0, sticky="nw", pady=2)
+            ttk.Label(recommended, text=source.description, wraplength=640, justify=tk.LEFT).grid(
                 row=row,
                 column=1,
                 sticky="w",
                 padx=6,
-                pady=3,
+                pady=2,
             )
             button = ttk.Button(
                 recommended,
                 text="Open Source",
                 command=lambda selected=source: self._open_collection_source(selected),
             )
-            button.grid(row=row, column=2, sticky="e", pady=3)
+            button.grid(row=row, column=2, sticky="e", pady=2)
             self.collection_source_buttons.append(button)
         recommended.columnconfigure(1, weight=1)
         self.collections_safety_label = ttk.Label(
@@ -1350,7 +1564,7 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
             wraplength=860,
         )
-        self.collections_safety_label.pack(anchor="w", pady=(6, 0))
+        self.collections_safety_label.pack(anchor="w", pady=(4, 0))
 
         self.about_scope_label = ttk.Label(
             self.about_tab,

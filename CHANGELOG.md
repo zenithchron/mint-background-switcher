@@ -4,6 +4,13 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.24] - 2026-11-10
+
+### Changed
+
+- **Two-row Settings tab bar** (backlog #9): the nine settings pages now open from two tab rows instead of one cramped row — top row: **Sources, Layout & Appearance, Overlays, Rotation & Shortcuts**; bottom row: **Conditions, Never Show Again, Public Collections, Storage, Updates & About**. Selecting a tab in either row shows its page and highlights that row while the other row dims; Ctrl+Tab / Ctrl+Shift+Tab cycles pages across both rows. Every tab's behavior, underlined accelerator letters, and the Save & Apply Now flow are unchanged. The fixed 944×668 minimum geometry is preserved: page spacing was compacted (shared-sources and current-wallpaper lists, section padding) so every page fits unclipped at the minimum size under both the default and clam themes.
+- Bumped the package version to `0.2.24`.
+
 ## [0.2.23] - 2026-11-09
 
 ### Added
