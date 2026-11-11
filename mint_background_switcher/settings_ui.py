@@ -54,7 +54,12 @@ from .service import (
     switch_once,
 )
 from .sources import MAX_WEB_SOURCES, validate_web_url
-from .overlays import MAX_NO_DRAW_ZONES, MAX_ZONE_COORD, NoDrawZone
+from .overlays import (
+    DEFAULT_OVERLAY_CALENDAR_POSITION,
+    MAX_NO_DRAW_ZONES,
+    MAX_ZONE_COORD,
+    NoDrawZone,
+)
 from .availability import CollectionUnavailableError
 from .working_storage import (
     MARKER_FILENAME,
@@ -75,6 +80,13 @@ SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 WORKING_DIRECTORY_STATUS_PATH_LIMIT = 64
+# (display label, stored value) for the calendar overlay corner choice.
+OVERLAY_CALENDAR_POSITION_CHOICES = (
+    ("Bottom right", "bottom-right"),
+    ("Bottom left", "bottom-left"),
+    ("Top right", "top-right"),
+    ("Top left", "top-left"),
+)
 LAYOUT_CHOICES = (
     "shared",
     "same",
@@ -519,6 +531,10 @@ class SettingsApp(tk.Tk):
         self.overlay_title_var = tk.BooleanVar(value=False)
         self.overlay_artist_var = tk.BooleanVar(value=False)
         self.overlay_date_var = tk.BooleanVar(value=False)
+        self.overlay_calendar_var = tk.BooleanVar(value=False)
+        self.overlay_calendar_position_var = tk.StringVar(
+            value=OVERLAY_CALENDAR_POSITION_CHOICES[0][0]
+        )
         self.no_draw_zones_status_var = tk.StringVar(value="")
         self._no_draw_zones_display: list[tuple[str, int, int, int, int]] = []
         self.hotkey_var = tk.StringVar()
@@ -1042,8 +1058,9 @@ class SettingsApp(tk.Tk):
         ttk.Label(
             self.overlays_tab,
             text=(
-                "Draw the picture's title, photographer, and date on top of the wallpaper. "
-                "Works with the Shared, Same, Per-monitor, and Span layouts; multi-picture layouts "
+                "Draw the picture's title, photographer, and date — and an optional "
+                "calendar with today highlighted — on top of the wallpaper. Works with "
+                "the Shared, Same, Per-monitor, and Span layouts; multi-picture layouts "
                 "(Montage, Collage, Postcard, Polaroid) never draw overlays. Text is rendered at "
                 "panel resolution, so it stays sharp on scaled displays."
             ),
@@ -1070,6 +1087,23 @@ class SettingsApp(tk.Tk):
             variable=self.overlay_date_var,
         )
         self.overlay_date_checkbutton.pack(anchor="w")
+        overlay_calendar_row = ttk.Frame(overlay_info_frame)
+        overlay_calendar_row.pack(fill=tk.X, pady=(2, 0))
+        self.overlay_calendar_checkbutton = ttk.Checkbutton(
+            overlay_calendar_row,
+            text="Show calendar (current month, today highlighted)",
+            variable=self.overlay_calendar_var,
+        )
+        self.overlay_calendar_checkbutton.pack(side=tk.LEFT)
+        ttk.Label(overlay_calendar_row, text="Position:").pack(side=tk.LEFT, padx=(16, 4))
+        self.overlay_calendar_position_combo = ttk.Combobox(
+            overlay_calendar_row,
+            state="readonly",
+            width=14,
+            values=[label for label, _ in OVERLAY_CALENDAR_POSITION_CHOICES],
+        )
+        self.overlay_calendar_position_combo.set(OVERLAY_CALENDAR_POSITION_CHOICES[0][0])
+        self.overlay_calendar_position_combo.pack(side=tk.LEFT)
         overlay_zones_frame = ttk.LabelFrame(self.overlays_tab, text="No-draw zones", padding=(10, 6))
         overlay_zones_frame.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(
@@ -1712,6 +1746,12 @@ class SettingsApp(tk.Tk):
         self.overlay_title_var.set(profile.overlay_title)
         self.overlay_artist_var.set(profile.overlay_artist)
         self.overlay_date_var.set(profile.overlay_date)
+        self.overlay_calendar_var.set(profile.overlay_calendar)
+        position_labels = {value: label for label, value in OVERLAY_CALENDAR_POSITION_CHOICES}
+        position_label = position_labels.get(profile.overlay_calendar_position, OVERLAY_CALENDAR_POSITION_CHOICES[0][0])
+        self.overlay_calendar_position_var.set(position_label)
+        # The save path reads the combo's display, so keep it in sync here.
+        self.overlay_calendar_position_combo.set(position_label)
         self._no_draw_zones_display = [
             (zone.monitor, zone.left, zone.top, zone.width, zone.height)
             for zone in profile.no_draw_zones
@@ -2042,6 +2082,19 @@ class SettingsApp(tk.Tk):
         overlay_artist = bool(overlay_artist_var.get()) if overlay_artist_var is not None else False
         overlay_date_var = vars(self).get("overlay_date_var")
         overlay_date = bool(overlay_date_var.get()) if overlay_date_var is not None else False
+        overlay_calendar_var = vars(self).get("overlay_calendar_var")
+        overlay_calendar = bool(overlay_calendar_var.get()) if overlay_calendar_var is not None else False
+        overlay_calendar_position_combo = vars(self).get("overlay_calendar_position_combo")
+        overlay_calendar_position_var = vars(self).get("overlay_calendar_position_var")
+        # The combo's display is authoritative for the user's choice (a
+        # ttk.Combobox has no variable= binding); the var is the fallback.
+        position_label = (
+            overlay_calendar_position_combo.get()
+            if overlay_calendar_position_combo is not None
+            else (overlay_calendar_position_var.get() if overlay_calendar_position_var is not None else "")
+        )
+        position_values = {label: value for label, value in OVERLAY_CALENDAR_POSITION_CHOICES}
+        overlay_calendar_position = position_values.get(position_label, DEFAULT_OVERLAY_CALENDAR_POSITION)
         zones_display = vars(self).get("_no_draw_zones_display")
         if zones_display is None:
             no_draw_zones = list(existing.no_draw_zones) if existing is not None else []
@@ -2097,6 +2150,8 @@ class SettingsApp(tk.Tk):
             overlay_title=overlay_title,
             overlay_artist=overlay_artist,
             overlay_date=overlay_date,
+            overlay_calendar=overlay_calendar,
+            overlay_calendar_position=overlay_calendar_position,
             no_draw_zones=no_draw_zones,
         )
 

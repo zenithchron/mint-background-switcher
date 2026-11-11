@@ -70,6 +70,21 @@ def _dark_bbox(path: Path):
     return image.point(lambda v: 255 if v < 100 else 0).getbbox()
 
 
+def _calendar_highlight_bbox(image: Image.Image):
+    """Bounding box of the blue today-highlight pixels (exact color match)."""
+    from PIL import ImageChops
+
+    rgba = image.convert("RGBA")
+    target = overlays.CALENDAR_TODAY_FILL
+    bands = rgba.split()
+    mask = bands[0].point(lambda v: 255 if v == target[0] else 0)
+    for band, value in zip(bands[1:], target[1:]):
+        mask = ImageChops.multiply(
+            mask, band.point(lambda v, val=value: 255 if v == val else 0)
+        )
+    return mask.getbbox()
+
+
 # ---------------------------------------------------------------------------
 # Picture metadata
 # ---------------------------------------------------------------------------
@@ -173,7 +188,26 @@ def test_profile_overlay_defaults_off():
     assert not profile.overlay_title
     assert not profile.overlay_artist
     assert not profile.overlay_date
+    assert not profile.overlay_calendar
+    assert profile.overlay_calendar_position == "bottom-right"
     assert profile.no_draw_zones == []
+
+
+def test_profile_overlay_calendar_fields_round_trip():
+    profile = Profile(name="P", overlay_calendar=True, overlay_calendar_position="top-left")
+    data = profile.to_dict()
+    assert data["overlay_calendar"] is True
+    assert data["overlay_calendar_position"] == "top-left"
+    restored = Profile.from_dict("P", data)
+    assert restored.overlay_calendar is True
+    assert restored.overlay_calendar_position == "top-left"
+
+
+def test_profile_overlay_calendar_position_invalid_falls_back():
+    restored = Profile.from_dict("P", {"overlay_calendar": "1", "overlay_calendar_position": "middle"})
+    assert restored.overlay_calendar is True
+    assert restored.overlay_calendar_position == "bottom-right"
+    assert Profile.from_dict("P", {"overlay_calendar_position": 7}).overlay_calendar_position == "bottom-right"
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +399,159 @@ def test_apply_overlays_fractional_scale_proportional_panel(tmp_path: Path):
     assert big_height > small_height
 
 
+# ---------------------------------------------------------------------------
+# Calendar overlay (JBS OVR-06)
+# ---------------------------------------------------------------------------
+
+
+def _draw_calendar(tmp_image: Image.Image, *, now, position="bottom-right", zones=()):
+    return overlays.draw_calendar_panel(
+        tmp_image, (0, 0, 1000, 600), now=now, position=position, zone_rects=list(zones)
+    )
+
+
+def test_draw_calendar_panel_default_corner_and_highlight():
+    image = Image.new("RGBA", (1000, 600), (200, 200, 200, 255))
+    rect = _draw_calendar(image, now=datetime(2026, 11, 15, 12, 0))
+    assert rect is not None
+    x, y, right, bottom = rect
+    # Default corner is bottom-right, inside the panel with a small margin.
+    assert right <= 1000 and bottom <= 600
+    assert 1000 - right <= 40 and 600 - bottom <= 40
+    assert x >= 0 and y >= 0
+    highlight = _calendar_highlight_bbox(image)
+    assert highlight is not None
+    hx1, hy1, hx2, hy2 = highlight
+    assert x < hx1 < hx2 < right, "today highlight must sit inside the card"
+    assert y < hy1 < hy2 < bottom
+    # A far corner stays untouched.
+    assert image.getpixel((20, 20)) == (200, 200, 200, 255)
+
+
+@pytest.mark.parametrize("position", ["bottom-right", "bottom-left", "top-right", "top-left"])
+def test_draw_calendar_panel_all_corners(position):
+    image = Image.new("RGBA", (1000, 600), (200, 200, 200, 255))
+    rect = _draw_calendar(image, now=datetime(2026, 11, 15), position=position)
+    assert rect is not None
+    x, y, right, bottom = rect
+    if position.endswith("right"):
+        assert 1000 - right <= 40
+    else:
+        assert x <= 40
+    if position.startswith("top"):
+        assert y <= 40
+    else:
+        assert 600 - bottom <= 40
+    assert _calendar_highlight_bbox(image) is not None
+
+
+def test_draw_calendar_panel_zone_blocks_requested_corner_relocates():
+    image = Image.new("RGBA", (1000, 600), (200, 200, 200, 255))
+    # Cover the bottom-right corner; the card must move to the next corner.
+    rect = _draw_calendar(image, now=datetime(2026, 11, 15), zones=[(850, 450, 1000, 600)])
+    assert rect is not None
+    x, y, right, bottom = rect
+    assert not (x < 1000 and 850 < right and y < 600 and 450 < bottom), "must not overlap the zone"
+    assert _calendar_highlight_bbox(image) is not None
+
+
+def test_draw_calendar_panel_zones_covering_all_corners_returns_none():
+    image = Image.new("RGBA", (1000, 600), (200, 200, 200, 255))
+    zones = [(0, 0, 200, 200), (800, 0, 1000, 200), (0, 400, 200, 600), (800, 400, 1000, 600)]
+    assert _draw_calendar(image, now=datetime(2026, 11, 15), zones=zones) is None
+    assert _calendar_highlight_bbox(image) is None
+
+
+def test_draw_calendar_panel_too_small_returns_none():
+    image = Image.new("RGBA", (1000, 600), (200, 200, 200, 255))
+    assert overlays.draw_calendar_panel(image, (0, 0, 120, 60), now=datetime(2026, 11, 15)) is None
+    assert _calendar_highlight_bbox(image) is None
+
+
+def test_draw_calendar_panel_highlights_the_right_day():
+    # November 2026: 1st = Sunday (last column), 2nd = Monday (first column),
+    # 15th is one week row below the 8th (same column).
+    rects = {}
+    for day in (1, 2, 8, 15):
+        image = Image.new("RGBA", (1000, 600), (200, 200, 200, 255))
+        rect = _draw_calendar(image, now=datetime(2026, 11, day))
+        assert rect is not None
+        rects[day] = _calendar_highlight_bbox(image)
+    x, y, right, bottom = rects[1]
+    sunday_x = (x + right) / 2
+    x, y, right, bottom = rects[2]
+    monday_x = (x + right) / 2
+    assert sunday_x > monday_x
+    _, top_8, _, bottom_8 = rects[8]
+    _, top_15, _, bottom_15 = rects[15]
+    assert (top_15 + bottom_15) / 2 > (top_8 + bottom_8) / 2
+    # All highlights share the same card geometry (same month grid).
+    centers_x = {((b[0] + b[2]) / 2) % 1 for b in (rects[8], rects[15])}
+    assert len(centers_x) <= 2
+
+
+def test_apply_overlays_calendar_only_draws_without_metadata(tmp_path: Path):
+    wall = _make_png(tmp_path / "wall.png", (1000, 600))
+    photo = _make_jpeg(tmp_path / "photo.jpg")  # no EXIF at all
+    panel = OverlayPanel("A", (0, 0, 1000, 600), str(photo))
+    profile = Profile(name="p", overlay_calendar=True)
+    result = apply_overlays(wall, [panel], profile, [])
+    assert result.drawn == 1 and result.skipped == 0
+    assert "calendar drawn on 1 panel" in result.note
+    image = Image.open(wall)
+    assert _calendar_highlight_bbox(image) is not None
+    # Bottom-right corner carries the card.
+    assert image.getpixel((970, 570))[:3] != (200, 200, 200)
+    # Top-left corner stays untouched.
+    assert image.getpixel((20, 20))[:3] == (200, 200, 200)
+
+
+def test_apply_overlays_calendar_only_missing_picture_still_draws(tmp_path: Path):
+    wall = _make_png(tmp_path / "wall.png", (1000, 600))
+    panel = OverlayPanel("A", (0, 0, 1000, 600), str(tmp_path / "nope.jpg"))
+    result = apply_overlays(wall, [panel], Profile(name="p", overlay_calendar=True), [])
+    assert result.drawn == 1 and result.skipped == 0
+    assert Image.open(wall) is not None and _calendar_highlight_bbox(Image.open(wall)) is not None
+
+
+def test_apply_overlays_text_and_calendar_do_not_overlap(tmp_path: Path):
+    wall = _make_png(tmp_path / "wall.png", (1000, 600))
+    photo = _make_jpeg(tmp_path / "photo.jpg", title="Sunrise")
+    panel = OverlayPanel("A", (0, 0, 1000, 600), str(photo))
+    profile = Profile(name="p", overlay_title=True, overlay_calendar=True)
+    result = apply_overlays(wall, [panel], profile, [])
+    assert result.drawn == 1 and result.skipped == 0
+    assert "picture info and calendar" in result.note
+    image = Image.open(wall)
+    # The text panel takes the bottom-left, the calendar the bottom-right.
+    assert image.getpixel((30, 570))[:3] != BACKGROUND
+    assert image.getpixel((970, 570))[:3] != BACKGROUND
+    # Both overlays are present and do not share pixels.
+    assert _calendar_highlight_bbox(image) is not None
+    assert _dark_bbox(wall) is not None
+
+
+def test_apply_overlays_calendar_zone_covering_panel_skips(tmp_path: Path):
+    wall = _make_png(tmp_path / "wall.png", (1000, 600))
+    before = wall.read_bytes()
+    photo = _make_jpeg(tmp_path / "photo.jpg")
+    panel = OverlayPanel("A", (0, 0, 1000, 600), str(photo))
+    profile = Profile(name="p", overlay_calendar=True, no_draw_zones=[NoDrawZone("", 0, 0, 1000, 600)])
+    result = apply_overlays(wall, [panel], profile, [])
+    assert result.drawn == 0 and result.skipped == 1
+    assert "blocked by no-draw zones" in result.note
+    assert wall.read_bytes() == before
+
+
+def test_apply_overlays_disabled_profile_is_noop_with_calendar_fields(tmp_path: Path):
+    wall = _make_png(tmp_path / "wall.png", (1000, 600))
+    before = wall.read_bytes()
+    profile = Profile(name="p", overlay_calendar=False, overlay_calendar_position="top-left")
+    result = apply_overlays(wall, [OverlayPanel("A", (0, 0, 1000, 600), "")], profile, [])
+    assert result.drawn == 0 and result.skipped == 0 and result.note == ""
+    assert wall.read_bytes() == before
+
+
 def test_render_overlay_preview(tmp_path: Path):
     photo = _make_jpeg(tmp_path / "photo.jpg", title="Sunrise", artist="Jane", date="2026:11:09 08:30:00")
     out = render_overlay_preview(photo, tmp_path / "preview.png", width=640, height=360)
@@ -392,6 +579,45 @@ def test_render_overlay_preview_honors_zones(tmp_path: Path):
 def test_render_overlay_preview_missing_file_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         render_overlay_preview(tmp_path / "nope.jpg", tmp_path / "preview.png")
+
+
+def test_render_overlay_preview_with_calendar(tmp_path: Path):
+    photo = _make_jpeg(tmp_path / "photo.jpg", size=(1280, 720), color=BACKGROUND)
+    out = render_overlay_preview(
+        photo,
+        tmp_path / "preview.png",
+        width=640,
+        height=360,
+        fit_mode="fit_bars",
+        show_title=False,
+        show_artist=False,
+        show_date=False,
+        show_calendar=True,
+        calendar_position="top-left",
+        now=datetime(2026, 11, 15),
+    )
+    image = Image.open(out)
+    assert image.size == (640, 360)
+    assert _calendar_highlight_bbox(image) is not None
+    card = _dark_bbox(out)
+    assert card is not None
+    # The requested top-left corner wins when it is clear.
+    assert card[0] <= 40 and card[1] <= 40
+
+
+def test_render_overlay_preview_calendar_blocked_by_zones(tmp_path: Path):
+    photo = _make_jpeg(tmp_path / "photo.jpg", title="Sunrise", size=(1280, 720))
+    out = render_overlay_preview(
+        photo,
+        tmp_path / "preview.png",
+        width=640,
+        height=360,
+        fit_mode="fit_bars",
+        show_calendar=True,
+        zones=[NoDrawZone("", 0, 0, 640, 360)],
+    )
+    image = Image.open(out)
+    assert _calendar_highlight_bbox(image) is None
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +684,27 @@ def test_switch_shared_dry_run_without_overlays_is_plain(monkeypatch, tmp_path: 
     result = service.switch_once("P", dry_run=True, rng=random.Random(7))
     assert result.overlay_note == ""
     assert _dark_bbox(Path(result.wallpaper)) is None
+
+
+def test_switch_shared_dry_run_draws_calendar(monkeypatch, tmp_path: Path):
+    image_dir = tmp_path / "images"
+    _make_jpeg(image_dir / "photo.jpg", title="Sunrise", size=(800, 600))
+    profile = Profile(
+        name="P",
+        mode="shared",
+        shared_folders=[str(image_dir)],
+        desktop="unknown",
+        overlay_calendar=True,
+    )
+    _setup_service(monkeypatch, tmp_path, profile, "A:400x300+0+0")
+    result = service.switch_once("P", dry_run=True, rng=random.Random(7))
+    assert result.action != "black"
+    assert "calendar drawn" in result.overlay_note
+    wall = Path(result.wallpaper)
+    assert wall.exists()
+    assert _calendar_highlight_bbox(Image.open(wall)) is not None, (
+        "calendar card should appear in the composed wallpaper"
+    )
 
 
 def test_switch_montage_never_draws_overlay(monkeypatch, tmp_path: Path):
@@ -621,6 +868,34 @@ def test_cli_overlay_preview_writes_image(tmp_path: Path, monkeypatch, capsys):
 def test_cli_overlay_preview_missing_file(tmp_path: Path, capsys):
     assert cli.main(["overlay-preview", str(tmp_path / "nope.jpg")]) != 0
     assert "no such file" in capsys.readouterr().err
+
+
+def test_cli_overlay_preview_uses_profile_calendar_settings(tmp_path: Path, monkeypatch, capsys):
+    photo = _make_jpeg(tmp_path / "photo.jpg", size=(1280, 720), color=BACKGROUND)
+    out = tmp_path / "preview.png"
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    save_config(
+        Config(
+            active_profile="P",
+            profiles={
+                "P": Profile(
+                    name="P",
+                    overlay_calendar=True,
+                    overlay_calendar_position="top-left",
+                )
+            },
+        )
+    )
+    assert (
+        cli.main(["overlay-preview", str(photo), "--out", str(out), "--width", "640", "--height", "360"])
+        == 0
+    )
+    assert _calendar_highlight_bbox(Image.open(out)) is not None
+    card = _dark_bbox(out)
+    assert card is not None
+    # The profile's top-left position is honored.
+    assert card[0] <= 40 and card[1] <= 40
 
 
 def test_cli_print_result_includes_overlay_note(capsys):

@@ -308,6 +308,8 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.overlay_title_checkbutton,
                 app.overlay_artist_checkbutton,
                 app.overlay_date_checkbutton,
+                app.overlay_calendar_checkbutton,
+                app.overlay_calendar_position_combo,
                 app.no_draw_zones_list,
                 app.no_draw_monitor_combo,
                 app.no_draw_x_entry,
@@ -3022,6 +3024,86 @@ def test_settings_loads_mirror_lockscreen_from_saved_profile(monkeypatch, tmp_pa
         app.update_idletasks()
         app.update()
         assert app.mirror_lockscreen_var.get() is True
+    finally:
+        app.destroy()
+
+
+def test_settings_overlay_calendar_toggles_saves_and_reloads(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.overlays_tab)
+        app.update()
+        # Off by default, visible on the overlays tab inside the pinned window.
+        assert app.overlay_calendar_var.get() is False
+        assert app.overlay_calendar_position_var.get() == "Bottom right"
+        assert is_descendant(app.overlay_calendar_checkbutton, app.overlays_tab)
+        assert app.overlay_calendar_checkbutton.winfo_ismapped()
+        assert app.overlay_calendar_checkbutton.winfo_width() >= app.overlay_calendar_checkbutton.winfo_reqwidth()
+        assert app.overlay_calendar_position_combo.winfo_ismapped()
+        assert app.overlay_calendar_position_combo.winfo_width() >= app.overlay_calendar_position_combo.winfo_reqwidth()
+
+        app.overlay_calendar_var.set(True)
+        # Select the position through the real widget (a user's dropdown choice),
+        # not the backing StringVar: the save path must pick up the combo display.
+        app.overlay_calendar_position_combo.set("Top left")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.overlay_calendar is True
+        assert saved.overlay_calendar_position == "top-left"
+
+        # Change the widgets, then reload from the saved profile.
+        app.overlay_calendar_var.set(False)
+        app.overlay_calendar_position_combo.set("Bottom right")
+        app._load_profile("Default")
+        assert app.overlay_calendar_var.get() is True
+        assert app.overlay_calendar_position_var.get() == "Top left"
+        # The dropdown display reflects the saved position after reload.
+        assert app.overlay_calendar_position_combo.get() == "Top left"
+    finally:
+        app.destroy()
+
+
+def test_settings_loads_overlay_calendar_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={
+            "Default": settings_ui.Profile(
+                name="Default",
+                overlay_calendar=True,
+                overlay_calendar_position="bottom-left",
+            )
+        },
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.overlay_calendar_var.get() is True
+        assert app.overlay_calendar_position_var.get() == "Bottom left"
+        # The dropdown display matches the saved position on startup.
+        assert app.overlay_calendar_position_combo.get() == "Bottom left"
     finally:
         app.destroy()
 

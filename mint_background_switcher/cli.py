@@ -14,7 +14,7 @@ from .config import ensure_config, load_config
 from .config_io import ConfigImportError, export_config, export_document, import_settings, load_export
 from .hotkeys import HOTKEY_ACTIONS, register_all_cinnamon_hotkeys, register_cinnamon_hotkey
 from .monitor import detect_monitors
-from .overlays import overlays_enabled, read_picture_info, render_overlay_preview
+from .overlays import DEFAULT_OVERLAY_CALENDAR_POSITION, overlays_enabled, read_picture_info, render_overlay_preview
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
 from .service import (
@@ -404,9 +404,13 @@ def main(argv: list[str] | None = None) -> int:
                 show_artist = profile.overlay_artist
                 show_date = profile.overlay_date
                 zones = profile.no_draw_zones
+                show_calendar = profile.overlay_calendar
+                calendar_position = profile.overlay_calendar_position
             else:
                 show_title = show_artist = show_date = True
                 zones = []
+                show_calendar = True
+                calendar_position = DEFAULT_OVERLAY_CALENDAR_POSITION
             out = Path(args.out).expanduser() if args.out else image_path.with_name(f"overlay-preview{image_path.suffix or '.png'}")
             render_overlay_preview(
                 image_path,
@@ -419,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
                 show_artist=show_artist,
                 show_date=show_date,
                 zones=zones,
+                show_calendar=show_calendar,
+                calendar_position=calendar_position,
             )
             print(out)
         except (ValueError, OSError, WorkingDirectoryError) as exc:

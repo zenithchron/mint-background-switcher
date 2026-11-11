@@ -4,6 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.25] - 2026-11-11
+
+### Added
+
+- **Calendar overlay** (JBS OVR-06, the desktop-overlays backlog sub-item that remained future work after v0.2.23) — a small monthly calendar card drawn on top of the composed wallpaper with today's date highlighted in blue:
+  - **Settings → Overlays → Picture information**: new **Show calendar (current month, today highlighted)** checkbox plus a **Position** choice (Bottom right — default —, Bottom left, Top right, Top left). The calendar composes independently of the title / photographer / date lines and honors the same per-profile no-draw zones: if the requested corner is obstructed the card moves to the next clear corner, and a panel fully covered by zones is skipped without breaking rotation.
+  - Works with the Shared, Same, Per-monitor, and Span layouts (multi-picture layouts never draw overlays, as before), renders at physical panel resolution so the card stays sharp and proportionally sized on fractional-scale displays, and is reported by **Save & Apply Now**, the background loop, and the CLI via the same `overlays` note (e.g. `calendar drawn on 1 panel`).
+  - CLI: `mint-background-switcher overlay-preview <image>` now includes the calendar when the profile has it enabled (and always includes it in the no-overlay fallback mode); `--profile` selects which profile's overlay settings apply.
+- Bumped the package version to `0.2.25`.
+
 ## [0.2.24] - 2026-11-10
 
 ### Changed

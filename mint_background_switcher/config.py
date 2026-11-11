@@ -11,7 +11,12 @@ from typing import Any, Callable
 
 from .paths import config_file, xdg_config_dir
 from .sources import MAX_WEB_SOURCES, coerce_web_sources
-from .overlays import NoDrawZone, coerce_no_draw_zones
+from .overlays import (
+    DEFAULT_OVERLAY_CALENDAR_POSITION,
+    OVERLAY_CALENDAR_POSITIONS,
+    NoDrawZone,
+    coerce_no_draw_zones,
+)
 from .storage import (
     atomic_write_json_unlocked,
     locked_file,
@@ -192,6 +197,12 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def _coerce_overlay_calendar_position(value: Any) -> str:
+    if isinstance(value, str) and value in OVERLAY_CALENDAR_POSITIONS:
+        return value
+    return DEFAULT_OVERLAY_CALENDAR_POSITION
+
+
 def _coerce_night_time(value: Any, default: str) -> str:
     """Normalize a saved night-window time, falling back to the default."""
     if parse_night_time(value) is None:
@@ -368,10 +379,12 @@ class Profile:
     next_hotkey: str = DEFAULT_NEXT_HOTKEY
     pause_hotkey: str = DEFAULT_PAUSE_HOTKEY
     web_sources: list[dict[str, str]] = field(default_factory=list)
-    # Picture overlay (JBS OVR-01..OVR-04)
+    # Picture overlay (JBS OVR-01..OVR-06)
     overlay_title: bool = False
     overlay_artist: bool = False
     overlay_date: bool = False
+    overlay_calendar: bool = False
+    overlay_calendar_position: str = DEFAULT_OVERLAY_CALENDAR_POSITION
     no_draw_zones: list[NoDrawZone] = field(default_factory=list)
 
     @classmethod
@@ -425,6 +438,10 @@ class Profile:
             overlay_title=_coerce_bool(data.get("overlay_title", False)),
             overlay_artist=_coerce_bool(data.get("overlay_artist", False)),
             overlay_date=_coerce_bool(data.get("overlay_date", False)),
+            overlay_calendar=_coerce_bool(data.get("overlay_calendar", False)),
+            overlay_calendar_position=_coerce_overlay_calendar_position(
+                data.get("overlay_calendar_position")
+            ),
             no_draw_zones=coerce_no_draw_zones(data.get("no_draw_zones", [])),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
@@ -475,6 +492,8 @@ class Profile:
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,
             "overlay_date": self.overlay_date,
+            "overlay_calendar": self.overlay_calendar,
+            "overlay_calendar_position": self.overlay_calendar_position,
             "no_draw_zones": [zone.to_dict() for zone in self.no_draw_zones],
             "desktop": self.desktop,
             "effect": self.effect,

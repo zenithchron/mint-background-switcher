@@ -1,11 +1,12 @@
 """Picture overlays drawn onto composed wallpapers.
 
-Inspired by John's Background Switcher (OVR-01..OVR-04): the picture
-title, photographer, and date are rendered as a small text panel on top
-of the *composed* wallpaper, so overlays compose with every fit mode and
-stay sharp on fractionally-scaled displays (all geometry is physical
-panel pixels).  User-defined no-draw zones (pixels, per-monitor or for
-the whole desktop) are never drawn into.
+Inspired by John's Background Switcher (OVR-01..OVR-06): the picture
+title, photographer, and date are rendered as a small text panel and an
+optional monthly calendar card (today highlighted) on top of the
+*composed* wallpaper, so overlays compose with every fit mode and stay
+sharp on fractionally-scaled displays (all geometry is physical panel
+pixels).  User-defined no-draw zones (pixels, per-monitor or for the
+whole desktop) are never drawn into.
 
 The overlay step is fail-open: metadata problems or zone collisions skip
 the affected panel instead of breaking wallpaper rotation.
@@ -13,10 +14,11 @@ the affected panel instead of breaking wallpaper rotation.
 
 from __future__ import annotations
 
+import calendar
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping, Sequence
 
@@ -31,6 +33,9 @@ __all__ = [
     "MAX_LINE_CHARS",
     "MAX_NO_DRAW_ZONES",
     "MAX_ZONE_COORD",
+    "CALENDAR_TODAY_FILL",
+    "DEFAULT_OVERLAY_CALENDAR_POSITION",
+    "OVERLAY_CALENDAR_POSITIONS",
     "NoDrawZone",
     "OverlayPanel",
     "OverlayResult",
@@ -38,6 +43,7 @@ __all__ = [
     "apply_overlays",
     "canvas_offset",
     "coerce_no_draw_zones",
+    "draw_calendar_panel",
     "overlay_lines",
     "overlays_enabled",
     "panel_for_span",
@@ -50,6 +56,13 @@ __all__ = [
 MAX_NO_DRAW_ZONES = 8
 MAX_ZONE_COORD = 100_000
 MAX_LINE_CHARS = 60
+
+# Calendar overlay (JBS OVR-06): the corner the monthly calendar card is
+# preferred in, plus the allowed corner choices.
+OVERLAY_CALENDAR_POSITIONS = ("bottom-right", "bottom-left", "top-right", "top-left")
+DEFAULT_OVERLAY_CALENDAR_POSITION = "bottom-right"
+# Same blue as the three-month calendar effect (images.py).
+CALENDAR_TODAY_FILL = (64, 120, 216, 255)
 
 # Sentinel monitor name: the zone applies to the whole virtual desktop
 # (canvas coordinates), not to one physical monitor.
@@ -215,7 +228,12 @@ def read_picture_info(image_path: str | Path) -> PictureInfo:
 
 
 def overlays_enabled(profile: Profile) -> bool:
-    return bool(profile.overlay_title or profile.overlay_artist or profile.overlay_date)
+    return bool(
+        profile.overlay_title
+        or profile.overlay_artist
+        or profile.overlay_date
+        or profile.overlay_calendar
+    )
 
 
 def overlay_lines(profile: Profile, info: PictureInfo) -> list[str]:
@@ -412,6 +430,149 @@ def _place_text_panel(
     return chosen
 
 
+def _centered_text(
+    draw: ImageDraw.ImageDraw,
+    center: tuple[float, float],
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+) -> None:
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    draw.text(
+        (center[0] - (right - left) / 2 - left, center[1] - (bottom - top) / 2 - top),
+        text,
+        font=font,
+        fill=fill,
+    )
+
+
+def draw_calendar_panel(
+    image: Image.Image,
+    panel_rect: tuple[int, int, int, int],
+    *,
+    now: datetime | None = None,
+    position: str = DEFAULT_OVERLAY_CALENDAR_POSITION,
+    zone_rects: Sequence[tuple[int, int, int, int]] = (),
+) -> tuple[int, int, int, int] | None:
+    """Draw a small monthly calendar card (JBS OVR-06) inside ``panel_rect``.
+
+    The card shows the month of ``now`` (default: the current date) with
+    today highlighted.  The requested corner is tried first, then the
+    remaining corners in a fixed order; the first one clear of every
+    obstacle in ``zone_rects`` wins.  Returns the drawn rectangle in
+    canvas pixels, or ``None`` when no corner is clear or the panel is
+    too small.
+    """
+    month_day = (now or datetime.now()).date()
+    panel_x, panel_y, panel_w, panel_h = panel_rect
+    draw = ImageDraw.Draw(image)
+    # Sizing follows the physical panel height so fractional-scale
+    # displays get a proportionally larger card.
+    day_size = min(20, max(10, panel_h // 68))
+    title_font = _overlay_font(day_size + 4, bold=True)
+    day_font = _overlay_font(day_size)
+    today_font = _overlay_font(day_size, bold=True)
+    head_font = _overlay_font(max(8, day_size - 2))
+    cell_w = int(draw.textlength("31", font=day_font)) + 2 * max(2, day_size // 4)
+    title_h = max(12, _text_height(draw, month_day.strftime("%B %Y"), title_font))
+    row_h = max(12, int(day_size * 1.45))
+    pad = max(8, panel_h // 90)
+    gap = max(3, day_size // 3)
+    card_w = 7 * cell_w + 2 * pad
+    card_h = pad + title_h + gap + 7 * row_h + pad
+    margin = max(8, panel_h // 100)
+    if card_w > panel_w - 2 * margin or card_h > panel_h - 2 * margin:
+        return None
+    order = list(OVERLAY_CALENDAR_POSITIONS)
+    if position in order:
+        order.remove(position)
+        order.insert(0, position)
+    for corner in order:
+        x = panel_x + margin if corner.endswith("left") else panel_x + panel_w - card_w - margin
+        y = panel_y + margin if corner.startswith("top") else panel_y + panel_h - card_h - margin
+        rect = (x, y, x + card_w, y + card_h)
+        if all(not _overlaps(rect, zone) for zone in zone_rects):
+            _draw_calendar_card(draw, rect, month_day, title_font, day_font, today_font, head_font, cell_w, row_h, pad, gap, title_h)
+            return rect
+    return None
+
+
+def _text_height(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont
+) -> int:
+    _, top, _, bottom = draw.textbbox((0, 0), text, font=font)
+    return int(bottom - top)
+
+
+def _draw_calendar_card(
+    draw: ImageDraw.ImageDraw,
+    rect: tuple[int, int, int, int],
+    month_day: date,
+    title_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    day_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    today_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    head_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    cell_w: int,
+    row_h: int,
+    pad: int,
+    gap: int,
+    title_h: int,
+) -> None:
+    x, y, right, bottom = rect
+    card_w = right - x
+    card_h = bottom - y
+    draw.rounded_rectangle(
+        [x, y, right, bottom],
+        radius=max(6, card_h // 10),
+        fill=(8, 12, 18, 205),
+        outline=(255, 255, 255, 90),
+        width=max(1, card_h // 90),
+    )
+    center_x = x + card_w / 2
+    _centered_text(draw, (center_x, y + pad + title_h / 2), month_day.strftime("%B %Y"), font=title_font, fill=(255, 255, 255, 255))
+    grid_top = y + pad + title_h + gap
+    for column, letter in enumerate(("M", "T", "W", "T", "F", "S", "S")):
+        _centered_text(
+            draw,
+            (x + pad + (column + 0.5) * cell_w, grid_top + row_h / 2),
+            letter,
+            font=head_font,
+            fill=(190, 203, 220, 255),
+        )
+    weeks = calendar.Calendar(firstweekday=0).monthdayscalendar(month_day.year, month_day.month)
+    weeks.extend([[0] * 7 for _ in range(6 - len(weeks))])
+    for week_index, week in enumerate(weeks[:6]):
+        for column, day_number in enumerate(week):
+            if day_number == 0:
+                continue
+            cell_center = (
+                x + pad + (column + 0.5) * cell_w,
+                grid_top + (week_index + 1.5) * row_h,
+            )
+            is_today = day_number == month_day.day
+            if is_today:
+                half_w = max(3, cell_w * 0.42)
+                half_h = max(3, row_h * 0.42)
+                draw.rounded_rectangle(
+                    (
+                        cell_center[0] - half_w,
+                        cell_center[1] - half_h,
+                        cell_center[0] + half_w,
+                        cell_center[1] + half_h,
+                    ),
+                    radius=max(2, round(min(half_w, half_h) / 2)),
+                    fill=CALENDAR_TODAY_FILL,
+                )
+            _centered_text(
+                draw,
+                cell_center,
+                str(day_number),
+                font=today_font if is_today else day_font,
+                fill=(255, 255, 255, 255),
+            )
+
+
 def _save_in_place(image: Image.Image, path: Path) -> None:
     """Atomically rewrite the composed file in its own format.
 
@@ -447,13 +608,13 @@ def _save_in_place(image: Image.Image, path: Path) -> None:
             pass
 
 
-def _result_note(drawn: int, total: int, reasons: dict[str, int]) -> str:
+def _result_note(drawn: int, total: int, reasons: dict[str, int], subject: str = "picture info") -> str:
     if drawn == total:
         plural = "s" if total != 1 else ""
-        return f"Overlay: picture info drawn on {drawn} panel{plural}."
+        return f"Overlay: {subject} drawn on {drawn} panel{plural}."
     detail = "; ".join(f"{count} panel{'s' if count != 1 else ''}: {reason}" for reason, count in sorted(reasons.items()))
     if drawn:
-        return f"Overlay: picture info drawn on {drawn} of {total} panels ({detail} skipped)."
+        return f"Overlay: {subject} drawn on {drawn} of {total} panels ({detail} skipped)."
     return f"Overlay: no panels annotated ({detail})."
 
 
@@ -462,47 +623,83 @@ def apply_overlays(
     panels: Sequence[OverlayPanel],
     profile: Profile,
     monitors: Sequence[Monitor],
+    *,
+    now: datetime | None = None,
 ) -> OverlayResult:
-    """Draw the picture-info overlays onto a composed wallpaper in place.
+    """Draw the picture-info and calendar overlays onto a composed wallpaper in place.
 
     ``panels`` are canvas-coordinate regions, one per picture that was
     composed; each receives the enabled metadata lines for its own
-    picture.  Failures on individual panels (missing metadata, no-draw
-    zone collisions) skip that panel only.  The composed file is
-    rewritten only when at least one panel was drawn.
+    picture, and a monthly calendar card when the profile enables one.
+    Failures on individual panels (missing metadata, no-draw zone
+    collisions) skip that panel only.  The composed file is rewritten
+    only when at least one panel was drawn.
     """
     if not panels or not overlays_enabled(profile):
         return OverlayResult(0, 0, "")
     path = Path(wallpaper_path)
+    text_enabled = bool(profile.overlay_title or profile.overlay_artist or profile.overlay_date)
+    calendar_enabled = bool(profile.overlay_calendar)
+    if text_enabled and calendar_enabled:
+        subject = "picture info and calendar"
+    elif calendar_enabled:
+        subject = "calendar"
+    else:
+        subject = "picture info"
     with Image.open(path) as source:
         image = source.convert("RGBA")
         canvas_size = image.size
         reasons: dict[str, int] = {}
         drawn = 0
         for panel in panels:
-            if not panel.image_path or not Path(panel.image_path).is_file():
-                reasons["missing picture"] = reasons.get("missing picture", 0) + 1
-                continue
-            try:
-                info = read_picture_info(panel.image_path)
-                lines = overlay_lines(profile, info)
-                if not lines:
-                    reasons["no stored metadata"] = reasons.get("no stored metadata", 0) + 1
-                    continue
-                zone_rects = zones_in_canvas(profile.no_draw_zones, monitors, canvas_size, panel.rect)
-                if _place_text_panel(image, panel.rect, lines, zone_rects) is not None:
-                    drawn += 1
+            zone_rects = zones_in_canvas(profile.no_draw_zones, monitors, canvas_size, panel.rect)
+            text_rect: tuple[int, int, int, int] | None = None
+            text_reason: str | None = None
+            if text_enabled:
+                if not panel.image_path or not Path(panel.image_path).is_file():
+                    text_reason = "missing picture"
                 else:
-                    reason = "blocked by no-draw zones" if zone_rects else "panel too small"
+                    try:
+                        info = read_picture_info(panel.image_path)
+                        lines = overlay_lines(profile, info)
+                        if not lines:
+                            text_reason = "no stored metadata"
+                        else:
+                            text_rect = _place_text_panel(image, panel.rect, lines, zone_rects)
+                            if text_rect is None:
+                                text_reason = "blocked by no-draw zones" if zone_rects else "panel too small"
+                    except Exception:
+                        # Fail-open: a drawing error skips this panel's text
+                        # without aborting the rest.
+                        text_reason = "drawing error"
+            calendar_rect: tuple[int, int, int, int] | None = None
+            calendar_reason: str | None = None
+            if calendar_enabled:
+                # The text panel (already placed) is an obstacle too, so the
+                # two overlays never draw on top of each other.
+                obstacles = list(zone_rects) + ([text_rect] if text_rect is not None else [])
+                try:
+                    calendar_rect = draw_calendar_panel(
+                        image,
+                        panel.rect,
+                        now=now,
+                        position=profile.overlay_calendar_position,
+                        zone_rects=obstacles,
+                    )
+                    if calendar_rect is None:
+                        calendar_reason = "blocked by no-draw zones" if obstacles else "panel too small"
+                except Exception:
+                    calendar_reason = "drawing error"
+            if text_rect is not None or calendar_rect is not None:
+                drawn += 1
+            else:
+                reason = text_reason if text_reason is not None else calendar_reason
+                if reason is not None:
                     reasons[reason] = reasons.get(reason, 0) + 1
-            except Exception:
-                # The fail-open contract is "skip the affected panel only":
-                # a drawing error on one panel must not abort the rest.
-                reasons["drawing error"] = reasons.get("drawing error", 0) + 1
         if drawn:
             _save_in_place(image, path)
     total = len(panels)
-    return OverlayResult(drawn, total - drawn, _result_note(drawn, total, reasons))
+    return OverlayResult(drawn, total - drawn, _result_note(drawn, total, reasons, subject))
 
 
 def render_overlay_preview(
@@ -517,12 +714,16 @@ def render_overlay_preview(
     show_artist: bool = True,
     show_date: bool = True,
     zones: Sequence[NoDrawZone] | None = None,
+    show_calendar: bool = False,
+    calendar_position: str = DEFAULT_OVERLAY_CALENDAR_POSITION,
+    now: datetime | None = None,
 ) -> Path:
     """Render a standalone overlay preview image for one picture.
 
     The picture is fitted into ``width``×``height`` with the given fit
     mode and a single whole-canvas overlay panel is drawn with the
-    enabled metadata lines.  "All monitors" no-draw zones are honored in
+    enabled metadata lines and, when ``show_calendar`` is set, the
+    monthly calendar card.  "All monitors" no-draw zones are honored in
     canvas coordinates; per-monitor zones are ignored (a preview is a
     single virtual screen).
     """
@@ -539,10 +740,21 @@ def render_overlay_preview(
     with Image.open(image_path) as source:
         base = fit_image(source, (width, height), fit_mode=fit_mode, bar_color=bar_color)
     base = base.convert("RGBA")
-    if lines:
+    if lines or show_calendar:
         panel = OverlayPanel(ALL_MONITORS, (0, 0, width, height), str(image_path))
         zone_rects = zones_in_canvas(list(zones or []), [], (width, height), panel.rect)
-        _place_text_panel(base, panel.rect, lines, zone_rects)
+        text_rect = None
+        if lines:
+            text_rect = _place_text_panel(base, panel.rect, lines, zone_rects)
+        if show_calendar:
+            obstacles = zone_rects + ([text_rect] if text_rect is not None else [])
+            draw_calendar_panel(
+                base,
+                panel.rect,
+                now=now,
+                position=calendar_position,
+                zone_rects=obstacles,
+            )
     out = Path(out_path)
     if out.suffix.lower() in {".jpg", ".jpeg"}:
         base.convert("RGB").save(out, quality=95)
