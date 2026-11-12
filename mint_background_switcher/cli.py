@@ -171,11 +171,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     web_source = sub.add_parser(
         "web-source",
-        help="Manage direct image URL web sources for a profile",
+        help="Manage web sources (direct image URLs or RSS/Atom feeds) for a profile",
     )
     web_source_sub = web_source.add_subparsers(dest="web_source_command", required=True)
-    ws_add = web_source_sub.add_parser("add", help="Add a direct image URL (http/https) to the profile")
+    ws_add = web_source_sub.add_parser(
+        "add",
+        help="Add a direct image URL (http/https), or an RSS/Atom feed with --feed",
+    )
     ws_add.add_argument("url")
+    ws_add.add_argument(
+        "--feed",
+        action="store_true",
+        help="Treat the URL as an RSS/Atom feed whose items carry pictures",
+    )
     ws_add.add_argument("--profile")
     ws_remove = web_source_sub.add_parser("remove", help="Remove a web source URL from the profile")
     ws_remove.add_argument("url")
@@ -363,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             profile_name = load_config(create=False).get_profile(args.profile).name
             if args.web_source_command == "add":
-                sources = add_web_source(args.profile, args.url)
+                sources = add_web_source(args.profile, args.url, feed=args.feed)
             elif args.web_source_command == "remove":
                 sources = remove_web_source(args.profile, args.url)
             elif args.web_source_command == "list":

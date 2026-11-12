@@ -1,10 +1,12 @@
 """Web picture sources: the extension point for non-folder picture sources.
 
-This release ships the first provider: direct image URLs. Each profile can
-list up to ``MAX_WEB_SOURCES`` ``http(s)`` URLs, each pointing at one image
-file. On every switch the sources are resolved to cached copies under the
-working directory's ``web_sources`` folder, and the cached files join the
-rotation pool exactly like a local folder.
+Two providers are shipped: direct image URLs and RSS/Atom picture feeds.
+Each profile can list up to ``MAX_WEB_SOURCES`` ``http(s)`` entries, where
+an entry either points at one image file (``type == "url"``) or at an
+RSS/Atom feed whose items carry pictures (``type == "feed"``). On every
+switch the sources are resolved to cached copies under the working
+directory's ``web_sources`` folder, and the cached files join the rotation
+pool exactly like a local folder.
 
 Design notes:
 
@@ -12,14 +14,21 @@ Design notes:
   reported for that source and never blocks rotation. If a URL was already
   downloaded, its cached copy keeps rotating while the URL is offline.
 * Each URL is re-downloaded at most once per ``WEB_SOURCE_REFRESH_HOURS``;
-  ``force_refresh`` re-downloads immediately.
+  ``force_refresh`` re-downloads immediately. A feed is re-fetched on the
+  same window; pictures that are still listed are kept, new ones are
+  downloaded, and pictures the feed no longer lists are pruned.
+* Feed extraction is one picture per item, in feed order: an image
+  ``enclosure``, then ``media:content``, then ``media:thumbnail``, then the
+  first ``<img>`` in the item's content/description. Relative URLs resolve
+  against the feed URL; non-http(s) URLs are dropped.
 * Dry runs never touch the network or the cache.
 * Cache files are named ``<sha256(url) prefix>.<ext>``. Files for URLs that
   are no longer configured are pruned so removed sources stop rotating.
-* Future providers (RSS feeds, image search) plug in through the same
-  per-profile ``web_sources`` entry list and cache directory; the rotation
-  pipeline only ever sees local folders, so adding a provider never touches
-  it again.
+  Feed ownership is tracked in a ``<stem>.images.json`` sidecar so only the
+  feed that listed a picture can prune it.
+* Future providers (image search) plug in through the same per-profile
+  ``web_sources`` entry list and cache directory; the rotation pipeline
+  only ever sees local folders, so adding a provider never touches it again.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import re
@@ -36,6 +46,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from PIL import Image
@@ -44,12 +55,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, avoids import cycles
     from .config import Profile
 
 WEB_SOURCE_TYPE = "url"
+WEB_FEED_TYPE = "feed"
 WEB_SOURCE_DIRNAME = "web_sources"
 MAX_WEB_SOURCES = 20
 MAX_WEB_SOURCE_URL_LENGTH = 2048
 WEB_SOURCE_REFRESH_HOURS = 24.0
 WEB_SOURCE_MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 WEB_SOURCE_TIMEOUT_SECONDS = 30
+RSS_MAX_IMAGES_PER_FEED = 10
+FEED_MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024
+FEED_SIDECAR_SUFFIX = ".images.json"
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 USER_AGENT = "MintBackgroundSwitcher/0.2 (+https://github.com/zenithchron/mint-background-switcher)"
 
@@ -70,6 +85,9 @@ _HOSTNAME_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
 _CACHE_FILE_RE = re.compile(
     r"^[0-9a-f]{20}\.(?:jpg|jpeg|png|webp|bmp|gif|tif|tiff)$", re.IGNORECASE
 )
+_STEM_RE = re.compile(r"^[0-9a-f]{20}$")
+_FEED_SIDECAR_RE = re.compile(r"^[0-9a-f]{20}\.images\.json$")
+_IMG_TAG_RE = re.compile(r"<img[^>]*\bsrc\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
 
 
 class WebSourceError(RuntimeError):
@@ -89,7 +107,7 @@ class WebSourceStatus:
     """Outcome of resolving one configured web source to a cached file."""
 
     url: str
-    status: str  # "cached" | "refreshed" | "stale-kept" | "failed" | "skipped"
+    status: str  # "cached" | "refreshed" | "stale-kept" | "failed" | "skipped" | "empty"
     path: str | None = None
     detail: str = ""
 
@@ -98,11 +116,11 @@ class WebSourceStatus:
 
 
 def validate_web_url(raw: Any) -> str | None:
-    """Normalize and validate a direct image URL.
+    """Normalize and validate a web source URL (direct image URL or RSS/Atom feed).
 
-    Returns the stripped URL when it is a plausible http(s) direct image URL,
-    or None when it is unusable. Strict on purpose: sources must be direct
-    file URLs, and garbage in the config must never reach the downloader.
+    Returns the stripped URL when it is a plausible http(s) web source URL,
+    or None when it is unusable. Strict on purpose: sources must be http(s)
+    URLs, and garbage in the config must never reach the downloader.
     """
     if not isinstance(raw, str):
         return None
@@ -148,7 +166,8 @@ def coerce_web_sources(value: Any) -> list[dict[str, str]]:
         if url is None or url in seen:
             continue
         seen.add(url)
-        entries.append({"type": WEB_SOURCE_TYPE, "url": url})
+        kind = WEB_FEED_TYPE if item.get("type") == WEB_FEED_TYPE else WEB_SOURCE_TYPE
+        entries.append({"type": kind, "url": url})
     return entries
 
 
@@ -165,7 +184,7 @@ def _describe_error(exc: Exception, url: str) -> str:
     return f"{reason} ({url})"
 
 
-def _fetch_url(url: str) -> bytes:
+def _fetch_url(url: str, max_bytes: int = WEB_SOURCE_MAX_DOWNLOAD_BYTES) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         response = urllib.request.urlopen(request, timeout=WEB_SOURCE_TIMEOUT_SECONDS)
@@ -179,10 +198,8 @@ def _fetch_url(url: str) -> bytes:
             if not chunk:
                 break
             total += len(chunk)
-            if total > WEB_SOURCE_MAX_DOWNLOAD_BYTES:
-                raise WebSourceFetchError(
-                    f"image exceeds {WEB_SOURCE_MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB ({url})"
-                )
+            if total > max_bytes:
+                raise WebSourceFetchError(f"content exceeds {max_bytes // (1024 * 1024)} MiB ({url})")
             chunks.append(chunk)
     return b"".join(chunks)
 
@@ -264,6 +281,223 @@ def _download(url: str, fetcher: Callable[[str], bytes]) -> tuple[bytes | None, 
     return data, extension, None
 
 
+def _local_tag(tag: object) -> str:
+    """Element tag with any XML namespace stripped, or '' for non-elements."""
+    if not isinstance(tag, str):
+        return ""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _is_image_url(url: str) -> bool:
+    path = urllib.parse.urlsplit(url).path
+    return Path(path).suffix.lower() in _SUPPORTED_IMAGE_EXTENSIONS
+
+
+def _first_img_in_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = _IMG_TAG_RE.search(text)
+    return match.group(1) if match else None
+
+
+def _item_image_url(item: ET.Element, feed_url: str) -> str | None:
+    """Return the first plausible picture URL of one feed item, or None.
+
+    Priority per item: image enclosure, then media:content, then
+    media:thumbnail, then the first <img> in the item content/description
+    (parsed CDATA elements or raw HTML text). Relative URLs resolve against
+    the feed URL; the result must be a valid http(s) URL.
+    """
+    tiers: list[list[str]] = [[], [], [], []]
+    for element in item.iter():
+        tag = _local_tag(element.tag)
+        if not tag or tag == "#comment":
+            continue
+        if tag == "enclosure":
+            candidate = element.get("url")
+            if candidate and ((element.get("type") or "").lower().startswith("image/") or _is_image_url(candidate)):
+                tiers[0].append(candidate)
+        elif tag in ("content", "encoded"):
+            # media:content carries a url attribute; content:encoded (local tag
+            # "encoded") and Atom content carry HTML (or CDATA-parsed elements)
+            # whose <img> is the picture.
+            candidate = element.get("url")
+            if candidate and ((element.get("type") or "").lower().startswith("image/") or _is_image_url(candidate)):
+                tiers[1].append(candidate)
+            img = _first_img_in_text(element.text)
+            if img:
+                tiers[3].append(img)
+        elif tag == "thumbnail":
+            candidate = element.get("url")
+            if candidate and _is_image_url(candidate):
+                tiers[2].append(candidate)
+        elif tag == "img":
+            candidate = element.get("src")
+            if candidate:
+                tiers[3].append(candidate)
+        elif tag == "description":
+            img = _first_img_in_text(element.text)
+            if img:
+                tiers[3].append(img)
+    for tier in tiers:
+        if tier:
+            resolved = urllib.parse.urljoin(feed_url, tier[0].strip())
+            if validate_web_url(resolved) is not None:
+                return resolved
+    return None
+
+
+def extract_feed_image_urls(
+    data: bytes,
+    feed_url: str,
+    limit: int = RSS_MAX_IMAGES_PER_FEED,
+) -> list[str]:
+    """Parse RSS 2.0 / Atom XML and return picture URLs in feed order.
+
+    One picture per ``<item>`` (RSS) or ``<entry>`` (Atom), newest first as
+    feeds order their items, de-duplicated and bounded by ``limit``. Malformed
+    XML and feeds without pictures yield an empty list — extraction is
+    fail-open and never raises.
+    """
+    try:
+        root = ET.fromstring(data)
+    except (ET.ParseError, ValueError):
+        return []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for element in root.iter():
+        if _local_tag(element.tag) not in ("item", "entry"):
+            continue
+        if len(urls) >= limit:
+            break
+        url = _item_image_url(element, feed_url)
+        if url is not None and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def _feed_sidecar_path(cache_dir: Path, feed_url: str) -> Path:
+    return cache_dir / f"{web_source_stem(feed_url)}{FEED_SIDECAR_SUFFIX}"
+
+
+def _read_feed_sidecar(path: Path) -> set[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {stem for stem in data if isinstance(stem, str) and _STEM_RE.match(stem)}
+
+
+def _write_feed_sidecar(cache_dir: Path, feed_url: str, stems: list[str]) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = _feed_sidecar_path(cache_dir, feed_url)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".part", dir=cache_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(stems, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _delete_stem_files(cache_dir: Path, stem: str) -> None:
+    try:
+        candidates = [
+            path
+            for path in cache_dir.glob(f"{stem}.*")
+            if path.is_file() and path.suffix.lower() in _SUPPORTED_IMAGE_EXTENSIONS
+        ]
+    except OSError:
+        return
+    for path in candidates:
+        try:
+            path.unlink()
+        except OSError:
+            continue
+
+
+def _refresh_feed_entry(
+    feed_url: str,
+    cache_dir: Path,
+    *,
+    dry_run: bool,
+    force_refresh: bool,
+    current: float,
+    refresh_window: float,
+    cancelled: Callable[[], bool] | None,
+    fetcher: Callable[[str], bytes],
+) -> WebSourceStatus:
+    """Resolve one RSS/Atom feed entry to cached images. Never raises."""
+    sidecar = _feed_sidecar_path(cache_dir, feed_url)
+    old_stems = _read_feed_sidecar(sidecar)
+    cached_files = [path for path in (_find_existing(cache_dir, stem) for stem in old_stems) if path is not None]
+    if dry_run:
+        if cached_files:
+            return WebSourceStatus(feed_url, "cached", detail=f"{len(cached_files)} image(s) cached")
+        return WebSourceStatus(feed_url, "skipped", detail="no cached copy yet; dry runs never download")
+    if old_stems and not force_refresh:
+        sidecar_age = current - sidecar.stat().st_mtime if sidecar.is_file() else None
+        if sidecar_age is not None and sidecar_age < refresh_window and cached_files:
+            return WebSourceStatus(feed_url, "cached", detail=f"{len(cached_files)} image(s) cached")
+    if cancelled is not None and cancelled():
+        raise WebSourceCancelled(f"cancelled before refreshing {feed_url}")
+    feed_fetcher: Callable[[str], bytes]
+    if fetcher is _fetch_url:
+        feed_fetcher = lambda url: _fetch_url(url, FEED_MAX_DOWNLOAD_BYTES)
+    else:
+        feed_fetcher = fetcher
+    try:
+        feed_bytes = feed_fetcher(feed_url)
+    except Exception as exc:
+        error = str(exc) or _describe_error(exc, feed_url)
+        if cached_files:
+            newest = max(cached_files, key=lambda path: path.stat().st_mtime)
+            return WebSourceStatus(feed_url, "stale-kept", str(newest), detail=error)
+        return WebSourceStatus(feed_url, "failed", detail=error)
+    image_urls = extract_feed_image_urls(feed_bytes, feed_url)
+    if not image_urls:
+        if cached_files:
+            newest = max(cached_files, key=lambda path: path.stat().st_mtime)
+            return WebSourceStatus(
+                feed_url, "empty", str(newest), detail="feed lists no image URLs; cached copies kept"
+            )
+        return WebSourceStatus(feed_url, "empty", detail="feed lists no image URLs")
+    new_stems = [web_source_stem(url) for url in image_urls]
+    downloaded = 0
+    failures: list[str] = []
+    for url, stem in zip(image_urls, new_stems):
+        existing = _find_existing(cache_dir, stem)
+        if existing is not None:
+            continue
+        if cancelled is not None and cancelled():
+            raise WebSourceCancelled(f"cancelled before refreshing {url}")
+        data, extension, error = _download(url, fetcher)
+        if error is not None:
+            failures.append(error)
+            continue
+        assert data is not None and extension is not None  # guaranteed by _download
+        _atomic_write(cache_dir, f"{stem}{extension}", data)
+        downloaded += 1
+    for stem in old_stems - set(new_stems):
+        _delete_stem_files(cache_dir, stem)
+    _write_feed_sidecar(cache_dir, feed_url, new_stems)
+    kept = len(new_stems) - downloaded - len(failures)
+    detail = f"{len(new_stems)} image(s) listed, {downloaded} downloaded, {kept} kept"
+    if failures:
+        detail += f", {len(failures)} failed: {failures[0]}"
+    return WebSourceStatus(feed_url, "refreshed", detail=detail)
+
+
 def refresh_web_sources(
     profile: "Profile",
     working_directory: Path | str,
@@ -292,6 +526,20 @@ def refresh_web_sources(
     results: list[WebSourceStatus] = []
     for entry in entries:
         url = entry["url"]
+        if entry["type"] == WEB_FEED_TYPE:
+            results.append(
+                _refresh_feed_entry(
+                    url,
+                    cache_dir,
+                    dry_run=dry_run,
+                    force_refresh=force_refresh,
+                    current=current,
+                    refresh_window=refresh_window,
+                    cancelled=cancelled,
+                    fetcher=fetcher,
+                )
+            )
+            continue
         stem = web_source_stem(url)
         existing = _find_existing(cache_dir, stem)
         age = None if existing is None else current - existing.stat().st_mtime
@@ -320,5 +568,42 @@ def refresh_web_sources(
         written = _atomic_write(cache_dir, f"{stem}{extension}", data)
         results.append(WebSourceStatus(url, "refreshed", str(written)))
     if not dry_run:
-        _prune_removed_source_files(cache_dir, {web_source_stem(entry["url"]) for entry in entries})
+        _prune_web_source_cache(cache_dir, entries)
     return results
+
+
+def _prune_web_source_cache(cache_dir: Path, entries: list[dict[str, str]]) -> None:
+    """Drop cache files whose sources are no longer configured.
+
+    Feed image files are only pruned through their owning feed's sidecar: a
+    removed feed loses its sidecar and every image it listed. Unrelated
+    files (other extensions, temp artifacts) are never touched.
+    """
+    try:
+        all_entries = list(cache_dir.iterdir())
+    except OSError:
+        return
+    direct_stems = {web_source_stem(entry["url"]) for entry in entries}
+    live_feed_stems = {
+        web_source_stem(entry["url"]) for entry in entries if entry["type"] == WEB_FEED_TYPE
+    }
+    sidecar_paths = [
+        path for path in all_entries if path.is_file() and _FEED_SIDECAR_RE.match(path.name)
+    ]
+    # pictures still owned by a live feed must survive a sibling feed's removal
+    live_feed_images: set[str] = set()
+    for path in sidecar_paths:
+        if path.name[:20] in live_feed_stems:
+            live_feed_images |= _read_feed_sidecar(path)
+    for path in sidecar_paths:
+        if path.name[:20] in live_feed_stems:
+            continue
+        # feed no longer configured: drop the sidecar and its images, but never
+        # a picture that is also listed as a direct URL or by another live feed
+        for stem in _read_feed_sidecar(path) - direct_stems - live_feed_images:
+            _delete_stem_files(cache_dir, stem)
+        try:
+            path.unlink()
+        except OSError:
+            continue
+    _prune_removed_source_files(cache_dir, direct_stems | live_feed_images)

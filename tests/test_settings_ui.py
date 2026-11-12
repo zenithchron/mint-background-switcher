@@ -301,6 +301,12 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.image_types_entry,
                 app.match_orientation_checkbutton,
                 app.shared_text,
+                app.web_sources_text,
+                app.web_url_entry,
+                app.web_add_url_button,
+                app.web_add_feed_button,
+                app.web_remove_button,
+                app.web_refresh_button,
             ),
             str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu, app.fit_mode_menu),
             str(app.overlays_tab): (
@@ -2516,6 +2522,225 @@ def test_settings_image_types_save_rejects_unknown_types(monkeypatch, tmp_path):
         )
         # A rejected save leaves the previous value in place.
         assert settings_ui.load_config().get_profile("Default").image_types == []
+    finally:
+        app.destroy()
+
+
+def _assert_web_row_controls(app):
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    for control in (
+        app.web_sources_text,
+        app.web_url_entry,
+        app.web_add_url_button,
+        app.web_add_feed_button,
+        app.web_remove_button,
+        app.web_refresh_button,
+    ):
+        assert is_descendant(control, app.sources_tab)
+        assert control.winfo_ismapped()
+        assert control.winfo_width() >= control.winfo_reqwidth()
+        assert control.winfo_height() >= control.winfo_reqheight()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_web_source_row_fits_fixed_geometry_in_both_themes(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+        assert app.web_add_url_button.cget("text") == "Add URL"
+        assert app.web_add_feed_button.cget("text") == "Add feed"
+        _assert_web_row_controls(app)
+
+        # clam adds ~10px per ttk button; the row must still fit unclipped
+        style = settings_ui.ttk.Style(app)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+            app.geometry("944x668+40+33")
+            app.update_idletasks()
+            app.update()
+            _assert_web_row_controls(app)
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_add_feed_button_adds_prefixed_entry_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    infos = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+
+        # Add URL still records a plain direct-image line.
+        app.web_url_entry.delete(0, settings_ui.tk.END)
+        app.web_url_entry.insert(0, "https://example.com/pic.jpg")
+        app.web_add_url_button.invoke()
+        app.update()
+        assert str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines() == [
+            "https://example.com/pic.jpg"
+        ]
+
+        # Add feed records the [feed]-prefixed line.
+        app.web_url_entry.delete(0, settings_ui.tk.END)
+        app.web_url_entry.insert(0, "https://example.com/gallery.rss")
+        app.web_add_feed_button.invoke()
+        app.update()
+        lines = str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines()
+        assert lines == ["https://example.com/pic.jpg", "[feed] https://example.com/gallery.rss"]
+        assert infos and infos[-1][0] == "Web source added"
+        assert "RSS/Atom feed" in infos[-1][1]
+        assert app.web_url_entry.get() == ""
+
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.web_sources == [
+            {"type": "url", "url": "https://example.com/pic.jpg"},
+            {"type": "feed", "url": "https://example.com/gallery.rss"},
+        ]
+
+        # Reloading the profile shows the prefixed line again.
+        infos.clear()
+        app._load_profile("Default")
+        lines = str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines()
+        assert lines == ["https://example.com/pic.jpg", "[feed] https://example.com/gallery.rss"]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_web_source_rejects_invalid_feed_url_and_duplicate(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    infos = []
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+
+        # An invalid feed URL is rejected without touching the list.
+        app.web_url_entry.insert(0, "ftp://example.com/feed.rss")
+        app.web_add_feed_button.invoke()
+        app.update()
+        assert errors and errors[-1][0] == "Invalid web source URL"
+        assert "feed URL" in errors[-1][1]
+        assert str(app.web_sources_text.get("1.0", settings_ui.tk.END)).strip() == ""
+
+        # Adding the same URL a second time is reported as a duplicate.
+        app.web_url_entry.delete(0, settings_ui.tk.END)
+        app.web_url_entry.insert(0, "https://example.com/gallery.rss")
+        app.web_add_feed_button.invoke()
+        app.update()
+        assert infos and infos[-1][0] == "Web source added"
+        errors.clear()
+        app.web_url_entry.delete(0, settings_ui.tk.END)
+        app.web_url_entry.insert(0, "https://example.com/gallery.rss")
+        app.web_add_feed_button.invoke()
+        app.update()
+        assert infos and infos[-1][0] == "Web source already listed"
+        lines = str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines()
+        assert lines == ["[feed] https://example.com/gallery.rss"]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_remove_selected_web_source_handles_feed_lines(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+
+        text = app.web_sources_text
+        text.insert("1.0", "https://example.com/pic.jpg\n[feed] https://example.com/gallery.rss")
+        text.tag_add(settings_ui.tk.SEL, "2.0", "2.0 lineend")
+        app.web_remove_button.invoke()
+        app.update()
+        assert str(text.get("1.0", settings_ui.tk.END)).splitlines() == ["https://example.com/pic.jpg"]
+
+        # removing a middle line leaves no blank line behind
+        text.delete("1.0", settings_ui.tk.END)
+        text.insert("1.0", "https://example.com/a.jpg\nhttps://example.com/b.jpg\nhttps://example.com/c.jpg")
+        text.tag_add(settings_ui.tk.SEL, "2.0", "2.0 lineend")
+        app.web_remove_button.invoke()
+        app.update()
+        assert str(text.get("1.0", settings_ui.tk.END)).splitlines() == [
+            "https://example.com/a.jpg",
+            "https://example.com/c.jpg",
+        ]
+
+        # saving persists only the remaining direct URL
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.web_sources == [
+            {"type": "url", "url": "https://example.com/a.jpg"},
+            {"type": "url", "url": "https://example.com/c.jpg"},
+        ]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_web_source_save_rejects_invalid_line(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+        app.web_sources_text.insert("1.0", "[feed] not a url")
+        assert app._save_current() is False
+        assert errors and errors[-1][0] == "Save failed"
+        assert "Invalid web source URL(s)" in errors[-1][1]
+        assert "http/https image or feed URLs" in errors[-1][1]
+        # a rejected save leaves the previous profile in place
+        assert settings_ui.load_config().get_profile("Default").web_sources == []
     finally:
         app.destroy()
 

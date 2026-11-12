@@ -53,7 +53,7 @@ from .service import (
     save_current_wallpaper,
     switch_once,
 )
-from .sources import MAX_WEB_SOURCES, validate_web_url
+from .sources import MAX_WEB_SOURCES, WEB_FEED_TYPE, WEB_SOURCE_TYPE, validate_web_url
 from .overlays import (
     DEFAULT_OVERLAY_CALENDAR_POSITION,
     MAX_NO_DRAW_ZONES,
@@ -80,6 +80,17 @@ SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 WORKING_DIRECTORY_STATUS_PATH_LIMIT = 64
+# List-box line prefix that marks an RSS/Atom feed entry (vs a direct image URL).
+FEED_LINE_PREFIX = "[feed] "
+
+
+def _split_web_source_line(line: str) -> tuple[str, str]:
+    """Split one web-source list line into (kind, candidate URL)."""
+    if line.startswith(FEED_LINE_PREFIX):
+        return WEB_FEED_TYPE, line[len(FEED_LINE_PREFIX) :].strip()
+    return WEB_SOURCE_TYPE, line
+
+
 # (display label, stored value) for the calendar overlay corner choice.
 OVERLAY_CALENDAR_POSITION_CHOICES = (
     ("Bottom right", "bottom-right"),
@@ -816,7 +827,7 @@ class SettingsApp(tk.Tk):
 
         web_frame = ttk.LabelFrame(
             self.sources_tab,
-            text="Web picture sources — direct image URLs (http/https), cached in the working folder",
+            text="Web picture sources — direct image URLs and RSS/Atom picture feeds (http/https), cached in the working folder",
         )
         web_frame.pack(fill=tk.X, pady=(0, 1))
         self.web_sources_text = tk.Text(web_frame, height=1, width=40)
@@ -825,8 +836,14 @@ class SettingsApp(tk.Tk):
         web_entry_row.pack(fill=tk.X)
         self.web_url_entry = ttk.Entry(web_entry_row)
         self.web_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.web_add_url_button = ttk.Button(web_entry_row, text="Add URL", command=self._add_web_source_from_entry)
+        self.web_add_url_button = ttk.Button(
+            web_entry_row, text="Add URL", command=lambda: self._add_web_source_from_entry(WEB_SOURCE_TYPE)
+        )
         self.web_add_url_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_add_feed_button = ttk.Button(
+            web_entry_row, text="Add feed", command=lambda: self._add_web_source_from_entry(WEB_FEED_TYPE)
+        )
+        self.web_add_feed_button.pack(side=tk.LEFT, padx=(4, 0))
         self.web_remove_button = ttk.Button(
             web_entry_row,
             text="Remove Selected",
@@ -1740,7 +1757,11 @@ class SettingsApp(tk.Tk):
         web_text = vars(self).get("web_sources_text")
         if web_text is not None:
             web_text.delete("1.0", tk.END)
-            web_text.insert(tk.END, "\n".join(entry["url"] for entry in profile.web_sources))
+            web_lines = [
+                f"{FEED_LINE_PREFIX}{entry['url']}" if entry["type"] == WEB_FEED_TYPE else entry["url"]
+                for entry in profile.web_sources
+            ]
+            web_text.insert(tk.END, "\n".join(web_lines))
             self.web_url_entry.delete(0, tk.END)
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
         self.overlay_title_var.set(profile.overlay_title)
@@ -2058,21 +2079,22 @@ class SettingsApp(tk.Tk):
                 line = raw_line.strip()
                 if not line:
                     continue
-                url = validate_web_url(line)
+                kind, candidate = _split_web_source_line(line)
+                url = validate_web_url(candidate)
                 if url is None:
                     invalid_web_urls.append(line)
                     continue
                 if url in seen_web_urls:
                     continue
                 seen_web_urls.add(url)
-                web_sources.append({"type": "url", "url": url})
+                web_sources.append({"type": kind, "url": url})
             if len(web_sources) > MAX_WEB_SOURCES:
                 raise ValueError(f"A profile can list at most {MAX_WEB_SOURCES} web sources.")
             if invalid_web_urls:
                 shown = "\n".join(invalid_web_urls[:5])
                 extra = f"\n…and {len(invalid_web_urls) - 5} more." if len(invalid_web_urls) > 5 else ""
                 raise ValueError(
-                    "Invalid web source URL(s) — use direct http/https image URLs:\n" + shown + extra
+                    "Invalid web source URL(s) — use http/https image or feed URLs:\n" + shown + extra
                 )
         # Overlay fields live on the Overlays page; carry the saved values forward when the
         # widgets are absent (partial construction) so saving never fails or wipes zones.
@@ -2433,14 +2455,35 @@ class SettingsApp(tk.Tk):
             return []
         return [line.strip() for line in str(text.get("1.0", tk.END)).split("\n") if line.strip()]
 
-    def _add_web_source_from_entry(self) -> None:
+    def _web_source_entries_from_text(self) -> list[tuple[str, str]]:
+        """Parse the list into (kind, url) pairs; invalid lines are dropped.
+
+        Feed lines carry a ``[feed] `` prefix so both provider types share
+        one list box.
+        """
+        entries: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for line in self._web_source_urls_from_text():
+            kind, candidate = _split_web_source_line(line)
+            url = validate_web_url(candidate)
+            if url is None or url in seen:
+                continue
+            seen.add(url)
+            entries.append((kind, url))
+        return entries
+
+    def _add_web_source_from_entry(self, kind: str = WEB_SOURCE_TYPE) -> None:
+        is_feed = kind == WEB_FEED_TYPE
+        noun = "feed URL" if is_feed else "direct image URL"
+        button = "Add feed" if is_feed else "Add URL"
         if self._any_worker_busy():
             return
         raw = self.web_url_entry.get().strip()
         if not raw:
             messagebox.showinfo(
                 "Enter a web source URL",
-                "Type a direct image URL (http:// or https://), then choose Add URL.",
+                f"Type a {noun} (http:// or https://), then choose {button}."
+                + (" Feeds are RSS/Atom documents whose items carry pictures." if is_feed else ""),
                 parent=self,
             )
             return
@@ -2448,26 +2491,28 @@ class SettingsApp(tk.Tk):
         if url is None:
             messagebox.showerror(
                 "Invalid web source URL",
-                f"Not a usable direct image URL (use http:// or https://):\n{raw}",
+                f"Not a usable {noun} (use http:// or https://):\n{raw}",
                 parent=self,
             )
             return
-        existing = self._web_source_urls_from_text()
+        existing = [url for _kind, url in self._web_source_entries_from_text()]
         if url in existing:
             messagebox.showinfo("Web source already listed", f"That URL is already listed:\n{url}", parent=self)
             return
         if len(existing) >= MAX_WEB_SOURCES:
             messagebox.showerror(
                 "Too many web sources",
-                f"A profile can list at most {MAX_WEB_SOURCES} web sources.",
+                f"A profile can list at most {MAX_WEB_SOURCES} web sources (image URLs and feeds combined).",
                 parent=self,
             )
             return
-        self._append_text_line(self.web_sources_text, url)
+        line = f"{FEED_LINE_PREFIX}{url}" if is_feed else url
+        self._append_text_line(self.web_sources_text, line)
         self.web_url_entry.delete(0, tk.END)
+        what = "RSS/Atom feed" if is_feed else "web source"
         messagebox.showinfo(
             "Web source added",
-            f"Added:\n{url}\n\nChoose Save Profile to keep this profile change.",
+            f"Added {what}:\n{url}\n\nChoose Save Profile to keep this profile change.",
             parent=self,
         )
 
@@ -2488,8 +2533,17 @@ class SettingsApp(tk.Tk):
             return
         line_start = text.index(f"{selection[0]} linestart")
         line_end = text.index(f"{selection[0]} lineend")
-        removed = text.get(line_start, f"{line_end}").strip()
-        text.delete(line_start, f"{line_end} linend")
+        removed = text.get(line_start, line_end).strip()
+        # Delete the whole line without leaving a blank line behind: middle lines
+        # lose their trailing newline, the last real line its preceding one.
+        is_last_real = f"{line_end} +1c" == text.index("end")
+        if is_last_real:
+            start_index = line_start if line_start == "1.0" else f"{line_start} -1c"
+            end_index = line_end
+        else:
+            start_index = line_start
+            end_index = f"{line_end} +1c"
+        text.delete(start_index, end_index)
         messagebox.showinfo(
             "Web source removed",
             f"Removed:\n{removed}\n\nChoose Save Profile to keep this profile change.",
@@ -2500,15 +2554,8 @@ class SettingsApp(tk.Tk):
         if vars(self).get("web_sources_text") is None:
             return True
         profile = self.config_data.profiles.get(self.profile_var.get())
-        saved = [entry["url"] for entry in profile.web_sources] if profile is not None else []
-        current: list[str] = []
-        seen: set[str] = set()
-        for line in self._web_source_urls_from_text():
-            url = validate_web_url(line)
-            if url is not None and url not in seen:
-                seen.add(url)
-                current.append(url)
-        return current == saved
+        saved = [(entry["type"], entry["url"]) for entry in profile.web_sources] if profile is not None else []
+        return self._web_source_entries_from_text() == saved
 
     def _refresh_web_sources(self) -> None:
         if self._any_worker_busy() or self._web_refresh_busy:
@@ -2529,8 +2576,8 @@ class SettingsApp(tk.Tk):
         if not profile.web_sources:
             messagebox.showinfo(
                 "No web sources listed",
-                f"This profile lists no web sources yet. Add direct image URLs on this page, choose "
-                f"Save Profile, then Refresh Now.",
+                f"This profile lists no web sources yet. Add direct image URLs or RSS/Atom feeds on this "
+                f"page, choose Save Profile, then Refresh Now.",
                 parent=self,
             )
             return
@@ -3131,6 +3178,7 @@ class SettingsApp(tk.Tk):
                     cached = sum(1 for s in statuses if s.status == "cached")
                     stale = sum(1 for s in statuses if s.status == "stale-kept")
                     failed = [s for s in statuses if s.status == "failed"]
+                    empty = [s for s in statuses if s.status == "empty"]
                     if failed:
                         first = failed[0]
                         messagebox.showwarning(
@@ -3138,6 +3186,7 @@ class SettingsApp(tk.Tk):
                             (
                                 f"Refreshed {refreshed}, kept {cached} fresh"
                                 + (f", {stale} kept its cached copy" if stale else "")
+                                + (f", {len(empty)} listed no images" if empty else "")
                                 + f", {len(failed)} failed.\n\nFirst failure:\n{first.url}\n{first.detail[:200]}"
                             ),
                             parent=self,
@@ -3148,6 +3197,7 @@ class SettingsApp(tk.Tk):
                             (
                                 f"Refreshed {refreshed}, kept {cached} fresh"
                                 + (f", {stale} kept its cached copy (URL offline)" if stale else "")
+                                + (f", {len(empty)} listed no images" if empty else "")
                                 + "."
                             ),
                             parent=self,

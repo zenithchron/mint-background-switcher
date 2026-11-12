@@ -105,3 +105,22 @@ def test_web_source_add_list_remove_round_trip(monkeypatch, tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["web_sources"] == []
     assert cli.main(["web-source", "remove", "https://example.com/a.jpg"]) == 1
+
+
+def test_web_source_add_feed_flag_stores_feed_type(monkeypatch, tmp_path, capsys):
+    from mint_background_switcher.config import Config, Profile, save_config
+
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    assert cli.main(["web-source", "add", "https://example.com/feed.rss", "--feed"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {
+        "profile": "P",
+        "web_sources": [{"type": "feed", "url": "https://example.com/feed.rss"}],
+    }
+
+    # without --flag the same URL would be a direct image entry; the feed URL is already listed
+    assert cli.main(["web-source", "add", "https://example.com/feed.rss"]) == 1
+    assert cli.main(["web-source", "add", "ftp://example.com/feed.rss", "--feed"]) == 1
+    assert cli.main(["web-source", "remove", "https://example.com/feed.rss"]) == 0

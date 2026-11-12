@@ -51,6 +51,8 @@ from .paths import generated_wallpaper_path
 from .run_conditions import active_run_conditions
 from .sources import (
     MAX_WEB_SOURCES,
+    WEB_FEED_TYPE,
+    WEB_SOURCE_TYPE,
     WebSourceCancelled,
     WebSourceStatus,
     refresh_web_sources,
@@ -238,11 +240,13 @@ def list_web_sources(profile_name: str | None = None) -> list[dict[str, str]]:
     return [dict(entry) for entry in load_config(create=False).get_profile(profile_name).web_sources]
 
 
-def add_web_source(profile_name: str | None, raw_url: str) -> list[dict[str, str]]:
-    """Add one direct image URL to the profile's web sources."""
+def add_web_source(profile_name: str | None, raw_url: str, *, feed: bool = False) -> list[dict[str, str]]:
+    """Add one web source (direct image URL or RSS/Atom feed URL) to a profile."""
     url = validate_web_url(raw_url)
     if url is None:
-        raise ValueError(f"not a valid direct image URL (use http:// or https://): {raw_url!r}")
+        kind = "RSS/Atom feed" if feed else "direct image"
+        raise ValueError(f"not a valid {kind} URL (use http:// or https://): {raw_url!r}")
+    kind = WEB_FEED_TYPE if feed else WEB_SOURCE_TYPE
 
     def _add(profile: Profile) -> list[dict[str, str]]:
         for entry in profile.web_sources:
@@ -250,17 +254,17 @@ def add_web_source(profile_name: str | None, raw_url: str) -> list[dict[str, str
                 raise ValueError(f"already listed: {url}")
         if len(profile.web_sources) >= MAX_WEB_SOURCES:
             raise ValueError(f"a profile can list at most {MAX_WEB_SOURCES} web sources")
-        profile.web_sources = [*profile.web_sources, {"type": "url", "url": url}]
+        profile.web_sources = [*profile.web_sources, {"type": kind, "url": url}]
         return [dict(entry) for entry in profile.web_sources]
 
     return _mutate_profile(profile_name, _add)
 
 
 def remove_web_source(profile_name: str | None, raw_url: str) -> list[dict[str, str]]:
-    """Remove one direct image URL from the profile's web sources."""
+    """Remove one web source (direct image URL or RSS/Atom feed) from a profile."""
     url = validate_web_url(raw_url)
     if url is None:
-        raise ValueError(f"not a valid direct image URL (use http:// or https://): {raw_url!r}")
+        raise ValueError(f"not a valid web source URL (use http:// or https://): {raw_url!r}")
 
     def _remove(profile: Profile) -> list[dict[str, str]]:
         if not any(entry["url"] == url for entry in profile.web_sources):

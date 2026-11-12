@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.26] - 2026-11-12
+
+### Added
+
+- **RSS/Atom picture feeds** (second keyless provider of the web-sources extension point from v0.2.22, JBS SRC-03..14) — a profile can now point at RSS/Atom feeds whose items carry pictures, alongside direct image URLs:
+  - **Settings → Sources → Web picture sources**: new **Add feed** button next to **Add URL**. Feed entries are shown in the same list with a `[feed] ` prefix, count against the same 20-entry cap as direct URLs, and use the same Remove Selected / Refresh now flow with visible success/error feedback.
+  - One picture per feed item, in feed order, up to 10 per feed: an image `enclosure` first, then `media:content`, then `media:thumbnail`, then the first `<img>` in the item's content/description (including RSS `content:encoded`). Relative URLs resolve against the feed URL; non-http(s) candidates are dropped.
+  - A feed is re-fetched within the same 24-hour refresh window as direct URLs (`Refresh now` forces it): pictures still listed are kept, new ones are downloaded, and pictures the feed no longer lists are pruned through a per-feed sidecar, so removing a feed only ever removes its own pictures.
+  - Fail-open as with direct URLs: an unreachable feed, an unparseable document, or a feed with no pictures is reported for that source only and never blocks rotation; previously cached feed pictures keep rotating while the feed is offline.
+  - CLI: `mint-background-switcher web-source add <url> --feed` (the existing `remove | list | refresh [--dry-run]` commands work on feed entries by URL).
+- Bumped the package version to `0.2.26`.
+
 ## [0.2.25] - 2026-11-11
 
 ### Added
