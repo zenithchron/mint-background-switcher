@@ -61,8 +61,8 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 
 ### 5. History and current-wallpaper actions
 
-- Never Show Again exclusions, including one image in a composite.
-- Previous and redraw-current actions.
+- Never Show Again exclusions, including one image in a composite. Shipped in `0.2.18` (whole-current-wallpaper one-click exclusion; single-image exclusion within a composite remains future work).
+- Previous and redraw-current actions. Previous shipped in `0.2.27` as a per-profile 10-step history with tray, CLI, and hotkey access; redraw-current remains future work.
 - Shuffle current monitor assignments and clear background.
 - Browse recent cached pictures and navigate to their original sources.
 - Configurable global shortcuts and manual Next while automatic switching is paused.

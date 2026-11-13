@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.27] - 2026-11-13
+
+### Added
+
+- **Previous wallpaper** (one-step-back action from the roadmap's "History and current-wallpaper actions" section) — restore the previously applied wallpaper of the active profile from the tray (**Previous** menu item), the CLI (`mint-background-switcher previous [--dry-run] [--profile NAME]`), or a new fourth rebindable Cinnamon hotkey (**Previous**, default `<Primary><Alt>Left`, editable under **Settings → Rotation & Shortcuts → Shortcuts** alongside the other hotkeys):
+  - Every applied switch — and every black screen — copies the composed wallpaper it displaces into a per-profile history of stable snapshots (newest first, capped at 10; the oldest snapshot and its file are dropped when the cap is exceeded). Entries are kept contiguous, so one step back always restores exactly the wallpaper that was applied, effects and overlays included.
+  - `previous` walks back one step: the snapshot is materialized into the alternating active slot and applied, the consumed entry leaves the stack, and the remaining snapshots shift down to stay contiguous. Restoring clears a black screen or pause, like a manual switch, and re-applies the lock-screen mirror when enabled.
+  - `previous --dry-run` reports the snapshot that would be restored without touching state or snapshot files. With no recorded history (fresh state, or a predecessor with no restorable source images such as a black screen) every path reports a one-line error and the CLI exits 1.
+  - Moving the working folder remaps the recorded history (and `last_wallpaper`) to the new location, and `register-hotkey --all` now registers all four hotkeys.
+- Bumped the package version to `0.2.27`.
+
 ## [0.2.26] - 2026-11-12
 
 ### Added

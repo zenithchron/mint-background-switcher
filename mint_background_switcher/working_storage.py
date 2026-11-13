@@ -14,7 +14,7 @@ import uuid
 
 from .config import Config, load_config, replace_working_directory
 from .paths import generated_wallpaper_path, xdg_cache_dir
-from .state import state_transaction
+from .state import WALLPAPER_HISTORY_LIMIT, state_transaction
 
 MARKER_FILENAME = ".mint-background-switcher-storage.json"
 MARKER_DATA = {"application": "mint-background-switcher", "schema": 1}
@@ -235,6 +235,13 @@ def _managed_names(config: Config, source: Path) -> list[str]:
         for profile_name in config.profiles
         for suffix in suffixes
     }
+    names.update(
+        {
+            generated_wallpaper_path(profile_name, suffix=f"prev-{index}", base_dir=source).name
+            for profile_name in config.profiles
+            for index in range(WALLPAPER_HISTORY_LIMIT)
+        }
+    )
     names.update(
         {
             "library-index.sqlite3",
@@ -515,6 +522,13 @@ def migrate_working_directory(
                 previous = _absolute(state.last_wallpaper)
                 if previous.parent.resolve(strict=False) == source and previous.name in {path.name for path in files}:
                     state.last_wallpaper = str(target / previous.name)
+
+            migrated_names = {path.name for path in files}
+            for entries in state.wallpaper_history.values():
+                for entry in entries:
+                    snapshot = _absolute(entry["wallpaper"])
+                    if snapshot.parent.resolve(strict=False) == source and snapshot.name in migrated_names:
+                        entry["wallpaper"] = str(target / snapshot.name)
 
         assert source is not None
         return WorkingDirectoryMigrationResult(source, target, tuple(path.name for path, _identity in installed))

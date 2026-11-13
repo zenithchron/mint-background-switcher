@@ -1,7 +1,7 @@
 """Cinnamon hotkey registration helper.
 
-Mint Background Switcher can register up to three rebindable Cinnamon custom
-hotkeys (Next, Pause/Resume, and Black screen). Each action owns one
+Mint Background Switcher can register up to four rebindable Cinnamon custom
+hotkeys (Next, Previous, Pause/Resume, and Black screen). Each action owns one
 ``org.cinnamon.desktop.keybindings.custom-keybinding`` object; the actions are
 defined in :data:`HOTKEY_ACTIONS` and registered with
 :func:`register_cinnamon_hotkey` / :func:`register_all_cinnamon_hotkeys`.
@@ -56,6 +56,12 @@ HOTKEY_ACTIONS: dict[str, HotkeyAction] = {
         custom_path=_custom_path("mint-background-switcher-black-screen"),
         cli_command="black-screen",
     ),
+    "previous": HotkeyAction(
+        key="previous",
+        display_name="Mint Background Switcher: Previous",
+        custom_path=_custom_path("mint-background-switcher-previous"),
+        cli_command="previous",
+    ),
 }
 
 # Kept for callers that only care about the historic black-screen hotkey.
@@ -65,6 +71,7 @@ DEFAULT_BINDINGS = {
     "next": "<Primary><Alt>n",
     "pause-resume": "<Primary><Alt>p",
     "black-screen": "<Primary><Alt>b",
+    "previous": "<Primary><Alt>Left",
 }
 
 
@@ -83,6 +90,8 @@ def hotkey_binding_for(profile, action_key: str) -> str:
         return profile.next_hotkey or DEFAULT_BINDINGS["next"]
     if action_key == "pause-resume":
         return profile.pause_hotkey or DEFAULT_BINDINGS["pause-resume"]
+    if action_key == "previous":
+        return profile.previous_hotkey or DEFAULT_BINDINGS["previous"]
     return profile.black_hotkey or DEFAULT_BINDINGS["black-screen"]
 
 

@@ -18,10 +18,12 @@ from .overlays import DEFAULT_OVERLAY_CALENDAR_POSITION, overlays_enabled, read_
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
 from .service import (
+    NoPreviousWallpaperError,
     add_web_source,
     black_screen,
     list_web_sources,
     pause,
+    previous_wallpaper,
     refresh_web_sources_now,
     remove_web_source,
     resume,
@@ -88,6 +90,10 @@ def build_parser() -> argparse.ArgumentParser:
     nextp.add_argument("--profile")
     nextp.add_argument("--dry-run", action="store_true")
 
+    previous = sub.add_parser("previous", help="Restore the previously applied wallpaper")
+    previous.add_argument("--profile")
+    previous.add_argument("--dry-run", action="store_true")
+
     black = sub.add_parser("black-screen", help="Set all monitors black and pause rotation")
     black.add_argument("--profile")
     black.add_argument("--dry-run", action="store_true")
@@ -132,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     hotkey = sub.add_parser(
         "register-hotkey",
-        help="Register Cinnamon hotkeys (Next, Pause/Resume, Black screen)",
+        help="Register Cinnamon hotkeys (Next, Previous, Pause/Resume, Black screen)",
     )
     hotkey.add_argument(
         "--action",
@@ -140,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="black-screen",
         help="Which hotkey to register (default: black-screen, the historic behavior)",
     )
-    hotkey.add_argument("--all", action="store_true", help="Register all three hotkeys using the saved profile bindings")
+    hotkey.add_argument("--all", action="store_true", help="Register all four hotkeys using the saved profile bindings")
     hotkey.add_argument("--binding", default=None)
     hotkey.add_argument("--dry-run", action="store_true")
 
@@ -231,6 +237,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         return 0
+    if args.command == "previous":
+        try:
+            _print_result(previous_wallpaper(args.profile, dry_run=args.dry_run))
+        except NoPreviousWallpaperError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        return 0
     if args.command == "black-screen":
         _print_result(black_screen(args.profile, dry_run=args.dry_run))
         return 0
@@ -313,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
                     for cmd in cmds:
                         print(f"#{key} " + " ".join(cmd))
             else:
-                print("registered next, pause-resume, black-screen")
+                print("registered next, previous, pause-resume, black-screen")
         else:
             commands = register_cinnamon_hotkey(args.action, binding=args.binding, dry_run=args.dry_run)
             if args.dry_run:

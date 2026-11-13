@@ -59,7 +59,13 @@ from .sources import (
     validate_web_url,
     web_source_cache_dir,
 )
-from .state import RuntimeState, draw_many, load_state, state_transaction
+from .state import (
+    WALLPAPER_HISTORY_LIMIT,
+    RuntimeState,
+    draw_many,
+    load_state,
+    state_transaction,
+)
 from .storage import atomic_write_json_unlocked, locked_file, lock_path_for, read_json_unlocked
 from .working_storage import ensure_configured_working_directory
 
@@ -79,6 +85,10 @@ class SwitchResult:
 
 class SwitchCancelled(RuntimeError):
     """Raised when a background rotation is cancelled before desktop activation."""
+
+
+class NoPreviousWallpaperError(RuntimeError):
+    """Raised when "previous" is requested but no earlier wallpaper is recorded."""
 
 
 def current_source_images() -> list[Path]:
@@ -621,6 +631,88 @@ def _next_wallpaper_path(
         return generated_wallpaper_path(profile.name, suffix="dry-run", base_dir=working_directory), None
     slot = (state.wallpaper_slot + 1) % 2
     return generated_wallpaper_path(profile.name, suffix=f"active-{slot}", base_dir=working_directory), slot
+
+
+def _previous_wallpaper_path(
+    profile_name: str,
+    index: int,
+    working_directory: Path,
+) -> Path:
+    """The stable snapshot file holding the profile's index-th previous wallpaper (0 = most recent)."""
+
+    return generated_wallpaper_path(profile_name, suffix=f"prev-{index}", base_dir=working_directory)
+
+
+def _push_previous_history(
+    state: RuntimeState,
+    working_directory: Path,
+    profile_name: str,
+    old_wallpaper: str | None,
+    old_images: Sequence[str],
+) -> None:
+    """Record the wallpaper being replaced so "previous" can restore it.
+
+    The composed file being displaced is copied to the profile's ``prev-0``
+    snapshot and existing snapshots are shifted to ``prev-1`` and onward
+    (in-place renames) so the newest entry is always at index 0. Entries
+    without restorable source images (black screens, fallbacks) are skipped,
+    and the stack is capped at :data:`WALLPAPER_HISTORY_LIMIT`.
+    """
+
+    if not old_images or not old_wallpaper:
+        return
+    old_path = Path(old_wallpaper).expanduser()
+    if not old_path.is_file():
+        return
+    # Compact first so entries are contiguous at prev-0..prev-n; otherwise a
+    # gap could make two entries target the same slot during the shift.
+    history = _compact_previous_history(state, working_directory, profile_name)
+    if len(history) >= WALLPAPER_HISTORY_LIMIT:
+        oldest = history.pop()
+        try:
+            Path(oldest["wallpaper"]).expanduser().unlink(missing_ok=True)
+        except OSError:
+            pass
+    for index in range(len(history) - 1, -1, -1):
+        current = Path(history[index]["wallpaper"]).expanduser()
+        target = _previous_wallpaper_path(profile_name, index + 1, working_directory)
+        if current.exists() and current.resolve(strict=False) != target.resolve(strict=False):
+            current.replace(target)
+        history[index]["wallpaper"] = str(target)
+    target_zero = _previous_wallpaper_path(profile_name, 0, working_directory)
+    shutil.copyfile(old_path, target_zero)
+    history.insert(
+        0,
+        {"wallpaper": str(target_zero), "images": [str(image) for image in old_images]},
+    )
+    state.wallpaper_history[profile_name] = history
+
+
+def _compact_previous_history(
+    state: RuntimeState,
+    working_directory: Path,
+    profile_name: str,
+) -> list[dict[str, Any]]:
+    """Drop entries whose snapshot file vanished and renumber the rest.
+
+    Surviving entries are renamed down so index 0 always lives at
+    ``prev-0``. Mutates ``state.wallpaper_history`` and returns the compacted
+    list.
+    """
+
+    history = state.wallpaper_history.get(profile_name, [])
+    if not history:
+        return []
+    valid = [entry for entry in history if Path(entry["wallpaper"]).expanduser().is_file()]
+    for index, remaining in enumerate(valid):
+        current = Path(remaining["wallpaper"]).expanduser()
+        target = _previous_wallpaper_path(profile_name, index, working_directory)
+        if current.resolve(strict=False) != target.resolve(strict=False):
+            if current.exists():
+                current.replace(target)
+            remaining["wallpaper"] = str(target)
+    state.wallpaper_history[profile_name] = valid
+    return valid
 
 
 def _mirror_lockscreen(profile: Profile, wallpaper: Path, *, dry_run: bool) -> str:
@@ -1383,6 +1475,14 @@ def _switch_once_with_state(
         state.black_screen = False
         state.black_reason = ""
         state.paused = False
+    if not dry_run:
+        _push_previous_history(
+            state,
+            working_directory,
+            profile.name,
+            state.last_wallpaper,
+            state.last_images,
+        )
     state.last_wallpaper = str(wallpaper)
     state.last_images = images_used
     return SwitchResult(
@@ -1464,6 +1564,15 @@ def black_screen(
             _cancel_if_requested(cancelled)
             setter.apply_black(wallpaper, profile.desktop)
 
+        # The wallpaper going black is restorable via "previous"; record it
+        # before it is displaced by the black composite.
+        _push_previous_history(
+            state,
+            working_directory,
+            profile.name,
+            state.last_wallpaper,
+            state.last_images,
+        )
         state.active_profile = profile.name
         state.black_screen = True
         state.black_reason = "night" if reason == "night" else "manual"
@@ -1479,6 +1588,101 @@ def black_screen(
         applied=True,
         action="black-screen",
         lockscreen_note=_mirror_lockscreen(profile, wallpaper, dry_run=False),
+    )
+
+
+def previous_wallpaper(
+    profile_name: str | None = None,
+    *,
+    dry_run: bool = False,
+    cancelled: Callable[[], bool] | None = None,
+) -> SwitchResult:
+    """Restore the previously applied wallpaper of a profile.
+
+    Walks back one step in the per-profile history of applied wallpapers:
+    the composed snapshot from the previous switch (or the wallpaper in
+    force before a black screen) is re-activated on the desktop. The
+    restored snapshot is exactly the file that was applied, including any
+    effects and overlays it carried. Restoring clears a black screen or
+    pause, like a manual switch.
+    """
+
+    _cancel_if_requested(cancelled)
+    cfg = load_config()
+    if dry_run:
+        # Read-only: report what would be restored without touching state or
+        # snapshot files.
+        state = load_state()
+        profile = cfg.get_profile(profile_name or state.active_profile)
+        entries = state.wallpaper_history.get(profile.name) or []
+        entry = next(
+            (candidate for candidate in entries if Path(candidate["wallpaper"]).expanduser().is_file()),
+            None,
+        )
+        if entry is None:
+            raise NoPreviousWallpaperError(
+                f"no previous wallpaper is recorded for profile {profile.name!r} yet; "
+                "apply a new wallpaper first, then 'previous' restores this one"
+            )
+        return SwitchResult(
+            profile.name,
+            Path(entry["wallpaper"]),
+            list(entry["images"]),
+            detect_monitors(),
+            applied=False,
+            action="previous",
+        )
+
+    with state_transaction() as state:
+        profile = cfg.get_profile(profile_name or state.active_profile)
+        working_directory = ensure_configured_working_directory(cfg)
+        history = _compact_previous_history(state, working_directory, profile.name)
+        if not history:
+            raise NoPreviousWallpaperError(
+                f"no previous wallpaper is recorded for profile {profile.name!r} yet; "
+                "apply a new wallpaper first, then 'previous' restores this one"
+            )
+        entry = history[0]
+        source = Path(entry["wallpaper"]).expanduser()
+        # Materialize the snapshot into the alternating active slot (like a
+        # rotation does) and apply that file. Copying first keeps the
+        # renumbering below from racing the desktop's read of the image.
+        next_slot = (state.wallpaper_slot + 1) % 2
+        wallpaper = generated_wallpaper_path(
+            profile.name,
+            suffix=f"active-{next_slot}",
+            base_dir=working_directory,
+        )
+        shutil.copyfile(source, wallpaper)
+        # The consumed entry leaves the stack; the remaining snapshots shift
+        # down one slot to stay contiguous.
+        remaining = history[1:]
+        for index, candidate in enumerate(remaining):
+            current = Path(candidate["wallpaper"]).expanduser()
+            target = _previous_wallpaper_path(profile.name, index, working_directory)
+            if current.exists() and current.resolve(strict=False) != target.resolve(strict=False):
+                current.replace(target)
+            candidate["wallpaper"] = str(target)
+        state.wallpaper_history[profile.name] = remaining
+        state.active_profile = profile.name
+        state.black_screen = False
+        state.black_reason = ""
+        state.paused = False
+        state.wallpaper_slot = next_slot
+        state.last_wallpaper = str(wallpaper)
+        state.last_images = list(entry["images"])
+        _cancel_if_requested(cancelled)
+        DesktopSetter(dry_run=False).apply(wallpaper, profile.desktop)
+        lockscreen_note = _mirror_lockscreen(profile, wallpaper, dry_run=False)
+        monitors = detect_monitors()
+    return SwitchResult(
+        profile.name,
+        wallpaper,
+        list(entry["images"]),
+        monitors,
+        applied=True,
+        action="previous",
+        lockscreen_note=lockscreen_note,
     )
 
 

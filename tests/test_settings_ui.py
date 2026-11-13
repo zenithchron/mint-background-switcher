@@ -274,6 +274,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.hotkey_entry, app.rotation_tab)
         assert is_descendant(app.next_hotkey_entry, app.rotation_tab)
         assert is_descendant(app.pause_hotkey_entry, app.rotation_tab)
+        assert is_descendant(app.previous_hotkey_entry, app.rotation_tab)
         assert is_descendant(app.register_hotkeys_button, app.rotation_tab)
         assert is_descendant(app.desktop_menu, app.rotation_tab)
         assert is_descendant(app.suppress_process_checkbutton, app.conditions_tab)
@@ -336,6 +337,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.hotkey_entry,
                 app.next_hotkey_entry,
                 app.pause_hotkey_entry,
+                app.previous_hotkey_entry,
                 app.register_hotkeys_button,
                 app.desktop_menu,
                 app.mirror_lockscreen_checkbutton,
@@ -4604,6 +4606,7 @@ def test_settings_hotkey_entries_are_visible_and_persist(monkeypatch, tmp_path):
         for control in (
             app.next_hotkey_entry,
             app.pause_hotkey_entry,
+            app.previous_hotkey_entry,
             app.hotkey_entry,
             app.register_hotkeys_button,
         ):
@@ -4613,21 +4616,26 @@ def test_settings_hotkey_entries_are_visible_and_persist(monkeypatch, tmp_path):
 
         assert app.next_hotkey_var.get() == "<Primary><Alt>n"
         assert app.pause_hotkey_var.get() == "<Primary><Alt>p"
+        assert app.previous_hotkey_var.get() == "<Primary><Alt>Left"
         assert app.hotkey_var.get() == "<Primary><Alt>b"
 
         app.next_hotkey_var.set("<Ctrl>n")
         app.pause_hotkey_var.set("<Alt>p")
+        app.previous_hotkey_var.set("<Ctrl>Left")
         assert app._save_current() is True
         saved = settings_ui.load_config().get_profile("Default")
         assert saved.next_hotkey == "<Ctrl>n"
         assert saved.pause_hotkey == "<Alt>p"
+        assert saved.previous_hotkey == "<Ctrl>Left"
         assert saved.black_hotkey == "<Primary><Alt>b"
 
         app.next_hotkey_var.set("<Ctrl>x")
         app.pause_hotkey_var.set("<Ctrl>y")
+        app.previous_hotkey_var.set("<Ctrl>Right")
         app._load_profile("Default")
         assert app.next_hotkey_var.get() == "<Ctrl>n"
         assert app.pause_hotkey_var.get() == "<Alt>p"
+        assert app.previous_hotkey_var.get() == "<Ctrl>Left"
     finally:
         app.destroy()
 
@@ -4644,7 +4652,7 @@ def test_settings_register_hotkeys_button_reports_saved_bindings(monkeypatch, tm
     monkeypatch.setattr(
         settings_ui,
         "register_all_cinnamon_hotkeys",
-        lambda: calls.append(1) or {"next": [], "pause-resume": [], "black-screen": []},
+        lambda: calls.append(1) or {"next": [], "previous": [], "pause-resume": [], "black-screen": []},
     )
     app = settings_ui.SettingsApp()
     try:
@@ -4661,6 +4669,7 @@ def test_settings_register_hotkeys_button_reports_saved_bindings(monkeypatch, tm
         assert infos and infos[0][0] == "Hotkeys registered"
         message = infos[0][1]
         assert "Next: <Ctrl>n" in message
+        assert "Previous: <Primary><Alt>Left" in message
         assert "Pause/Resume: <Primary><Alt>p" in message
         assert "Black screen: <Primary><Alt>b" in message
         saved = settings_ui.load_config().get_profile("Default")

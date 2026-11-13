@@ -12,6 +12,11 @@ from typing import Any, Callable, Iterator
 from .paths import state_file, xdg_config_dir
 from .storage import atomic_write_json_unlocked, locked_file, locked_read_json, locked_write_json, lock_path_for, read_json_unlocked
 
+#: How many previously applied wallpapers are kept per profile so the
+#: "previous" action can walk backward. Older snapshots are dropped (and
+#: their files removed) once the limit is exceeded.
+WALLPAPER_HISTORY_LIMIT = 10
+
 
 @dataclass(slots=True)
 class RuntimeState:
@@ -23,6 +28,7 @@ class RuntimeState:
     last_wallpaper: str | None = None
     last_images: list[str] = field(default_factory=list)
     wallpaper_slot: int = 0
+    wallpaper_history: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeState":
@@ -50,6 +56,7 @@ class RuntimeState:
             last_wallpaper=data.get("last_wallpaper"),
             last_images=[str(v) for v in last_images_raw] if isinstance(last_images_raw, list) else [],
             wallpaper_slot=wallpaper_slot,
+            wallpaper_history=_parse_wallpaper_history(data.get("wallpaper_history")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,7 +69,38 @@ class RuntimeState:
             "last_wallpaper": self.last_wallpaper,
             "last_images": self.last_images,
             "wallpaper_slot": self.wallpaper_slot,
+            "wallpaper_history": self.wallpaper_history,
         }
+
+
+def _parse_wallpaper_history(raw: Any) -> dict[str, list[dict[str, Any]]]:
+    """Parse the per-profile previous-wallpaper history from a state dict.
+
+    Malformed entries (missing wallpaper path, non-string images) are
+    dropped so a corrupt state file can never break the "previous"
+    action; lists are capped at :data:`WALLPAPER_HISTORY_LIMIT`.
+    """
+
+    if not isinstance(raw, dict):
+        return {}
+    history: dict[str, list[dict[str, Any]]] = {}
+    for profile_name, entries in raw.items():
+        if not isinstance(profile_name, str) or not profile_name or not isinstance(entries, list):
+            continue
+        kept: list[dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            wallpaper = entry.get("wallpaper")
+            images = entry.get("images")
+            if not isinstance(wallpaper, str) or not wallpaper.strip():
+                continue
+            if not isinstance(images, list) or not images or not all(isinstance(item, str) and item for item in images):
+                continue
+            kept.append({"wallpaper": wallpaper, "images": [str(item) for item in images]})
+        if kept:
+            history[profile_name] = kept[:WALLPAPER_HISTORY_LIMIT]
+    return history
 
 
 def load_state(path: Path | None = None) -> RuntimeState:

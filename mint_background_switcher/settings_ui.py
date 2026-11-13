@@ -21,6 +21,7 @@ from .config import (
     DEFAULT_NIGHT_START,
     DEFAULT_NEXT_HOTKEY,
     DEFAULT_PAUSE_HOTKEY,
+    DEFAULT_PREVIOUS_HOTKEY,
     EFFECT_CHOICES,
     FIT_MODE_CHOICES,
     FIT_MODE_LABELS,
@@ -551,6 +552,7 @@ class SettingsApp(tk.Tk):
         self.hotkey_var = tk.StringVar()
         self.next_hotkey_var = tk.StringVar()
         self.pause_hotkey_var = tk.StringVar()
+        self.previous_hotkey_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
@@ -1232,6 +1234,15 @@ class SettingsApp(tk.Tk):
         self.hotkey_entry.grid(row=2, column=1, sticky="w", padx=5)
         self.register_hotkeys_button = ttk.Button(shortcuts, text="Register hotkeys", command=self._register_hotkeys)
         self.register_hotkeys_button.grid(row=2, column=2, sticky="w", padx=(16, 0))
+        ttk.Label(shortcuts, text="Previous hotkey:").grid(row=3, column=0, sticky="w")
+        self.previous_hotkey_entry = ttk.Entry(shortcuts, textvariable=self.previous_hotkey_var, width=22)
+        self.previous_hotkey_entry.grid(row=3, column=1, sticky="w", padx=5)
+        ttk.Label(
+            shortcuts,
+            text="Restores the previously applied wallpaper.",
+            justify=tk.LEFT,
+            wraplength=430,
+        ).grid(row=3, column=2, sticky="w", padx=(16, 0))
         shortcuts.columnconfigure(2, weight=1)
 
         desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=8)
@@ -1737,6 +1748,7 @@ class SettingsApp(tk.Tk):
         self.hotkey_var.set(profile.black_hotkey)
         self.next_hotkey_var.set(profile.next_hotkey)
         self.pause_hotkey_var.set(profile.pause_hotkey)
+        self.previous_hotkey_var.set(profile.previous_hotkey)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
@@ -2040,6 +2052,10 @@ class SettingsApp(tk.Tk):
         pause_hotkey = (
             str(pause_hotkey_var.get()).strip() if pause_hotkey_var is not None else ""
         ) or DEFAULT_PAUSE_HOTKEY
+        previous_hotkey_var = vars(self).get("previous_hotkey_var")
+        previous_hotkey = (
+            str(previous_hotkey_var.get()).strip() if previous_hotkey_var is not None else ""
+        ) or DEFAULT_PREVIOUS_HOTKEY
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -2175,6 +2191,7 @@ class SettingsApp(tk.Tk):
             overlay_calendar=overlay_calendar,
             overlay_calendar_position=overlay_calendar_position,
             no_draw_zones=no_draw_zones,
+            previous_hotkey=previous_hotkey,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
@@ -3873,6 +3890,7 @@ class SettingsApp(tk.Tk):
             return
         summary = (
             ("Next", self.next_hotkey_var.get().strip() or DEFAULT_NEXT_HOTKEY),
+            ("Previous", self.previous_hotkey_var.get().strip() or DEFAULT_PREVIOUS_HOTKEY),
             ("Pause/Resume", self.pause_hotkey_var.get().strip() or DEFAULT_PAUSE_HOTKEY),
             ("Black screen", self.hotkey_var.get().strip() or DEFAULT_BLACK_HOTKEY),
         )

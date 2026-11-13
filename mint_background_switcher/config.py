@@ -106,6 +106,7 @@ MAX_HOTKEY_LENGTH = 64
 DEFAULT_BLACK_HOTKEY = "<Primary><Alt>b"
 DEFAULT_NEXT_HOTKEY = "<Primary><Alt>n"
 DEFAULT_PAUSE_HOTKEY = "<Primary><Alt>p"
+DEFAULT_PREVIOUS_HOTKEY = "<Primary><Alt>Left"
 # "Never show again" exclusion list bounds: keep saved configs small and
 # selection filtering cheap; over-long paths are dropped rather than
 # truncated so a config can never hold a silently altered entry.
@@ -386,6 +387,7 @@ class Profile:
     overlay_calendar: bool = False
     overlay_calendar_position: str = DEFAULT_OVERLAY_CALENDAR_POSITION
     no_draw_zones: list[NoDrawZone] = field(default_factory=list)
+    previous_hotkey: str = DEFAULT_PREVIOUS_HOTKEY
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -443,6 +445,7 @@ class Profile:
                 data.get("overlay_calendar_position")
             ),
             no_draw_zones=coerce_no_draw_zones(data.get("no_draw_zones", [])),
+            previous_hotkey=_coerce_hotkey(data.get("previous_hotkey"), DEFAULT_PREVIOUS_HOTKEY),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -488,6 +491,7 @@ class Profile:
             "black_hotkey": self.black_hotkey,
             "next_hotkey": self.next_hotkey,
             "pause_hotkey": self.pause_hotkey,
+            "previous_hotkey": self.previous_hotkey,
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,
