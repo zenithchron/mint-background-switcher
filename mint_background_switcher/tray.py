@@ -12,7 +12,7 @@ import time
 from .autostart import disable_autostart, enable_autostart
 from .config import load_config, save_config
 from .hotkeys import source_wrapper_argv
-from .service import SwitchCancelled, black_screen, pause, previous_wallpaper, switch_once
+from .service import SwitchCancelled, black_screen, pause, previous_wallpaper, redraw_current, switch_once
 from .state import load_state
 
 TRAY_ICON_CANDIDATES = (
@@ -228,6 +228,10 @@ class TrayApp:
         item_previous.connect("activate", self._previous)
         menu.append(item_previous)
 
+        item_redraw = Gtk.MenuItem(label="Redraw Current")
+        item_redraw.connect("activate", self._redraw)
+        menu.append(item_redraw)
+
         item_pause = Gtk.MenuItem(label="Pause")
         item_pause.connect("activate", self._pause)
         menu.append(item_pause)
@@ -289,6 +293,10 @@ class TrayApp:
     def _previous(self, *_):
         self.rotation_runner.cancel()
         self._run_action(lambda: previous_wallpaper())
+
+    def _redraw(self, *_):
+        self.rotation_runner.cancel()
+        self._run_action(lambda: redraw_current())
 
     def _pause(self, *_):
         self.rotation_runner.cancel()

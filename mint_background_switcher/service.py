@@ -9,6 +9,7 @@ import shutil
 import stat
 import time
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -89,6 +90,10 @@ class SwitchCancelled(RuntimeError):
 
 class NoPreviousWallpaperError(RuntimeError):
     """Raised when "previous" is requested but no earlier wallpaper is recorded."""
+
+
+class NoCurrentWallpaperError(RuntimeError):
+    """Raised when "redraw-current" is requested but nothing applicable is recorded."""
 
 
 def current_source_images() -> list[Path]:
@@ -1682,6 +1687,72 @@ def previous_wallpaper(
         monitors,
         applied=True,
         action="previous",
+        lockscreen_note=lockscreen_note,
+    )
+
+
+def redraw_current(
+    profile_name: str | None = None,
+    *,
+    dry_run: bool = False,
+    cancelled: Callable[[], bool] | None = None,
+) -> SwitchResult:
+    """Re-apply the current wallpaper without changing anything.
+
+    The composed file that is currently active (the last one applied by a
+    switch, or the black-screen composite while a black screen is active) is
+    activated on the desktop again. This restores a wallpaper that the
+    desktop lost or reset without advancing the rotation: no new picture is
+    picked, the history stack is untouched, and no pause or black screen is
+    cleared. The lock-screen mirror is re-applied when enabled.
+    """
+
+    _cancel_if_requested(cancelled)
+    cfg = load_config()
+    # Dry runs only read state (no rewrite of the state file); live runs hold
+    # the same state lock as rotations so the file cannot change mid-apply.
+    state_ctx = state_transaction() if not dry_run else nullcontext(load_state())
+    with state_ctx as state:
+        profile = cfg.get_profile(profile_name or state.active_profile)
+        raw = (state.last_wallpaper or "").strip()
+        if not raw:
+            raise NoCurrentWallpaperError(
+                f"no wallpaper has been applied to profile {profile.name!r} yet; "
+                "apply one first (Save & Apply Now or 'next'), then 'redraw-current' re-applies it"
+            )
+        wallpaper = Path(raw).expanduser()
+        is_black = state.black_screen
+        if not is_black and not wallpaper.is_file():
+            raise NoCurrentWallpaperError(
+                f"the current wallpaper file is missing: {wallpaper}; "
+                "use 'previous' to restore an earlier wallpaper, or run 'next' to apply a new one"
+            )
+        _cancel_if_requested(cancelled)
+        setter = DesktopSetter(dry_run=dry_run)
+        if is_black:
+            # Re-apply the black screen the same way 'black-screen' applied it.
+            if setter.supports_solid_black(profile.desktop):
+                setter.apply_black(None, profile.desktop)
+            else:
+                if not wallpaper.is_file():
+                    raise NoCurrentWallpaperError(
+                        f"the current black-screen file is missing: {wallpaper}; "
+                        "run 'black-screen' to compose it again"
+                    )
+                setter.apply_black(wallpaper, profile.desktop)
+        else:
+            setter.apply(wallpaper, profile.desktop)
+        lockscreen_note = ""
+        if wallpaper.is_file():
+            lockscreen_note = _mirror_lockscreen(profile, wallpaper, dry_run=dry_run)
+        monitors = detect_monitors()
+    return SwitchResult(
+        profile.name,
+        wallpaper,
+        list(state.last_images),
+        monitors,
+        applied=not dry_run,
+        action="redraw-current",
         lockscreen_note=lockscreen_note,
     )
 

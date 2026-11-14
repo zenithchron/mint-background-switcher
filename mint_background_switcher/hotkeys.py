@@ -1,9 +1,9 @@
 """Cinnamon hotkey registration helper.
 
-Mint Background Switcher can register up to four rebindable Cinnamon custom
-hotkeys (Next, Previous, Pause/Resume, and Black screen). Each action owns one
-``org.cinnamon.desktop.keybindings.custom-keybinding`` object; the actions are
-defined in :data:`HOTKEY_ACTIONS` and registered with
+Mint Background Switcher can register up to five rebindable Cinnamon custom
+hotkeys (Next, Previous, Redraw Current, Pause/Resume, and Black screen).
+Each action owns one ``org.cinnamon.desktop.keybindings.custom-keybinding``
+object; the actions are defined in :data:`HOTKEY_ACTIONS` and registered with
 :func:`register_cinnamon_hotkey` / :func:`register_all_cinnamon_hotkeys`.
 """
 
@@ -62,6 +62,12 @@ HOTKEY_ACTIONS: dict[str, HotkeyAction] = {
         custom_path=_custom_path("mint-background-switcher-previous"),
         cli_command="previous",
     ),
+    "redraw": HotkeyAction(
+        key="redraw",
+        display_name="Mint Background Switcher: Redraw Current",
+        custom_path=_custom_path("mint-background-switcher-redraw"),
+        cli_command="redraw-current",
+    ),
 }
 
 # Kept for callers that only care about the historic black-screen hotkey.
@@ -72,6 +78,7 @@ DEFAULT_BINDINGS = {
     "pause-resume": "<Primary><Alt>p",
     "black-screen": "<Primary><Alt>b",
     "previous": "<Primary><Alt>Left",
+    "redraw": "<Primary><Alt>r",
 }
 
 
@@ -92,6 +99,8 @@ def hotkey_binding_for(profile, action_key: str) -> str:
         return profile.pause_hotkey or DEFAULT_BINDINGS["pause-resume"]
     if action_key == "previous":
         return profile.previous_hotkey or DEFAULT_BINDINGS["previous"]
+    if action_key == "redraw":
+        return profile.redraw_hotkey or DEFAULT_BINDINGS["redraw"]
     return profile.black_hotkey or DEFAULT_BINDINGS["black-screen"]
 
 
@@ -202,7 +211,7 @@ def register_all_cinnamon_hotkeys(
     command_prefix: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, list[list[str]]]:
-    """Register all three hotkeys from the active profile's saved bindings.
+    """Register all five hotkeys from the active profile's saved bindings.
 
     ``command_prefix`` (for example a managed launcher path) replaces the
     default wrapper argv in each registered command. Returns the gsettings

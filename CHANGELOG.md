@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.28] - 2026-11-14
+
+### Added
+
+- **Redraw Current** (the remaining "History and current-wallpaper actions" roadmap item) — re-apply the currently active wallpaper without changing anything, from the tray (**Redraw Current** menu item), the CLI (`mint-background-switcher redraw-current [--dry-run] [--profile NAME]`), or a new fifth rebindable Cinnamon hotkey (**Redraw Current**, default `<Primary><Alt>r`, editable under **Settings → Rotation & Shortcuts → Shortcuts** alongside the other hotkeys):
+  - Restores a wallpaper the desktop lost or reset: the last applied composed file is activated again on the profile's desktops, and the lock-screen mirror is re-applied when enabled. While a black screen is active, the black screen is re-applied instead (solid-black on supporting desktops, the composed black file elsewhere).
+  - It never picks a new picture, never advances the no-repeat rotation or pool position, never touches the per-profile history stack, and never clears a pause or black screen — the only visible effect is that the active wallpaper (or black screen) is on the desktop again.
+  - `redraw-current --dry-run` reports the file that would be applied without touching state or desktops (the state file is not rewritten). With no applicable wallpaper (fresh state) or a missing current file, every path reports a one-line error and the CLI exits 1.
+  - `register-hotkey --all` now registers all five hotkeys.
+- Bumped the package version to `0.2.28`.
+
 ## [0.2.27] - 2026-11-13
 
 ### Added
