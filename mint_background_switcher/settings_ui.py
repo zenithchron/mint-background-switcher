@@ -712,7 +712,7 @@ class SettingsApp(tk.Tk):
         self.sources_tab = ttk.Frame(page_area, padding=9)
         self.layout_tab = ttk.Frame(page_area, padding=12)
         self.overlays_tab = ttk.Frame(page_area, padding=12)
-        self.rotation_tab = ttk.Frame(page_area, padding=12)
+        self.rotation_tab = ttk.Frame(page_area, padding=8)
         self.conditions_tab = ttk.Frame(page_area, padding=12)
         self.excluded_tab = ttk.Frame(page_area, padding=12)
         self.collections_tab = ttk.Frame(page_area, padding=12)
@@ -1172,9 +1172,9 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_scope_var,
             style="Heading.TLabel",
         )
-        self.rotation_scope_label.pack(anchor="w", pady=(0, 2))
-        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=5)
-        rotation_schedule.pack(fill=tk.X, pady=(0, 5))
+        self.rotation_scope_label.pack(anchor="w", pady=(0, 1))
+        rotation_schedule = ttk.LabelFrame(self.rotation_tab, text="Rotation", padding=4)
+        rotation_schedule.pack(fill=tk.X, pady=(0, 3))
         ttk.Label(rotation_schedule, text="Interval minutes:").grid(row=0, column=0, sticky="w")
         self.interval_entry = ttk.Entry(rotation_schedule, textvariable=self.interval_var, width=10)
         self.interval_entry.grid(row=0, column=1, sticky="w", padx=5)
@@ -1185,27 +1185,29 @@ class SettingsApp(tk.Tk):
             wraplength=570,
         ).grid(row=0, column=2, sticky="w", padx=(16, 0))
         rotation_schedule.columnconfigure(2, weight=1)
+        rotation_toggles = ttk.Frame(rotation_schedule)
+        rotation_toggles.grid(row=1, column=0, columnspan=3, sticky="w")
         self.sequential_checkbutton = ttk.Checkbutton(
-            rotation_schedule,
+            rotation_toggles,
             text="Rotate pictures in folder order instead of random",
             variable=self.sequential_var,
         )
-        self.sequential_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 0))
+        self.sequential_checkbutton.pack(side=tk.LEFT)
         self.rotate_on_startup_checkbutton = ttk.Checkbutton(
-            rotation_schedule,
+            rotation_toggles,
             text="Rotate at startup (off keeps the current background after login)",
             variable=self.rotate_on_startup_var,
         )
-        self.rotate_on_startup_checkbutton.grid(row=2, column=0, columnspan=3, sticky="w", pady=(3, 0))
+        self.rotate_on_startup_checkbutton.pack(side=tk.LEFT, padx=(20, 0))
         self.night_black_screen_checkbutton = ttk.Checkbutton(
             rotation_schedule,
             text="Keep the desktop black during a nightly window",
             variable=self.night_black_screen_var,
         )
-        self.night_black_screen_checkbutton.grid(row=3, column=0, columnspan=3, sticky="w", pady=(3, 0))
-        ttk.Label(rotation_schedule, text="Night window:").grid(row=4, column=0, sticky="w", padx=(20, 0))
+        self.night_black_screen_checkbutton.grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        ttk.Label(rotation_schedule, text="Night window:").grid(row=3, column=0, sticky="w", padx=(20, 0))
         night_window_frame = ttk.Frame(rotation_schedule)
-        night_window_frame.grid(row=4, column=1, sticky="w", padx=5)
+        night_window_frame.grid(row=3, column=1, sticky="w", padx=5)
         self.night_start_entry = ttk.Entry(night_window_frame, textvariable=self.night_start_var, width=6)
         self.night_start_entry.pack(side=tk.LEFT)
         ttk.Label(night_window_frame, text="to").pack(side=tk.LEFT, padx=(6, 6))
@@ -1216,23 +1218,23 @@ class SettingsApp(tk.Tk):
             text="Local HH:MM; may cross midnight; auto-resumes.",
             justify=tk.LEFT,
             wraplength=430,
-        ).grid(row=4, column=2, sticky="w", padx=(16, 0))
+        ).grid(row=3, column=2, sticky="w", padx=(16, 0))
         self.night_black_screen_var.trace_add("write", self._refresh_night_time_state)
         self._refresh_night_time_state()
-        ttk.Label(rotation_schedule, text="Post-switch command:").grid(row=5, column=0, sticky="w")
+        ttk.Label(rotation_schedule, text="Post-switch command:").grid(row=4, column=0, sticky="w", pady=(2, 0))
         self.post_switch_command_entry = ttk.Entry(
             rotation_schedule, textvariable=self.post_switch_command_var, width=30
         )
-        self.post_switch_command_entry.grid(row=5, column=1, sticky="w", padx=5)
+        self.post_switch_command_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(2, 0))
         ttk.Label(
             rotation_schedule,
             text="Runs once after each new wallpaper is applied; leave empty to disable.",
             justify=tk.LEFT,
             wraplength=480,
-        ).grid(row=5, column=2, sticky="w", padx=(16, 0))
+        ).grid(row=4, column=2, sticky="w", padx=(16, 0), pady=(2, 0))
 
-        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=5)
-        shortcuts.pack(fill=tk.X, pady=(0, 5))
+        shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=4)
+        shortcuts.pack(fill=tk.X, pady=(0, 3))
         ttk.Label(shortcuts, text="Next hotkey:").grid(row=0, column=0, sticky="w")
         self.next_hotkey_entry = ttk.Entry(shortcuts, textvariable=self.next_hotkey_var, width=22)
         self.next_hotkey_entry.grid(row=0, column=1, sticky="w", padx=5)
@@ -1270,7 +1272,7 @@ class SettingsApp(tk.Tk):
         ).grid(row=4, column=2, sticky="w", padx=(16, 0))
         shortcuts.columnconfigure(2, weight=1)
 
-        desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=8)
+        desktop_integration = ttk.LabelFrame(self.rotation_tab, text="Desktop integration", padding=6)
         desktop_integration.pack(fill=tk.X)
         ttk.Label(desktop_integration, text="Desktop:").grid(row=0, column=0, sticky="w")
         self.desktop_menu = ttk.OptionMenu(
@@ -1295,7 +1297,7 @@ class SettingsApp(tk.Tk):
             text="Mirror wallpaper to the lock screen",
             variable=self.mirror_lockscreen_var,
         )
-        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 0))
+        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
         ttk.Label(
             desktop_integration,
             text="GNOME writes the lock-screen image on each rotation; Cinnamon already mirrors it.",
