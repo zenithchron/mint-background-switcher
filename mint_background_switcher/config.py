@@ -99,6 +99,9 @@ DEFAULT_NIGHT_END = "06:00"
 MAX_SUPPRESS_PROCESS_LENGTH = 15
 DEFAULT_IDLE_SECONDS = 300
 MAX_IDLE_SECONDS = 86_400
+# Cap the optional post-switch command so a malformed saved value can never
+# balloon the config; commands longer than this are dropped on load.
+MAX_POST_SWITCH_COMMAND_LENGTH = 300
 # Cinnamon keybinding strings are short ("<Primary><Alt>n"). Cap the length so
 # a malformed saved value can never balloon the config, and drop control
 # characters that would make the gsettings command ambiguous.
@@ -290,6 +293,24 @@ def _coerce_suppress_process(value: Any) -> str:
     return text
 
 
+def _coerce_post_switch_command(value: Any) -> str:
+    """Normalize the saved post-switch command, or drop it when unusable.
+
+    The command is a single line executed with ``shlex.split`` (no shell), so
+    line breaks make it unrunnable and over-long values are dropped rather
+    than truncated: a saved config never holds a silently altered user value.
+    Tabs stay allowed — ``shlex.split`` treats them as ordinary separators.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text or len(text) > MAX_POST_SWITCH_COMMAND_LENGTH:
+        return ""
+    if "\r" in text or "\n" in text:
+        return ""
+    return text
+
+
 def _coerce_hotkey(value: Any, default: str) -> str:
     """Normalize a saved Cinnamon keybinding, falling back when unusable.
 
@@ -390,6 +411,7 @@ class Profile:
     no_draw_zones: list[NoDrawZone] = field(default_factory=list)
     previous_hotkey: str = DEFAULT_PREVIOUS_HOTKEY
     redraw_hotkey: str = DEFAULT_REDRAW_HOTKEY
+    post_switch_command: str = ""
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -449,6 +471,7 @@ class Profile:
             no_draw_zones=coerce_no_draw_zones(data.get("no_draw_zones", [])),
             previous_hotkey=_coerce_hotkey(data.get("previous_hotkey"), DEFAULT_PREVIOUS_HOTKEY),
             redraw_hotkey=_coerce_hotkey(data.get("redraw_hotkey"), DEFAULT_REDRAW_HOTKEY),
+            post_switch_command=_coerce_post_switch_command(data.get("post_switch_command", "")),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -496,6 +519,7 @@ class Profile:
             "pause_hotkey": self.pause_hotkey,
             "previous_hotkey": self.previous_hotkey,
             "redraw_hotkey": self.redraw_hotkey,
+            "post_switch_command": self.post_switch_command,
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,

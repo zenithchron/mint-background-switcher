@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.29] - 2026-11-16
+
+### Added
+
+- **Post-switch command** (the remaining scheduling control from the roadmap, inspired by John's Background Switcher's command-after-switch) — a per-profile **Post-switch command** field under **Settings → Rotation & Shortcuts → Rotation**:
+  - Enter any single-line command (for example a script that reacts to the new wallpaper). After each new wallpaper is applied — via `next`, **Save & Apply Now**, or the background loop — it runs once, split with `shlex.split` and executed without a shell, with a 30 second timeout.
+  - Fail-safe by design: the command can never break the switch. A non-zero exit, a missing executable, a wedged command, or an invalid command line is reported as a `post_switch` note by **Save & Apply Now**, `mint-background-switcher next`, and the background loop; a successful run is silent, and an empty field disables the hook.
+  - Never triggered by dry runs, the safe black fallback (no picture applied), Black screen, Previous, or Redraw Current; resuming behaves like a normal switch.
+  - Saved values are validated by **Save Profile** (at most 300 characters, one line, balanced quotes), and a malformed saved value is dropped on load so a broken config can never launch an unintended command.
+- Bumped the package version to `0.2.29`.
+
 ## [0.2.28] - 2026-11-14
 
 ### Added

@@ -276,6 +276,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.pause_hotkey_entry, app.rotation_tab)
         assert is_descendant(app.previous_hotkey_entry, app.rotation_tab)
         assert is_descendant(app.register_hotkeys_button, app.rotation_tab)
+        assert is_descendant(app.post_switch_command_entry, app.rotation_tab)
         assert is_descendant(app.desktop_menu, app.rotation_tab)
         assert is_descendant(app.suppress_process_checkbutton, app.conditions_tab)
         assert is_descendant(app.suppress_battery_checkbutton, app.conditions_tab)
@@ -339,6 +340,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.pause_hotkey_entry,
                 app.previous_hotkey_entry,
                 app.register_hotkeys_button,
+                app.post_switch_command_entry,
                 app.desktop_menu,
                 app.mirror_lockscreen_checkbutton,
             ),
@@ -4636,6 +4638,59 @@ def test_settings_hotkey_entries_are_visible_and_persist(monkeypatch, tmp_path):
         assert app.next_hotkey_var.get() == "<Ctrl>n"
         assert app.pause_hotkey_var.get() == "<Alt>p"
         assert app.previous_hotkey_var.get() == "<Ctrl>Left"
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_post_switch_command_entry_is_visible_persists_and_rejects_invalid(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message))
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        assert app.post_switch_command_entry.winfo_ismapped()
+        assert app.post_switch_command_entry.winfo_width() >= app.post_switch_command_entry.winfo_reqwidth()
+        assert app.post_switch_command_entry.winfo_height() >= app.post_switch_command_entry.winfo_reqheight()
+        assert app.post_switch_command_var.get() == ""
+
+        # A valid command line persists and reloads.
+        app.post_switch_command_var.set("/bin/echo hello world")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.post_switch_command == "/bin/echo hello world"
+        app._load_profile("Default")
+        assert app.post_switch_command_var.get() == "/bin/echo hello world"
+
+        # Over-long commands are rejected without saving.
+        app.post_switch_command_var.set("x" * 301)
+        assert app._save_current() is False
+        assert errors and "at most 300 characters" in errors[-1][1]
+        assert settings_ui.load_config().get_profile("Default").post_switch_command == "/bin/echo hello world"
+
+        # Unbalanced quotes are rejected without saving.
+        app.post_switch_command_var.set("/bin/echo 'unbalanced")
+        assert app._save_current() is False
+        assert errors and "balanced quotes" in errors[-1][1]
+        assert settings_ui.load_config().get_profile("Default").post_switch_command == "/bin/echo hello world"
+
+        # Empty command is allowed (disables the hook).
+        app.post_switch_command_var.set("")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").post_switch_command == ""
     finally:
         app.destroy()
 

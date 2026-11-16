@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import queue
+import shlex
 import shutil
 import subprocess
 import threading
@@ -30,6 +31,7 @@ from .config import (
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
     MAX_IDLE_SECONDS,
+    MAX_POST_SWITCH_COMMAND_LENGTH,
     MAX_SUPPRESS_PROCESS_LENGTH,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
@@ -555,6 +557,7 @@ class SettingsApp(tk.Tk):
         self.pause_hotkey_var = tk.StringVar()
         self.previous_hotkey_var = tk.StringVar()
         self.redraw_hotkey_var = tk.StringVar()
+        self.post_switch_command_var = tk.StringVar()
         self.desktop_var = tk.StringVar()
         self.effect_var = tk.StringVar()
         self.bar_color_var = tk.StringVar()
@@ -1216,6 +1219,17 @@ class SettingsApp(tk.Tk):
         ).grid(row=4, column=2, sticky="w", padx=(16, 0))
         self.night_black_screen_var.trace_add("write", self._refresh_night_time_state)
         self._refresh_night_time_state()
+        ttk.Label(rotation_schedule, text="Post-switch command:").grid(row=5, column=0, sticky="w")
+        self.post_switch_command_entry = ttk.Entry(
+            rotation_schedule, textvariable=self.post_switch_command_var, width=30
+        )
+        self.post_switch_command_entry.grid(row=5, column=1, sticky="w", padx=5)
+        ttk.Label(
+            rotation_schedule,
+            text="Runs once after each new wallpaper is applied; leave empty to disable.",
+            justify=tk.LEFT,
+            wraplength=480,
+        ).grid(row=5, column=2, sticky="w", padx=(16, 0))
 
         shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=5)
         shortcuts.pack(fill=tk.X, pady=(0, 5))
@@ -1761,6 +1775,7 @@ class SettingsApp(tk.Tk):
         self.pause_hotkey_var.set(profile.pause_hotkey)
         self.previous_hotkey_var.set(profile.previous_hotkey)
         self.redraw_hotkey_var.set(profile.redraw_hotkey)
+        self.post_switch_command_var.set(profile.post_switch_command)
         self.desktop_var.set(profile.desktop)
         self.effect_var.set(profile.effect)
         self.bar_color_var.set(profile.bar_color)
@@ -2072,6 +2087,21 @@ class SettingsApp(tk.Tk):
         redraw_hotkey = (
             str(redraw_hotkey_var.get()).strip() if redraw_hotkey_var is not None else ""
         ) or DEFAULT_REDRAW_HOTKEY
+        post_switch_command_var = vars(self).get("post_switch_command_var")
+        raw_post_switch_command = (
+            str(post_switch_command_var.get()).strip() if post_switch_command_var is not None else ""
+        )
+        if raw_post_switch_command:
+            if len(raw_post_switch_command) > MAX_POST_SWITCH_COMMAND_LENGTH:
+                raise ValueError(
+                    f"The post-switch command can be at most {MAX_POST_SWITCH_COMMAND_LENGTH} characters."
+                )
+            try:
+                shlex.split(raw_post_switch_command)
+            except ValueError:
+                raise ValueError(
+                    "The post-switch command is not valid: enter one command line with balanced quotes."
+                ) from None
         postcard_count = max(1, min(100, int(postcard_count_var.get()))) if postcard_count_var is not None else 4
         postcard_size = (
             max(0.0, min(1.0, float(postcard_size_var.get()))) if postcard_size_var is not None else 0.5
@@ -2209,6 +2239,7 @@ class SettingsApp(tk.Tk):
             no_draw_zones=no_draw_zones,
             previous_hotkey=previous_hotkey,
             redraw_hotkey=redraw_hotkey,
+            post_switch_command=raw_post_switch_command,
         )
 
     def _save_current(self, show_success: bool = True) -> bool:
@@ -3313,6 +3344,9 @@ class SettingsApp(tk.Tk):
                         overlay_note = getattr(result, "overlay_note", "") or ""
                         if overlay_note:
                             detail = f"{detail}\n\n{overlay_note}"
+                        post_switch_note = getattr(result, "post_switch_note", "") or ""
+                        if post_switch_note:
+                            detail = f"{detail}\n\n{post_switch_note}"
                         messagebox.showinfo(title, detail, parent=self)
         except queue.Empty:
             pass

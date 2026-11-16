@@ -909,6 +909,7 @@ def test_cli_print_result_includes_overlay_note(capsys):
         lockscreen_note="",
         overlay_note="Overlay: picture info drawn on 1 panel.",
         web_sources=[],
+        post_switch_note="",
     )
     cli._print_result(result)
     out = capsys.readouterr().out

@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import random
 import secrets
+import shlex
 import shutil
 import stat
+import subprocess
 import time
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
@@ -82,6 +84,12 @@ class SwitchResult:
     lockscreen_note: str = ""
     web_sources: list[dict[str, str]] = field(default_factory=list)
     overlay_note: str = ""
+    post_switch_note: str = ""
+
+
+# The post-switch command runs synchronously after a new wallpaper is applied;
+# a bounded timeout keeps a wedged command from stalling the background loop.
+POST_SWITCH_TIMEOUT_SECONDS = 30
 
 
 class SwitchCancelled(RuntimeError):
@@ -733,6 +741,56 @@ def _mirror_lockscreen(profile: Profile, wallpaper: Path, *, dry_run: bool) -> s
     return result.detail
 
 
+def run_post_switch_command(command: str) -> str:
+    """Run the profile's optional post-switch command after a new wallpaper.
+
+    The command line is split with ``shlex.split`` and executed without a
+    shell. Fail-safe by contract: any problem with the command (invalid
+    command line, missing executable, non-zero exit, timeout) is reported
+    through the returned note and never breaks the wallpaper switch; an
+    empty command or a successful run returns an empty string. Output is
+    captured in memory, so keep the command's output modest.
+    """
+    text = command.strip()
+    if not text:
+        return ""
+    try:
+        argv = shlex.split(text)
+    except ValueError:
+        return "Post-switch command was not run: the command line is not valid (unbalanced quote?)."
+    if not argv:
+        return ""
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=POST_SWITCH_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return f"Post-switch command failed (timed out after {POST_SWITCH_TIMEOUT_SECONDS} s); it was terminated."
+    except FileNotFoundError:
+        return f"Post-switch command was not run: {argv[0]!r} was not found on this system."
+    except OSError:
+        return f"Post-switch command was not run: it could not be started."
+    except Exception:
+        return "Post-switch command failed: unexpected error while running it."
+    if proc.returncode == 0:
+        return ""
+    detail = " ".join((proc.stderr or proc.stdout or "").split())[-160:]
+    suffix = f": {detail}" if detail else ""
+    return f"Post-switch command failed (exit {proc.returncode}){suffix}"
+
+
+def _post_switch_note_for(profile_name: str | None) -> str:
+    """Run the post-switch hook; any settings problem is reported, never raised.
+
+    The wallpaper is already applied when this runs, so a concurrent profile
+    deletion or a corrupted config must surface as a note instead of an
+    exception out of ``switch_once``.
+    """
+    try:
+        profile = load_config().get_profile(profile_name)
+        return run_post_switch_command(profile.post_switch_command)
+    except Exception:
+        return "Post-switch command was not run: the settings could not be read."
+
+
 def _apply_black_fallback(
     profile: Profile,
     monitors: list[Monitor],
@@ -912,6 +970,11 @@ def switch_once(
         selection_scope.finish(error)
         raise
     selection_scope.finish(None)
+    # The optional post-switch command runs only after a new wallpaper has
+    # actually been applied: dry runs return earlier, the black-screen fallback
+    # applies no picture, and a command problem can never fail the switch.
+    if result.action != "black-fallback":
+        result.post_switch_note = _post_switch_note_for(profile_name)
     return result
 
 
@@ -1926,6 +1989,8 @@ def run_loop(
                         print(result.lockscreen_note, flush=True)
                     if result.overlay_note:
                         print(result.overlay_note, flush=True)
+                    if result.post_switch_note:
+                        print(result.post_switch_note, flush=True)
                 except CollectionUnavailableError as exc:
                     print(
                         f"{exc}; keeping the current wallpaper and retrying on the next tick",
@@ -1961,6 +2026,8 @@ def run_loop(
                         print(result.lockscreen_note, flush=True)
                     if result.overlay_note:
                         print(result.overlay_note, flush=True)
+                    if result.post_switch_note:
+                        print(result.post_switch_note, flush=True)
                 except CollectionUnavailableError as exc:
                     print(
                         f"{exc}; keeping the current wallpaper and retrying on the next tick",

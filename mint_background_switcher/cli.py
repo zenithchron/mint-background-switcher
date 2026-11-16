@@ -69,6 +69,8 @@ def _print_result(result) -> None:
         print(f"lock_screen={result.lockscreen_note}")
     if result.overlay_note:
         print(f"overlays={result.overlay_note}")
+    if result.post_switch_note:
+        print(f"post_switch={result.post_switch_note}")
     if result.web_sources:
         print("web_sources:")
         for status in result.web_sources:
