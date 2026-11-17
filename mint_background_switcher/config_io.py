@@ -8,7 +8,12 @@ from typing import Any
 
 from .config import Config
 from .paths import config_file
-from .storage import atomic_write_json_unlocked, locked_file, lock_path_for
+from .storage import (
+    atomic_write_json_unlocked,
+    locked_file,
+    lock_path_for,
+    read_json_unlocked,
+)
 
 EXPORT_FORMAT = "mint-background-switcher-settings"
 EXPORT_FORMAT_VERSION = 1
@@ -101,3 +106,32 @@ def import_settings(source: Path, destination: Path | None = None) -> Config:
     with locked_file(lock_path_for(destination)):
         atomic_write_json_unlocked(destination, imported.to_dict())
     return imported
+
+
+def reset_to_defaults(destination: Path | None = None) -> tuple[Config, Config | None]:
+    """Replace every profile with the factory default profile at ``destination``.
+
+    The reset restores the built-in default values for every option as a single
+    new ``Default`` profile — the same profile a fresh ``init`` creates. The
+    working-folder setting is preserved, because it points at generated files
+    and moving it is a deliberate Storage operation with its own confirmation.
+    The rotation state file is not touched. The previous config is returned
+    alongside the new one; when no readable config exists, ``previous`` is
+    ``None``. On any failure the destination is left byte-for-byte unchanged.
+    """
+    destination = Path(destination).expanduser() if destination is not None else config_file()
+    if destination.is_dir():
+        raise ValueError(f"destination {destination} is a directory")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with locked_file(lock_path_for(destination)):
+        previous: Config | None = None
+        if destination.exists():
+            try:
+                previous = Config.from_dict(read_json_unlocked(destination))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                previous = None
+        fresh = Config.default()
+        fresh.working_directory = previous.working_directory if previous is not None else None
+        fresh._loaded_working_directory = fresh.working_directory
+        atomic_write_json_unlocked(destination, fresh.to_dict())
+    return fresh, previous

@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.30] - 2026-11-17
+
+### Added
+
+- **Reset to defaults** (the remaining settings-management control from the roadmap, completing JBS's config save/restore/reset trio) — a new **Reset to Defaults...** button under **Settings → Storage → Import / Export / Reset** alongside **Export Settings...** and **Import Settings...**:
+  - After a confirmation that names the full replacement, every custom profile is removed and all options go back to their built-in default values as a single new **Default** profile — exactly the profile a fresh `init` creates.
+  - The working-folder setting is kept: it points at generated wallpapers and the image-library index, and moving it remains a deliberate Storage operation with its own confirmation. The rotation state file is not touched.
+  - The editor refreshes immediately (profile list, active profile, and every field show the factory values), the background loop picks up the reset settings on its next rotation, and a failed reset is reported without touching the settings.
+  - CLI: `mint-background-switcher reset-defaults [--dry-run]` — the dry run reports the current profiles and the result without changing anything.
+- Bumped the package version to `0.2.30`.
+
 ## [0.2.29] - 2026-11-16
 
 ### Added

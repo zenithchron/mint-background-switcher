@@ -12,6 +12,7 @@ from mint_background_switcher.config_io import (
     export_document,
     import_settings,
     load_export,
+    reset_to_defaults,
 )
 
 
@@ -353,3 +354,148 @@ def test_export_import_unicode_round_trip(tmp_path):
     export_config(config, destination)
     imported = load_export(destination)
     assert imported.to_dict() == config.to_dict()
+
+
+def test_reset_to_defaults_replaces_profiles_with_factory_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home" / "Pictures").mkdir(parents=True)
+    current = _rich_config()
+    destination = tmp_path / "config" / "config.json"
+    destination.parent.mkdir(parents=True)
+    destination.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+
+    fresh, previous = reset_to_defaults(destination)
+
+    # The previous config is returned, and the new one is exactly the factory
+    # default config with the working directory preserved.
+    assert previous is not None
+    assert previous.to_dict() == current.to_dict()
+    expected = Config.default()
+    expected.working_directory = "/working"
+    assert fresh.to_dict() == expected.to_dict()
+    assert list(fresh.profiles) == ["Default"]
+    assert fresh.active_profile == "Default"
+    default_profile = fresh.get_profile("Default")
+    assert default_profile.shared_folders == [str(tmp_path / "home" / "Pictures")]
+    # Factory values, not leftovers from the rich config.
+    assert default_profile.interval_minutes == 10.0
+    assert default_profile.mode == "shared"
+    assert default_profile.fit_mode == "fit_bars"
+    assert default_profile.effect == "none"
+    assert default_profile.black_hotkey == "<Primary><Alt>b"
+    assert default_profile.night_black_screen is False
+    assert default_profile.suppress_process == ""
+    assert default_profile.excluded_images == []
+    assert default_profile.web_sources == []
+    assert default_profile.post_switch_command == ""
+    # The on-disk config reloads to the same factory config.
+    assert load_config(destination).to_dict() == fresh.to_dict()
+    assert json.loads(destination.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION
+
+
+def test_reset_to_defaults_missing_config_returns_none_previous(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    destination = tmp_path / "config" / "config.json"
+    fresh, previous = reset_to_defaults(destination)
+    assert previous is None
+    assert fresh.working_directory is None
+    assert destination.exists()
+
+
+def test_reset_to_defaults_unreadable_config_starts_from_factory(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    destination = tmp_path / "config" / "config.json"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("not json", encoding="utf-8")
+    fresh, previous = reset_to_defaults(destination)
+    assert previous is None
+    assert list(fresh.profiles) == ["Default"]
+    assert load_config(destination).to_dict() == fresh.to_dict()
+
+
+def test_reset_to_defaults_rejects_directory_destination(tmp_path):
+    directory = tmp_path / "configdir"
+    directory.mkdir()
+    with pytest.raises(ValueError, match="is a directory"):
+        reset_to_defaults(directory)
+
+
+def test_cli_reset_defaults_dry_run_reports_without_mutating(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    config_path = tmp_path / "config" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    current = _rich_config()
+    config_path.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+    before = config_path.read_bytes()
+
+    assert cli.main(["reset-defaults", "--dry-run"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary == {
+        "dry_run": True,
+        "current_profiles": ["Home", "Office"],
+        "current_active_profile": "Office",
+        "working_directory_kept": "/working",
+        "result_profiles": ["Default"],
+        "result_active_profile": "Default",
+    }
+    assert config_path.read_bytes() == before
+
+
+def test_cli_reset_defaults_replaces_settings(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home" / "Pictures").mkdir(parents=True)
+    current = _rich_config()
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.json").write_text(json.dumps(current.to_dict()), encoding="utf-8")
+
+    assert cli.main(["reset-defaults"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["dry_run"] is False
+    assert summary["previous_profiles"] == ["Home", "Office"]
+    assert summary["profiles"] == ["Default"]
+    assert summary["active_profile"] == "Default"
+    assert summary["working_directory"] == "/working"
+    reloaded = load_config()
+    assert list(reloaded.profiles) == ["Default"]
+    assert reloaded.active_profile == "Default"
+    assert reloaded.working_directory == "/working"
+    # The profile content is factory-default, not the rich values.
+    assert reloaded.get_profile("Default").mode == "shared"
+    assert reloaded.get_profile("Default").interval_minutes == 10.0
+
+
+def test_cli_reset_defaults_failure_fails_cleanly(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # A directory component that is actually a file guarantees an OSError
+    # no matter which user the tests run as.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(blocker / "config"))
+    config_path = blocker / "config" / "config.json"
+
+    assert cli.main(["reset-defaults"]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("reset failed:")
+    assert "Traceback" not in err
+    assert not config_path.exists()
+
+
+def test_reset_to_defaults_write_failure_leaves_config_unchanged(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    destination = tmp_path / "config" / "config.json"
+    destination.parent.mkdir(parents=True)
+    current = _rich_config()
+    destination.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+    before = destination.read_bytes()
+
+    from mint_background_switcher import config_io
+
+    def _fail(*_args, **_kwargs):
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(config_io, "atomic_write_json_unlocked", _fail)
+    with pytest.raises(OSError, match="simulated write failure"):
+        reset_to_defaults(destination)
+    assert destination.read_bytes() == before

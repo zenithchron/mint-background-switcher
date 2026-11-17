@@ -11,7 +11,14 @@ from . import __version__
 from .availability import CollectionUnavailableError
 from .autostart import disable_autostart, enable_autostart, tray_command
 from .config import ensure_config, load_config
-from .config_io import ConfigImportError, export_config, export_document, import_settings, load_export
+from .config_io import (
+    ConfigImportError,
+    export_config,
+    export_document,
+    import_settings,
+    load_export,
+    reset_to_defaults,
+)
 from .hotkeys import HOTKEY_ACTIONS, register_all_cinnamon_hotkeys, register_cinnamon_hotkey
 from .monitor import detect_monitors
 from .overlays import DEFAULT_OVERLAY_CALENDAR_POSITION, overlays_enabled, read_picture_info, render_overlay_preview
@@ -181,6 +188,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Validate the file and report what would be imported without changing anything",
+    )
+
+    resetp = sub.add_parser(
+        "reset-defaults",
+        help="Replace every profile with the factory default profile (the working-folder setting is kept)",
+    )
+    resetp.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be reset without changing anything",
     )
 
     web_source = sub.add_parser(
@@ -393,6 +410,31 @@ def main(argv: list[str] | None = None) -> int:
             "profiles": sorted(candidate.profiles),
             "active_profile": candidate.active_profile,
             "working_directory": candidate.working_directory,
+        }, indent=2, sort_keys=True))
+        return 0
+    if args.command == "reset-defaults":
+        if args.dry_run:
+            current = load_config(create=False)
+            print(json.dumps({
+                "dry_run": True,
+                "current_profiles": sorted(current.profiles),
+                "current_active_profile": current.active_profile,
+                "working_directory_kept": current.working_directory,
+                "result_profiles": ["Default"],
+                "result_active_profile": "Default",
+            }, indent=2, sort_keys=True))
+            return 0
+        try:
+            result, previous = reset_to_defaults()
+        except (OSError, ValueError) as exc:
+            print(f"reset failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({
+            "dry_run": False,
+            "previous_profiles": sorted(previous.profiles) if previous is not None else None,
+            "profiles": sorted(result.profiles),
+            "active_profile": result.active_profile,
+            "working_directory": result.working_directory,
         }, indent=2, sort_keys=True))
         return 0
     if args.command == "web-source":

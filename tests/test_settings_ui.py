@@ -4884,18 +4884,20 @@ def test_storage_page_shows_import_export_section(monkeypatch, tmp_path):
         app.update()
         app.notebook.select(app.storage_tab)
         app.update()
-        assert app.backup_frame.cget("text") == "Import / Export"
+        assert app.backup_frame.cget("text") == "Import / Export / Reset"
         for control in (
             app.backup_frame,
             app.export_settings_button,
             app.import_settings_button,
+            app.reset_defaults_button,
             app.backup_status_label,
         ):
             assert is_descendant(control, app.storage_tab)
             assert control.winfo_ismapped()
         assert app.export_settings_button.cget("text") == "Export Settings..."
         assert app.import_settings_button.cget("text") == "Import Settings..."
-        assert app.backup_status_var.get() == "No export or import done yet in this session."
+        assert app.reset_defaults_button.cget("text") == "Reset to Defaults..."
+        assert app.backup_status_var.get() == "No export, import, or reset done yet in this session."
     finally:
         app.destroy()
 
@@ -4937,7 +4939,7 @@ def test_export_settings_dialog_cancel_writes_nothing(monkeypatch, tmp_path):
     try:
         app.update()
         app._export_settings()
-        assert app.backup_status_var.get() == "No export or import done yet in this session."
+        assert app.backup_status_var.get() == "No export, import, or reset done yet in this session."
         assert not (tmp_path / "backup").exists()
     finally:
         app.destroy()
@@ -5042,7 +5044,158 @@ def test_import_settings_cancel_leaves_config_unchanged(monkeypatch, tmp_path):
         app._import_settings()
         assert app.config_data.to_dict() == before
         assert config_path.read_bytes() == before_bytes
-        assert app.backup_status_var.get() == "No export or import done yet in this session."
+        assert app.backup_status_var.get() == "No export, import, or reset done yet in this session."
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_reset_to_defaults_replaces_config_and_refreshes_editor(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    home = tmp_path / "home"
+    (home / "Pictures").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    current = settings_ui.Config(
+        active_profile="Work",
+        working_directory="/working/reset",
+        profiles={
+            "Work": settings_ui.Profile(
+                name="Work",
+                shared_folders=["/pics/work"],
+                interval_minutes=30.0,
+                mode="span",
+            ),
+            "Weekend": settings_ui.Profile(name="Weekend", shared_folders=["/pics/weekend"]),
+        },
+    )
+    config_path = tmp_path / "config" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+    infos = []
+    monkeypatch.setattr(settings_ui.messagebox, "askokcancel", lambda *_a, **_k: True)
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kw: infos.append((title, message)))
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        app._reset_to_defaults()
+        # The on-disk config is exactly the factory config with the working
+        # directory preserved — not a merge with the old profiles.
+        expected = settings_ui.Config.default()
+        expected.working_directory = "/working/reset"
+        assert settings_ui.load_config().to_dict() == expected.to_dict()
+        assert app.config_data.to_dict() == expected.to_dict()
+        assert app.profile_var.get() == "Default"
+        assert tuple(app.profile_combo["values"]) == ("Default",)
+        assert app.profile_scope_var.get() == "Profile settings for “Default”"
+        assert app.shared_text.get("1.0", tk.END).strip() == str(home / "Pictures")
+        assert app.working_directory_var.get() == "/working/reset"
+        assert app.backup_status_var.get() == "Settings reset to the factory defaults."
+        assert infos and infos[0][0] == "Settings reset"
+        assert "working-folder setting was kept" in infos[0][1]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_reset_to_defaults_confirm_dialog_describes_full_replacement(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    current = settings_ui.Config(
+        active_profile="Work",
+        profiles={
+            "Work": settings_ui.Profile(name="Work", shared_folders=["/pics/work"]),
+            "Weekend": settings_ui.Profile(name="Weekend", shared_folders=["/pics/weekend"]),
+        },
+    )
+    config_path = tmp_path / "config" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+    confirmations = []
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "askokcancel",
+        lambda title, message, **_kw: confirmations.append((title, message)) or False,
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        app._reset_to_defaults()
+        assert confirmations
+        title, message = confirmations[0]
+        assert title == "Reset settings to defaults"
+        assert "Replace ALL 2 profiles" in message
+        assert "factory default profile" in message
+        assert "working-folder setting is kept" in message
+        assert "Export a backup first" in message
+        before_bytes = config_path.read_bytes()
+        assert before_bytes == json.dumps(current.to_dict()).encode("utf-8")
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_reset_to_defaults_cancel_leaves_config_unchanged(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    current = settings_ui.Config(
+        active_profile="Work",
+        working_directory="/working/reset",
+        profiles={
+            "Work": settings_ui.Profile(name="Work", shared_folders=["/pics/work"]),
+            "Weekend": settings_ui.Profile(name="Weekend", shared_folders=["/pics/weekend"]),
+        },
+    )
+    config_path = tmp_path / "config" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+    monkeypatch.setattr(settings_ui.messagebox, "askokcancel", lambda *_a, **_k: False)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        before = app.config_data.to_dict()
+        before_bytes = config_path.read_bytes()
+        app._reset_to_defaults()
+        assert app.config_data.to_dict() == before
+        assert config_path.read_bytes() == before_bytes
+        assert app.backup_status_var.get() == "No export, import, or reset done yet in this session."
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_reset_to_defaults_reports_errors_without_touching_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    current = settings_ui.Config(
+        active_profile="Work",
+        profiles={"Work": settings_ui.Profile(name="Work", shared_folders=["/pics/work"])},
+    )
+    config_path = tmp_path / "config" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(current.to_dict()), encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "askokcancel", lambda *_a, **_k: True)
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message)))
+    monkeypatch.setattr(
+        settings_ui.config_io,
+        "reset_to_defaults",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("simulated write failure")),
+    )
+    app = settings_ui.SettingsApp()
+    try:
+        app.update()
+        before_bytes = config_path.read_bytes()
+        app._reset_to_defaults()
+        assert errors and errors[0][0] == "Reset failed"
+        assert "simulated write failure" in errors[0][1]
+        assert app.backup_status_var.get() == "Reset failed."
+        assert config_path.read_bytes() == before_bytes
+        assert app.config_data.to_dict() == current.to_dict()
     finally:
         app.destroy()
 

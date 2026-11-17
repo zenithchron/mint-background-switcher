@@ -587,7 +587,7 @@ class SettingsApp(tk.Tk):
         working_directory = configured_working_directory(self.config_data)
         self.working_directory_var = tk.StringVar(value=str(working_directory))
         self.working_status_var = tk.StringVar(value=_active_working_directory_status(working_directory))
-        self.backup_status_var = tk.StringVar(value="No export or import done yet in this session.")
+        self.backup_status_var = tk.StringVar(value="No export, import, or reset done yet in this session.")
         self.monitor_folders_data: dict[str, list[str]] = {}
         self._update_busy = False
         self._update_worker: threading.Thread | None = None
@@ -1497,15 +1497,15 @@ class SettingsApp(tk.Tk):
         )
         self.working_frame.columnconfigure(1, weight=1)
 
-        self.backup_frame = ttk.LabelFrame(self.storage_tab, text="Import / Export", padding=(8, 8))
+        self.backup_frame = ttk.LabelFrame(self.storage_tab, text="Import / Export / Reset", padding=(8, 8))
         self.backup_frame.pack(fill=tk.X, pady=(8, 0))
         ttk.Label(
             self.backup_frame,
             text=(
                 "Export the full settings — every profile, folder, and per-profile option — to a JSON "
-                "file, or restore them from a previous export. Importing replaces every profile and "
-                "setting in this installation; the background loop picks up the imported settings on "
-                "its next rotation."
+                "file, restore them from a previous export, or reset everything to the factory default "
+                "profile. Importing and resetting replace every profile and setting in this "
+                "installation; the background loop picks up the changed settings on its next rotation."
             ),
             justify=tk.LEFT,
             wraplength=760,
@@ -1522,6 +1522,12 @@ class SettingsApp(tk.Tk):
             command=self._import_settings,
         )
         self.import_settings_button.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=(6, 0))
+        self.reset_defaults_button = ttk.Button(
+            self.backup_frame,
+            text="Reset to Defaults...",
+            command=self._reset_to_defaults,
+        )
+        self.reset_defaults_button.grid(row=1, column=2, sticky="w", padx=(6, 0), pady=(6, 0))
         self.backup_status_label = ttk.Label(
             self.backup_frame,
             textvariable=self.backup_status_var,
@@ -2913,6 +2919,7 @@ class SettingsApp(tk.Tk):
             self.export_button,
             self.export_settings_button,
             self.import_settings_button,
+            self.reset_defaults_button,
             self.current_pictures_button,
             self.register_hotkeys_button,
             self.web_add_url_button,
@@ -3143,6 +3150,48 @@ class SettingsApp(tk.Tk):
                 f"Imported {count_text} from\n{source}\n\n"
                 "The imported settings are active; the background loop uses them from "
                 "its next rotation."
+            ),
+            parent=self,
+        )
+
+    def _reset_to_defaults(self) -> None:
+        if self._any_worker_busy():
+            self.backup_status_var.set("Wait for the background work to finish, then reset.")
+            return
+        count_text = self._profile_count_text(len(self.config_data.profiles))
+        if not messagebox.askokcancel(
+            "Reset settings to defaults",
+            (
+                f"Replace ALL {count_text} with a single factory default profile?\n\n"
+                "This removes every custom profile and restores the built-in default "
+                "values for every option. The working-folder setting is kept. Export a "
+                "backup first if you want to restore the current settings later.\n\n"
+                "The background loop picks up the reset settings on its next rotation."
+            ),
+            parent=self,
+        ):
+            return
+        try:
+            reset, _previous = config_io.reset_to_defaults(config_file())
+        except Exception as exc:
+            self.backup_status_var.set("Reset failed.")
+            messagebox.showerror("Reset failed", str(exc), parent=self)
+            return
+        self.config_data = reset
+        self.profile_var.set(reset.active_profile)
+        self._refresh_profiles()
+        self._load_profile(reset.active_profile)
+        working_directory = configured_working_directory(reset)
+        self.working_directory_var.set(str(working_directory))
+        self.working_status_var.set(_active_working_directory_status(working_directory))
+        self.backup_status_var.set("Settings reset to the factory defaults.")
+        messagebox.showinfo(
+            "Settings reset",
+            (
+                "Every profile was replaced with the factory default profile, and "
+                "every option is back to its built-in value.\n\n"
+                "The working-folder setting was kept; the background loop uses the "
+                "reset settings from its next rotation."
             ),
             parent=self,
         )
