@@ -40,18 +40,34 @@ class _Var:
         self.value = value
 
 
-class _Text:
-    def __init__(self, value=""):
-        self.value = value
+class _Tree:
+    """Minimal stand-in for the read-only ttk.Treeview source lists."""
 
-    def get(self, *_args):
-        return self.value
+    def __init__(self):
+        self._items: dict[str, tuple] = {}
+        self._counter = 0
 
-    def insert(self, _index, text):
-        self.value += text
+    def get_children(self, _parent=""):
+        return list(self._items)
 
-    def delete(self, *_args):
-        self.value = ""
+    def delete(self, *ids):
+        for item_id in ids:
+            self._items.pop(item_id, None)
+
+    def insert(self, _parent, _index, values=()):
+        self._counter += 1
+        item_id = f"item{self._counter}"
+        self._items[item_id] = tuple(values)
+        return item_id
+
+    def item(self, item_id, option="values"):
+        if option != "values":
+            raise ValueError(option)
+        return self._items[item_id]
+
+    @property
+    def rows(self):
+        return [list(values) for values in self._items.values()]
 
 
 class _Combo:
@@ -232,7 +248,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                     )
                 )
             elif layout == "per-monitor":
-                layout_controls.append(app.monitor_text)
+                layout_controls.extend((app.monitor_assignments_tree, app.monitor_add_button, app.monitor_remove_button, app.monitor_reveal_button))
             for control in layout_controls:
                 assert_visible_inside_window(control)
 
@@ -255,7 +271,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         app.event_generate("<Control-Tab>")
         app.update()
         assert app.notebook.select() == str(app.layout_tab)
-        assert is_descendant(app.shared_text, app.sources_tab)
+        assert is_descendant(app.shared_sources_tree, app.sources_tab)
         assert is_descendant(app.recursive_checkbutton, app.sources_tab)
         assert is_descendant(app.ignore_hidden_checkbutton, app.sources_tab)
         assert is_descendant(app.min_image_size_entry, app.sources_tab)
@@ -302,13 +318,16 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.ignore_patterns_entry,
                 app.image_types_entry,
                 app.match_orientation_checkbutton,
-                app.shared_text,
-                app.web_sources_text,
+                app.shared_sources_tree,
+                app.shared_remove_button,
+                app.shared_reveal_button,
+                app.web_sources_tree,
                 app.web_url_entry,
                 app.web_add_url_button,
                 app.web_add_feed_button,
                 app.web_remove_button,
                 app.web_refresh_button,
+                app.web_reveal_button,
             ),
             str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu, app.fit_mode_menu),
             str(app.overlays_tab): (
@@ -429,7 +448,9 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                         )
                     )
                 elif layout == "per-monitor":
-                    clam_layout_controls.append(app.monitor_text)
+                    clam_layout_controls.extend(
+                        (app.monitor_assignments_tree, app.monitor_add_button, app.monitor_remove_button, app.monitor_reveal_button)
+                    )
                 for control in clam_layout_controls:
                     assert_visible_inside_window(control)
                 assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
@@ -2126,8 +2147,8 @@ def test_settings_mode_menu_exposes_polaroid_and_applies_selection(monkeypatch, 
             "Storage",
             "Updates & About",
         ]
-        assert str(app.shared_text).startswith(str(app.sources_tab))
-        assert str(app.monitor_text).startswith(str(app.layout_panels["per-monitor"]))
+        assert str(app.shared_sources_tree).startswith(str(app.sources_tab))
+        assert str(app.monitor_assignments_tree).startswith(str(app.layout_panels["per-monitor"]))
         assert str(app.update_button).startswith(str(app.about_tab))
         assert app.mode_menu.winfo_ismapped()
         assert app.mode_menu.winfo_width() > 1
@@ -2294,8 +2315,8 @@ def test_save_current_returns_false_on_validation_failure(monkeypatch):
     setattr(dummy, "desktop_var", _Var("auto"))
     setattr(dummy, "effect_var", _Var("none"))
     setattr(dummy, "bar_color_var", _Var("black"))
-    setattr(dummy, "shared_text", _Text("/tmp/images"))
-    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "_shared_sources_display", ["/tmp/images"])
+    setattr(dummy, "monitor_folders_data", {})
     setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
     setattr(dummy, "profile_combo", _Combo())
 
@@ -2319,8 +2340,8 @@ def test_save_current_rejects_non_numeric_min_image_size(monkeypatch):
     setattr(dummy, "desktop_var", _Var("auto"))
     setattr(dummy, "effect_var", _Var("none"))
     setattr(dummy, "bar_color_var", _Var("black"))
-    setattr(dummy, "shared_text", _Text("/tmp/images"))
-    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "_shared_sources_display", ["/tmp/images"])
+    setattr(dummy, "monitor_folders_data", {})
     setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
     setattr(dummy, "profile_combo", _Combo())
 
@@ -2540,17 +2561,26 @@ def _assert_web_row_controls(app):
         return False
 
     for control in (
-        app.web_sources_text,
+        app.web_sources_tree,
         app.web_url_entry,
         app.web_add_url_button,
         app.web_add_feed_button,
         app.web_remove_button,
         app.web_refresh_button,
+        app.web_reveal_button,
     ):
         assert is_descendant(control, app.sources_tab)
         assert control.winfo_ismapped()
         assert control.winfo_width() >= control.winfo_reqwidth()
         assert control.winfo_height() >= control.winfo_reqheight()
+
+
+def _web_source_rows(app):
+    """(type, location, scope, availability) values of every web source row."""
+    return [
+        [str(value) for value in app.web_sources_tree.item(child, "values")]
+        for child in app.web_sources_tree.get_children()
+    ]
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
@@ -2601,22 +2631,24 @@ def test_settings_add_feed_button_adds_prefixed_entry_and_persists(monkeypatch, 
         app.notebook.select(app.sources_tab)
         app.update()
 
-        # Add URL still records a plain direct-image line.
+        # Add URL still records a direct-image row.
         app.web_url_entry.delete(0, settings_ui.tk.END)
         app.web_url_entry.insert(0, "https://example.com/pic.jpg")
         app.web_add_url_button.invoke()
         app.update()
-        assert str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines() == [
-            "https://example.com/pic.jpg"
+        assert _web_source_rows(app) == [
+            ["Image URL", "https://example.com/pic.jpg", "Default", "Not cached yet"]
         ]
 
-        # Add feed records the [feed]-prefixed line.
+        # Add feed records a Feed row for the same URL list.
         app.web_url_entry.delete(0, settings_ui.tk.END)
         app.web_url_entry.insert(0, "https://example.com/gallery.rss")
         app.web_add_feed_button.invoke()
         app.update()
-        lines = str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines()
-        assert lines == ["https://example.com/pic.jpg", "[feed] https://example.com/gallery.rss"]
+        assert _web_source_rows(app) == [
+            ["Image URL", "https://example.com/pic.jpg", "Default", "Not cached yet"],
+            ["Feed", "https://example.com/gallery.rss", "Default", "Not cached yet"],
+        ]
         assert infos and infos[-1][0] == "Web source added"
         assert "RSS/Atom feed" in infos[-1][1]
         assert app.web_url_entry.get() == ""
@@ -2628,11 +2660,13 @@ def test_settings_add_feed_button_adds_prefixed_entry_and_persists(monkeypatch, 
             {"type": "feed", "url": "https://example.com/gallery.rss"},
         ]
 
-        # Reloading the profile shows the prefixed line again.
+        # Reloading the profile shows the same typed rows again.
         infos.clear()
         app._load_profile("Default")
-        lines = str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines()
-        assert lines == ["https://example.com/pic.jpg", "[feed] https://example.com/gallery.rss"]
+        assert _web_source_rows(app) == [
+            ["Image URL", "https://example.com/pic.jpg", "Default", "Not cached yet"],
+            ["Feed", "https://example.com/gallery.rss", "Default", "Not cached yet"],
+        ]
     finally:
         app.destroy()
 
@@ -2660,7 +2694,7 @@ def test_settings_web_source_rejects_invalid_feed_url_and_duplicate(monkeypatch,
         app.update()
         assert errors and errors[-1][0] == "Invalid web source URL"
         assert "feed URL" in errors[-1][1]
-        assert str(app.web_sources_text.get("1.0", settings_ui.tk.END)).strip() == ""
+        assert _web_source_rows(app) == []
 
         # Adding the same URL a second time is reported as a duplicate.
         app.web_url_entry.delete(0, settings_ui.tk.END)
@@ -2674,14 +2708,15 @@ def test_settings_web_source_rejects_invalid_feed_url_and_duplicate(monkeypatch,
         app.web_add_feed_button.invoke()
         app.update()
         assert infos and infos[-1][0] == "Web source already listed"
-        lines = str(app.web_sources_text.get("1.0", settings_ui.tk.END)).splitlines()
-        assert lines == ["[feed] https://example.com/gallery.rss"]
+        assert _web_source_rows(app) == [
+            ["Feed", "https://example.com/gallery.rss", "Default", "Not cached yet"]
+        ]
     finally:
         app.destroy()
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
-def test_settings_remove_selected_web_source_handles_feed_lines(monkeypatch, tmp_path):
+def test_settings_remove_selected_web_source_handles_typed_rows(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
@@ -2694,25 +2729,41 @@ def test_settings_remove_selected_web_source_handles_feed_lines(monkeypatch, tmp
         app.notebook.select(app.sources_tab)
         app.update()
 
-        text = app.web_sources_text
-        text.insert("1.0", "https://example.com/pic.jpg\n[feed] https://example.com/gallery.rss")
-        text.tag_add(settings_ui.tk.SEL, "2.0", "2.0 lineend")
-        app.web_remove_button.invoke()
+        app._web_sources_display = [
+            (settings_ui.WEB_SOURCE_TYPE, "https://example.com/pic.jpg"),
+            (settings_ui.WEB_FEED_TYPE, "https://example.com/gallery.rss"),
+        ]
+        app._refresh_web_sources_view()
         app.update()
-        assert str(text.get("1.0", settings_ui.tk.END)).splitlines() == ["https://example.com/pic.jpg"]
 
-        # removing a middle line leaves no blank line behind
-        text.delete("1.0", settings_ui.tk.END)
-        text.insert("1.0", "https://example.com/a.jpg\nhttps://example.com/b.jpg\nhttps://example.com/c.jpg")
-        text.tag_add(settings_ui.tk.SEL, "2.0", "2.0 lineend")
+        # Selecting the feed row removes exactly that typed entry.
+        children = app.web_sources_tree.get_children()
+        assert len(children) == 2
+        app.web_sources_tree.selection_set(children[1])
         app.web_remove_button.invoke()
         app.update()
-        assert str(text.get("1.0", settings_ui.tk.END)).splitlines() == [
-            "https://example.com/a.jpg",
-            "https://example.com/c.jpg",
+        assert _web_source_rows(app) == [
+            ["Image URL", "https://example.com/pic.jpg", "Default", "Not cached yet"]
         ]
 
-        # saving persists only the remaining direct URL
+        # Removing a middle row leaves no row behind for it.
+        app._web_sources_display = [
+            (settings_ui.WEB_SOURCE_TYPE, "https://example.com/a.jpg"),
+            (settings_ui.WEB_SOURCE_TYPE, "https://example.com/b.jpg"),
+            (settings_ui.WEB_SOURCE_TYPE, "https://example.com/c.jpg"),
+        ]
+        app._refresh_web_sources_view()
+        app.update()
+        children = app.web_sources_tree.get_children()
+        app.web_sources_tree.selection_set(children[1])
+        app.web_remove_button.invoke()
+        app.update()
+        assert _web_source_rows(app) == [
+            ["Image URL", "https://example.com/a.jpg", "Default", "Not cached yet"],
+            ["Image URL", "https://example.com/c.jpg", "Default", "Not cached yet"],
+        ]
+
+        # saving persists only the remaining direct URLs
         assert app._save_current() is True
         saved = settings_ui.load_config().get_profile("Default")
         assert saved.web_sources == [
@@ -2738,13 +2789,70 @@ def test_settings_web_source_save_rejects_invalid_line(monkeypatch, tmp_path):
         app.update()
         app.notebook.select(app.sources_tab)
         app.update()
-        app.web_sources_text.insert("1.0", "[feed] not a url")
+        # A malformed row that bypassed the add flow is still rejected at save time.
+        app._web_sources_display = [(settings_ui.WEB_FEED_TYPE, "not a url")]
+        app._refresh_web_sources_view()
         assert app._save_current() is False
         assert errors and errors[-1][0] == "Save failed"
         assert "Invalid web source URL(s)" in errors[-1][1]
         assert "http/https image or feed URLs" in errors[-1][1]
         # a rejected save leaves the previous profile in place
         assert settings_ui.load_config().get_profile("Default").web_sources == []
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_source_trees_render_typed_rows_with_availability(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    shared_dir = tmp_path / "wallpapers"
+    shared_dir.mkdir()
+    picture = shared_dir / "one.png"
+    Image.new("RGB", (16, 10), (20, 80, 140)).save(picture)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+
+        app._shared_sources_display = [str(shared_dir), str(picture), "/does/not/exist/missing.jpg"]
+        app._refresh_shared_sources_view()
+        app.update()
+        rows = [
+            [str(value) for value in app.shared_sources_tree.item(child, "values")]
+            for child in app.shared_sources_tree.get_children()
+        ]
+        assert rows == [
+            ["Folder", str(shared_dir), "Default", "Available"],
+            ["Picture", str(picture), "Default", "Available"],
+            ["Picture", "/does/not/exist/missing.jpg", "Default", "Missing"],
+        ]
+
+        app._web_sources_display = [
+            (settings_ui.WEB_SOURCE_TYPE, "https://example.com/pic.jpg"),
+            (settings_ui.WEB_FEED_TYPE, "https://example.com/gallery.rss"),
+        ]
+        app._refresh_web_sources_view()
+        app.update()
+        assert _web_source_rows(app) == [
+            ["Image URL", "https://example.com/pic.jpg", "Default", "Not cached yet"],
+            ["Feed", "https://example.com/gallery.rss", "Default", "Not cached yet"],
+        ]
+
+        setattr(app, "monitor_folders_data", {"DP-1": [str(shared_dir), "/does/not/exist"]})
+        app._refresh_monitor_assignments_view()
+        app.update()
+        monitor_rows = [
+            [str(value) for value in app.monitor_assignments_tree.item(child, "values")]
+            for child in app.monitor_assignments_tree.get_children()
+        ]
+        assert monitor_rows == [
+            ["DP-1", str(shared_dir), "Available"],
+            ["DP-1", "/does/not/exist", "Missing"],
+        ]
     finally:
         app.destroy()
 
@@ -3512,8 +3620,7 @@ def test_shared_hard_drive_browse_adds_unique_folder():
         return "/media/example/Photos"
 
     dummy = object.__new__(settings_ui.SettingsApp)
-    shared_text = _Text("/tmp/example/Pictures")
-    setattr(dummy, "shared_text", shared_text)
+    setattr(dummy, "_shared_sources_display", ["/tmp/example/Pictures"])
     setattr(dummy, "_ask_folder", fake_ask_folder)
 
     settings_ui.SettingsApp._add_shared_folder_from_root(dummy)
@@ -3521,7 +3628,7 @@ def test_shared_hard_drive_browse_adds_unique_folder():
 
     assert calls[0]["initialdir"] == "/"
     assert calls[0]["title"]
-    assert shared_text.value.splitlines() == ["/tmp/example/Pictures", "/media/example/Photos"]
+    assert dummy._shared_sources_display == ["/tmp/example/Pictures", "/media/example/Photos"]
 
 
 def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_path):
@@ -3531,8 +3638,7 @@ def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_pat
     messages = []
     errors = []
     dummy = object.__new__(settings_ui.SettingsApp)
-    shared_text = _Text("/tmp/example/Pictures")
-    setattr(dummy, "shared_text", shared_text)
+    setattr(dummy, "_shared_sources_display", ["/tmp/example/Pictures"])
     monkeypatch.setattr(
         settings_ui.filedialog,
         "askopenfilename",
@@ -3555,7 +3661,7 @@ def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_pat
     assert dialogs[0]["parent"] is dummy
     assert dialogs[0]["title"] == "Add an individual wallpaper picture"
     assert ("Supported pictures", settings_ui.SUPPORTED_PICTURE_PATTERNS) in dialogs[0]["filetypes"]
-    assert shared_text.value.splitlines() == ["/tmp/example/Pictures", str(picture.resolve())]
+    assert dummy._shared_sources_display == ["/tmp/example/Pictures", str(picture.resolve())]
     assert [title for title, _message, _kwargs in messages] == [
         "Picture added",
         "Picture already listed",
@@ -3577,8 +3683,7 @@ def test_add_shared_picture_rejects_unsupported_unreadable_or_missing_files(monk
     )
     errors = []
     dummy = object.__new__(settings_ui.SettingsApp)
-    shared_text = _Text("")
-    setattr(dummy, "shared_text", shared_text)
+    setattr(dummy, "_shared_sources_display", [])
     monkeypatch.setattr(settings_ui.filedialog, "askopenfilename", lambda **_kwargs: next(selections))
     monkeypatch.setattr(
         settings_ui.messagebox,
@@ -3591,7 +3696,7 @@ def test_add_shared_picture_rejects_unsupported_unreadable_or_missing_files(monk
     settings_ui.SettingsApp._add_shared_picture(dummy)
     settings_ui.SettingsApp._add_shared_picture(dummy)
 
-    assert shared_text.value == ""
+    assert dummy._shared_sources_display == []
     assert [title for title, _message, _kwargs in errors] == [
         "Could not add picture",
         "Could not add picture",
@@ -3641,7 +3746,7 @@ def test_settings_add_picture_is_visible_and_saves_individual_source(monkeypatch
         app.shared_add_picture_button.invoke()
         app.profile_save_button.invoke()
 
-        assert str(picture.resolve()) in app.shared_text.get("1.0", settings_ui.tk.END).split("\n")
+        assert str(picture.resolve()) in app._shared_sources_display
         assert str(picture.resolve()) in settings_ui.load_config().get_profile("Default").shared_folders
         assert [title for title, _message, _kwargs in messages][-2:] == ["Picture added", "Saved"]
         assert errors == []
@@ -3652,68 +3757,81 @@ def test_settings_add_picture_is_visible_and_saves_individual_source(monkeypatch
 def test_monitor_folder_flow_browses_then_asks_for_screen():
     events = []
     dummy = object.__new__(settings_ui.SettingsApp)
-    monitor_text = _Text("DP-1=/old/dp\nHDMI-1=/old/hdmi")
+    tree = _Tree()
     setattr(dummy, "monitor_folder_var", _Var("DP-1"))
-    setattr(dummy, "monitor_text", monitor_text)
+    setattr(dummy, "monitor_folders_data", {"DP-1": ["/old/dp"], "HDMI-1": ["/old/hdmi"]})
+    setattr(dummy, "monitor_assignments_tree", tree)
     setattr(dummy, "_ask_folder", lambda **_kwargs: events.append("folder") or "/mnt/wallpapers")
     setattr(dummy, "_choose_monitor_for_folder", lambda folder: events.append(("screen", folder)) or "HDMI-1")
 
     settings_ui.SettingsApp._add_monitor_folder_from_root(dummy)
 
-    lines = monitor_text.value.splitlines()
     assert events == ["folder", ("screen", "/mnt/wallpapers")]
-    assert "DP-1=/old/dp" in lines
-    assert "HDMI-1=/old/hdmi;/mnt/wallpapers" in lines
+    assert dummy.monitor_folders_data == {
+        "DP-1": ["/old/dp"],
+        "HDMI-1": ["/old/hdmi", "/mnt/wallpapers"],
+    }
     assert dummy.monitor_folder_var.get() == "HDMI-1"
+    assert [row[:2] for row in tree.rows] == [
+        ["DP-1", "/old/dp"],
+        ["HDMI-1", "/old/hdmi"],
+        ["HDMI-1", "/mnt/wallpapers"],
+    ]
 
 
-def test_monitor_hard_drive_browse_shows_error_for_malformed_text(monkeypatch):
+def test_monitor_browse_creates_new_assignment(monkeypatch):
+    messages = []
     errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message: messages.append((title, message)))
     monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message: errors.append((title, message)))
     dummy = object.__new__(settings_ui.SettingsApp)
-    monitor_text = _Text("not-a-valid-monitor-line")
+    tree = _Tree()
     setattr(dummy, "monitor_folder_var", _Var("HDMI-1"))
-    setattr(dummy, "monitor_text", monitor_text)
+    setattr(dummy, "monitor_folders_data", {})
+    setattr(dummy, "monitor_assignments_tree", tree)
     setattr(dummy, "_ask_folder", lambda **_kwargs: "/mnt/wallpapers")
     setattr(dummy, "_choose_monitor_for_folder", lambda folder: "HDMI-1")
 
     settings_ui.SettingsApp._add_monitor_folder_from_root(dummy)
 
-    assert errors and errors[0][0] == "Could not add folder"
-    assert monitor_text.value == "not-a-valid-monitor-line"
+    assert errors == []
+    assert dummy.monitor_folders_data == {"HDMI-1": ["/mnt/wallpapers"]}
+    assert dummy.monitor_folder_var.get() == "HDMI-1"
+    assert [row[:2] for row in tree.rows] == [["HDMI-1", "/mnt/wallpapers"]]
+    # The add flow reports no success dialog (pre-existing behavior); a failure
+    # would surface as a showerror and is asserted away above.
+    assert messages == []
 
 
 def test_remove_monitor_folder_removes_only_selected_assignment():
     dummy = object.__new__(settings_ui.SettingsApp)
-    monitor_text = _Text("")
-    setattr(dummy, "monitor_text", monitor_text)
+    tree = _Tree()
+    setattr(dummy, "monitor_assignments_tree", tree)
     setattr(dummy, "monitor_folders_data", {"DP-1": ["/a", "/b"], "HDMI-1": ["/c"]})
 
     settings_ui.SettingsApp._remove_monitor_folder(dummy, "DP-1", "/a")
 
     assert dummy.monitor_folders_data == {"DP-1": ["/b"], "HDMI-1": ["/c"]}
-    assert monitor_text.value.splitlines() == ["DP-1=/b", "HDMI-1=/c"]
+    assert [row[:2] for row in tree.rows] == [["DP-1", "/b"], ["HDMI-1", "/c"]]
 
 
 def test_remove_monitor_folder_dialog_can_delete_last_assignment():
     dummy = object.__new__(settings_ui.SettingsApp)
-    monitor_text = _Text("")
-    setattr(dummy, "monitor_text", monitor_text)
+    tree = _Tree()
+    setattr(dummy, "monitor_assignments_tree", tree)
     setattr(dummy, "monitor_folders_data", {"DP-1": ["/a"], "HDMI-1": ["/c"]})
     setattr(dummy, "_choose_monitor_folder_to_remove", lambda: ("DP-1", "/a"))
 
     settings_ui.SettingsApp._remove_monitor_folder_from_dialog(dummy)
 
     assert dummy.monitor_folders_data == {"HDMI-1": ["/c"]}
-    assert monitor_text.value.splitlines() == ["HDMI-1=/c"]
+    assert [row[:2] for row in tree.rows] == [["HDMI-1", "/c"]]
 
 
 def test_remove_monitor_folder_dialog_shows_message_when_empty(monkeypatch):
     messages = []
     monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message: messages.append((title, message)))
     dummy = object.__new__(settings_ui.SettingsApp)
-    monitor_text = _Text("")
-    setattr(dummy, "monitor_text", monitor_text)
     setattr(dummy, "monitor_folders_data", {})
 
     assert settings_ui.SettingsApp._choose_monitor_folder_to_remove(dummy) is None
@@ -3767,8 +3885,7 @@ def test_rename_profile_preserves_current_form_settings_and_saves(monkeypatch):
     setattr(dummy, "effect_var", _Var("grayscale"))
     setattr(dummy, "bar_color_var", _Var("auto"))
     setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
-    setattr(dummy, "shared_text", _Text("/new-shared\n"))
-    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "_shared_sources_display", ["/new-shared"])
     setattr(dummy, "monitor_folders_data", {"HDMI-1": ["/new-monitor"]})
     setattr(dummy, "_ask_profile_name", lambda *_args, **_kwargs: "Travel")
     setattr(dummy, "_load_profile", lambda name: loaded.append(name))
@@ -4797,8 +4914,8 @@ def test_save_current_persists_hotkey_bindings(monkeypatch):
     setattr(dummy, "effect_var", _Var("none"))
     setattr(dummy, "bar_color_var", _Var("black"))
     setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
-    setattr(dummy, "shared_text", _Text("/shared"))
-    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "_shared_sources_display", ["/shared"])
+    setattr(dummy, "monitor_folders_data", {})
     setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
 
     assert settings_ui.SettingsApp._save_current(dummy) is True
@@ -4844,8 +4961,8 @@ def test_save_current_partial_app_carries_forward_no_draw_zones(monkeypatch):
     setattr(dummy, "effect_var", _Var("none"))
     setattr(dummy, "bar_color_var", _Var("black"))
     setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
-    setattr(dummy, "shared_text", _Text("/shared"))
-    setattr(dummy, "monitor_text", _Text(""))
+    setattr(dummy, "_shared_sources_display", ["/shared"])
+    setattr(dummy, "monitor_folders_data", {})
     setattr(
         dummy,
         "config_data",
@@ -4979,7 +5096,7 @@ def test_import_settings_replaces_config_and_refreshes_editor(monkeypatch, tmp_p
         assert app.interval_var.get() == "30.0"
         assert app.mode_var.get() == "span"
         assert app.effect_var.get() == "grayscale"
-        assert app.shared_text.get("1.0", tk.END).strip() == "/pics/work"
+        assert app._shared_sources_display == ["/pics/work"]
         assert tuple(app.profile_combo["values"]) == ("Weekend", "Work")
         assert app.profile_scope_var.get() == "Profile settings for “Work”"
         assert app.working_directory_var.get() == "/working/imported"
@@ -5089,7 +5206,7 @@ def test_reset_to_defaults_replaces_config_and_refreshes_editor(monkeypatch, tmp
         assert app.profile_var.get() == "Default"
         assert tuple(app.profile_combo["values"]) == ("Default",)
         assert app.profile_scope_var.get() == "Profile settings for “Default”"
-        assert app.shared_text.get("1.0", tk.END).strip() == str(home / "Pictures")
+        assert app._shared_sources_display == [str(home / "Pictures")]
         assert app.working_directory_var.get() == "/working/reset"
         assert app.backup_status_var.get() == "Settings reset to the factory defaults."
         assert infos and infos[0][0] == "Settings reset"

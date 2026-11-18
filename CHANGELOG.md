@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.31] - 2026-11-18
+
+### Added
+
+- **Structured source management** (Settings UI redesign Increment 4) — the editable free-text source lists are now read-only row views showing source type, location, scope, and availability, with explicit add, remove, and reveal actions:
+  - **Settings → Sources → Shared picture sources**: one row per folder or individual picture with **Type** (Folder / Picture), **Location**, **Scope** (the selected profile), and **Availability** (Available / Missing) columns. **Add folder...**, **Add picture...**, and **Browse hard drives...** add rows, **Remove Selected** deletes the selected row, and **Reveal** opens the source (or its containing folder) in the desktop file manager.
+  - **Settings → Sources → Web picture sources**: the URL list is now a read-only row list with **Type** (Image URL / Feed), **Location** (the URL), **Scope**, and **Availability** (N cached / Not cached yet) columns, managed with **Add URL**, **Add feed**, **Remove Selected**, **Refresh Now**, and a new **Reveal** that opens the selected URL in the default web browser. The `[feed] ` line prefix is gone — feeds are kept and displayed by type — while the 20-entry cap, per-URL validation, and refresh behavior are unchanged.
+  - **Settings → Layout & Appearance → Per-monitor folders**: the `MONITOR=/path;/path` text box is now a read-only row list with **Screen**, **Folder**, and **Availability** columns (one row per screen-folder assignment), managed with **Add per-monitor folder...**, **Remove per-monitor folder...**, and **Reveal**.
+  - Rows render in-memory profile state: the on-disk config schema is unchanged (folders and `MONITOR=path;path` lines save exactly as before), and saving with an empty display list cannot silently wipe a saved source list. Availability checks fail open (missing cache directory reports 0 cached; a missing path reports Missing) and never block editing or saving.
+- Bumped the package version to `0.2.31`.
+
 ## [0.2.30] - 2026-11-17
 
 ### Added

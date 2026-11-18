@@ -1,6 +1,7 @@
 """Web picture sources: URL validation, config coercion, and refresh behavior."""
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from mint_background_switcher.sources import (
     extract_feed_image_urls,
     refresh_web_sources,
     validate_web_url,
+    web_source_cached_count,
     web_source_cache_dir,
     web_source_stem,
 )
@@ -116,6 +118,49 @@ def test_coerce_web_sources_handles_non_lists_and_caps_count():
     entries = coerce_web_sources([{"url": url} for url in urls] * 2)
     assert len(entries) == MAX_WEB_SOURCES
     assert [entry["url"] for entry in entries] == urls[:MAX_WEB_SOURCES]
+
+
+def test_web_source_cached_count_direct_url(tmp_path):
+    cache_dir = web_source_cache_dir(tmp_path)
+    url = "https://example.com/pic.jpg"
+    entry = {"type": "url", "url": url}
+    # No cache directory yet: fail-open zero.
+    assert web_source_cached_count(cache_dir, entry) == 0
+    cache_dir.mkdir(parents=True)
+    assert web_source_cached_count(cache_dir, entry) == 0
+    (cache_dir / (web_source_stem(url) + ".png")).write_bytes(_png_bytes())
+    assert web_source_cached_count(cache_dir, entry) == 1
+
+
+def test_web_source_cached_count_feed_counts_sidecar_listed_pictures(tmp_path):
+    cache_dir = web_source_cache_dir(tmp_path)
+    feed_url = "https://example.com/feed.rss"
+    img_a = "https://example.com/a.jpg"
+    img_b = "https://example.com/b.jpg"
+    entry = {"type": WEB_FEED_TYPE, "url": feed_url}
+    assert web_source_cached_count(cache_dir, entry) == 0
+    cache_dir.mkdir(parents=True)
+    # The sidecar lists both stems but only one cached file exists.
+    (cache_dir / feed_stem_sidecar_name(feed_url)).write_text(
+        json.dumps([web_source_stem(img_a), web_source_stem(img_b)]), encoding="utf-8"
+    )
+    (cache_dir / (web_source_stem(img_a) + ".png")).write_bytes(_png_bytes())
+    assert web_source_cached_count(cache_dir, entry) == 1
+    (cache_dir / (web_source_stem(img_b) + ".png")).write_bytes(_png_bytes())
+    assert web_source_cached_count(cache_dir, entry) == 2
+
+
+def test_web_source_cached_count_is_fail_open(tmp_path):
+    cache_dir = web_source_cache_dir(tmp_path)
+    cache_dir.mkdir(parents=True)
+    # A malformed sidecar reports zero instead of raising.
+    feed_entry = {"type": WEB_FEED_TYPE, "url": "https://example.com/feed.rss"}
+    (cache_dir / feed_stem_sidecar_name("https://example.com/feed.rss")).write_text(
+        "{not json", encoding="utf-8"
+    )
+    assert web_source_cached_count(cache_dir, feed_entry) == 0
+    # A non-dict-shaped entry also fails open.
+    assert web_source_cached_count(cache_dir, {"type": "url"}) == 0
 
 
 def test_profile_web_sources_round_trip_and_default(tmp_path, monkeypatch):

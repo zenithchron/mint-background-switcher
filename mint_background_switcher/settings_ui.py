@@ -57,7 +57,14 @@ from .service import (
     save_current_wallpaper,
     switch_once,
 )
-from .sources import MAX_WEB_SOURCES, WEB_FEED_TYPE, WEB_SOURCE_TYPE, validate_web_url
+from .sources import (
+    MAX_WEB_SOURCES,
+    WEB_FEED_TYPE,
+    WEB_SOURCE_TYPE,
+    validate_web_url,
+    web_source_cached_count,
+    web_source_cache_dir,
+)
 from .overlays import (
     DEFAULT_OVERLAY_CALENDAR_POSITION,
     MAX_NO_DRAW_ZONES,
@@ -84,15 +91,15 @@ SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 WORKING_DIRECTORY_STATUS_PATH_LIMIT = 64
-# List-box line prefix that marks an RSS/Atom feed entry (vs a direct image URL).
-FEED_LINE_PREFIX = "[feed] "
+# Read-only source row columns (structured source management, roadmap increment 4).
+SOURCE_TREE_COLUMNS = ("type", "location", "scope", "availability")
+# Used to label a missing shared source by its last-known kind.
+_SOURCE_PICTURE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"})
 
 
-def _split_web_source_line(line: str) -> tuple[str, str]:
-    """Split one web-source list line into (kind, candidate URL)."""
-    if line.startswith(FEED_LINE_PREFIX):
-        return WEB_FEED_TYPE, line[len(FEED_LINE_PREFIX) :].strip()
-    return WEB_SOURCE_TYPE, line
+def _web_source_display_type(kind: str) -> str:
+    """Human label for one web source row."""
+    return "Feed" if kind == WEB_FEED_TYPE else "Image URL"
 
 
 # (display label, stored value) for the calendar overlay corner choice.
@@ -737,16 +744,16 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_scope_var,
             style="Heading.TLabel",
         )
-        self.sources_scope_label.pack(anchor="w", pady=(0, 4))
+        self.sources_scope_label.pack(anchor="w", pady=(0, 2))
         ttk.Label(
             self.sources_tab,
             text="Choose local folders and pictures for this profile. Source files remain read-only.",
             justify=tk.LEFT,
             wraplength=840,
-        ).pack(anchor="w", pady=(0, 3))
+        ).pack(anchor="w", pady=(0, 2))
 
-        source_options = ttk.LabelFrame(self.sources_tab, text="Folder scanning", padding=(8, 4))
-        source_options.pack(fill=tk.X, pady=(0, 3))
+        source_options = ttk.LabelFrame(self.sources_tab, text="Folder scanning", padding=(8, 2))
+        source_options.pack(fill=tk.X, pady=(0, 1))
         self.recursive_checkbutton = ttk.Checkbutton(
             source_options,
             text="Scan folders recursively",
@@ -759,58 +766,75 @@ class SettingsApp(tk.Tk):
             variable=self.ignore_hidden_var,
         )
         self.ignore_hidden_checkbutton.grid(row=0, column=2, sticky="w")
-        ttk.Label(source_options, text="Minimum image size:").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(source_options, text="Minimum image size:").grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.min_image_size_entry = ttk.Entry(source_options, textvariable=self.min_image_size_var, width=6)
-        self.min_image_size_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(4, 0))
+        self.min_image_size_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(2, 0))
         ttk.Label(
             source_options,
             text="px on the smallest side; 0 means no limit. Smaller pictures are skipped when the library is scanned.",
-        ).grid(row=1, column=2, sticky="w", pady=(4, 0))
-        ttk.Label(source_options, text="Ignore name patterns:").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=1, column=2, sticky="w", pady=(2, 0))
+        ttk.Label(source_options, text="Ignore name patterns:").grid(row=2, column=0, sticky="w", pady=(2, 0))
         self.ignore_patterns_entry = ttk.Entry(
             source_options,
             textvariable=self.ignore_patterns_var,
             width=11,
         )
-        self.ignore_patterns_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(4, 0))
+        self.ignore_patterns_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(2, 0))
         ttk.Label(
             source_options,
             text="wildcards, comma-separated; for example thumb*.jpg",
-        ).grid(row=2, column=2, sticky="w", pady=(4, 0))
+        ).grid(row=2, column=2, sticky="w", pady=(2, 0))
         self.match_orientation_checkbutton = ttk.Checkbutton(
             source_options,
             text="Match monitor orientation",
             variable=self.match_orientation_var,
         )
-        self.match_orientation_checkbutton.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.match_orientation_checkbutton.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
         ttk.Label(
             source_options,
             text="prefer landscape pictures on landscape monitors and portrait pictures on portrait monitors",
-        ).grid(row=3, column=2, sticky="w", pady=(4, 0))
-        ttk.Label(source_options, text="Image types:").grid(row=4, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=3, column=2, sticky="w", pady=(2, 0))
+        ttk.Label(source_options, text="Image types:").grid(row=4, column=0, sticky="w", pady=(2, 0))
         self.image_types_entry = ttk.Entry(
             source_options,
             textvariable=self.image_types_var,
             width=12,
         )
-        self.image_types_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(4, 0))
+        self.image_types_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(2, 0))
         ttk.Label(
             source_options,
             text="comma-separated; for example jpg, png; empty means all supported types",
-        ).grid(row=4, column=2, sticky="w", pady=(4, 0))
+        ).grid(row=4, column=2, sticky="w", pady=(2, 0))
         source_options.columnconfigure(2, weight=1)
 
-        shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=6)
-        shared_frame.pack(fill=tk.BOTH, expand=True, pady=3)
+        shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=2)
+        shared_frame.pack(fill=tk.BOTH, expand=True, pady=1)
         ttk.Label(
             shared_frame,
             text=(
                 "Folders and individual pictures used by Shared, Same, Montage, Collage, "
-                "Postcard, Polaroid, and Span modes."
+                "Postcard, Polaroid, and Span modes. Use the buttons below to add, "
+                "remove, or reveal a source."
             ),
-        ).pack(anchor="w", pady=(0, 2))
-        self.shared_text = tk.Text(shared_frame, height=1, width=40)
-        self.shared_text.pack(fill=tk.BOTH, expand=True)
+            justify=tk.LEFT,
+            wraplength=860,
+        ).pack(anchor="w")
+        self._shared_sources_display: list[str] = []
+        # height=1 keeps the Sources page inside the fixed 944x668 window in
+        # both ttk themes; the frame's expand=True grows the tree (and its
+        # scrollbar stays live) with any spare page height.
+        self.shared_sources_tree = ttk.Treeview(
+            shared_frame,
+            columns=SOURCE_TREE_COLUMNS,
+            show="headings",
+            selectmode="browse",
+            height=1,
+        )
+        self._configure_source_tree(self.shared_sources_tree)
+        shared_scroll = ttk.Scrollbar(shared_frame, orient=tk.VERTICAL, command=self.shared_sources_tree.yview)
+        self.shared_sources_tree.configure(yscrollcommand=shared_scroll.set)
+        shared_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.shared_sources_tree.pack(fill=tk.BOTH, expand=True)
         shared_buttons = ttk.Frame(shared_frame)
         shared_buttons.pack(fill=tk.X, pady=2)
         self.shared_add_folder_button = ttk.Button(
@@ -831,14 +855,39 @@ class SettingsApp(tk.Tk):
             command=self._add_shared_folder_from_root,
         )
         self.shared_browse_drives_button.pack(side=tk.LEFT)
+        self.shared_remove_button = ttk.Button(
+            shared_buttons,
+            text="Remove Selected",
+            command=self._remove_selected_shared_source,
+        )
+        self.shared_remove_button.pack(side=tk.LEFT, padx=(8, 0))
+        self.shared_reveal_button = ttk.Button(
+            shared_buttons,
+            text="Reveal",
+            command=self._reveal_selected_shared_source,
+        )
+        self.shared_reveal_button.pack(side=tk.LEFT, padx=(8, 0))
 
         web_frame = ttk.LabelFrame(
             self.sources_tab,
             text="Web picture sources — direct image URLs and RSS/Atom picture feeds (http/https), cached in the working folder",
         )
-        web_frame.pack(fill=tk.X, pady=(0, 1))
-        self.web_sources_text = tk.Text(web_frame, height=1, width=40)
-        self.web_sources_text.pack(fill=tk.X)
+        web_frame.pack(fill=tk.X)
+        self._web_sources_display: list[tuple[str, str]] = []
+        # height=1 keeps the fixed-geometry page unclipped in both themes;
+        # the 20-entry cap limits the list length the rows must represent.
+        # No column headers here: the shared list above carries the same
+        # headings, and each row's Type value (Image URL / Feed) is
+        # self-describing, so the header row would only cost vertical space.
+        self.web_sources_tree = ttk.Treeview(
+            web_frame,
+            columns=SOURCE_TREE_COLUMNS,
+            show="",
+            selectmode="browse",
+            height=1,
+        )
+        self._configure_source_tree(self.web_sources_tree)
+        self.web_sources_tree.pack(fill=tk.X)
         web_entry_row = ttk.Frame(web_frame)
         web_entry_row.pack(fill=tk.X)
         self.web_url_entry = ttk.Entry(web_entry_row)
@@ -859,6 +908,12 @@ class SettingsApp(tk.Tk):
         self.web_remove_button.pack(side=tk.LEFT, padx=(4, 0))
         self.web_refresh_button = ttk.Button(web_entry_row, text="Refresh Now", command=self._refresh_web_sources)
         self.web_refresh_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_reveal_button = ttk.Button(
+            web_entry_row,
+            text="Reveal",
+            command=self._reveal_selected_web_source,
+        )
+        self.web_reveal_button.pack(side=tk.LEFT, padx=(4, 0))
 
         self.layout_scope_label = ttk.Label(
             self.layout_tab,
@@ -1062,16 +1117,32 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
             wraplength=520,
         ).pack(anchor="w")
-        ttk.Button(monitor_frame, text="Add per-monitor folder...", command=self._add_monitor_folder_from_root).pack(
-            anchor="w", pady=(4, 2)
+        self.monitor_folders_data: dict[str, list[str]] = {}
+        self.monitor_assignments_tree = ttk.Treeview(
+            monitor_frame,
+            columns=("monitor", "location", "availability"),
+            show="headings",
+            selectmode="browse",
+            height=3,
         )
-        ttk.Button(monitor_frame, text="Remove per-monitor folder...", command=self._remove_monitor_folder_from_dialog).pack(
-            anchor="w", pady=(0, 2)
+        self._configure_assignments_tree(self.monitor_assignments_tree)
+        self.monitor_assignments_tree.pack(fill=tk.BOTH, expand=True)
+        monitor_buttons = ttk.Frame(monitor_frame)
+        monitor_buttons.pack(fill=tk.X, pady=(4, 0))
+        self.monitor_add_button = ttk.Button(
+            monitor_buttons, text="Add per-monitor folder...", command=self._add_monitor_folder_from_root
         )
-        ttk.Label(monitor_frame, text="Current assignments:").pack(anchor="w", pady=(4, 0))
-        self.monitor_text = tk.Text(monitor_frame, height=3, width=48)
-        self.monitor_text.pack(fill=tk.BOTH, expand=True)
+        self.monitor_add_button.pack(side=tk.LEFT)
+        self.monitor_remove_button = ttk.Button(
+            monitor_buttons, text="Remove per-monitor folder...", command=self._remove_monitor_folder_from_dialog
+        )
+        self.monitor_remove_button.pack(side=tk.LEFT, padx=4)
+        self.monitor_reveal_button = ttk.Button(
+            monitor_buttons, text="Reveal", command=self._reveal_selected_monitor_folder
+        )
+        self.monitor_reveal_button.pack(side=tk.LEFT, padx=4)
         self._refresh_layout_workspace()
+        self._refresh_monitor_assignments_view()
 
         self.overlays_scope_label = ttk.Label(
             self.overlays_tab,
@@ -1799,16 +1870,13 @@ class SettingsApp(tk.Tk):
         self.polaroid_span_var.set(profile.polaroid_span)
         self.polaroid_tilt_var.set(profile.polaroid_tilt)
         self.polaroid_captions_var.set(profile.polaroid_captions)
-        self.shared_text.delete("1.0", tk.END)
-        self.shared_text.insert(tk.END, "\n".join(profile.shared_folders))
-        web_text = vars(self).get("web_sources_text")
-        if web_text is not None:
-            web_text.delete("1.0", tk.END)
-            web_lines = [
-                f"{FEED_LINE_PREFIX}{entry['url']}" if entry["type"] == WEB_FEED_TYPE else entry["url"]
-                for entry in profile.web_sources
+        self._shared_sources_display = [str(p) for p in profile.shared_folders]
+        self._refresh_shared_sources_view()
+        if vars(self).get("web_sources_tree") is not None:
+            self._web_sources_display = [
+                (entry["type"], entry["url"]) for entry in profile.web_sources
             ]
-            web_text.insert(tk.END, "\n".join(web_lines))
+            self._refresh_web_sources_view()
             self.web_url_entry.delete(0, tk.END)
         self._write_monitor_folders({monitor: list(paths) for monitor, paths in profile.monitor_folders.items()})
         self.overlay_title_var.set(profile.overlay_title)
@@ -1942,29 +2010,125 @@ class SettingsApp(tk.Tk):
         text = "Polaroid photos across all screens:" if self.polaroid_span_var.get() else "Polaroid photos per screen:"
         self.polaroid_count_label.configure(text=text)
 
-    def _set_monitor_text(self, text: str) -> None:
+    # ------------------------------------------------------------------
+    # Structured source rows (roadmap increment 4). The tree views are
+    # read-only renderings of the display lists; edits go through the
+    # add/remove/reveal handlers so the config schema stays unchanged.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _source_availability(location: str) -> str:
+        """Availability label for a local source row (fail-open)."""
         try:
-            self.monitor_text.configure(state="normal")
+            return "Available" if Path(location).exists() else "Missing"
         except Exception:
-            pass
-        self.monitor_text.delete("1.0", tk.END)
-        self.monitor_text.insert(tk.END, text)
-        try:
-            self.monitor_text.configure(state="disabled")
-        except Exception:
-            pass
+            return "Missing"
 
-    def _parse_monitor_folders(self) -> dict[str, list[str]]:
-        result: dict[str, list[str]] = {}
-        for raw in self.monitor_text.get("1.0", tk.END).splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                raise ValueError(f"Monitor folder line must be MONITOR=/path/a;/path/b: {line!r}")
-            monitor, paths = line.split("=", 1)
-            result[monitor.strip()] = [p.strip() for p in paths.split(";") if p.strip()]
-        return result
+    def _shared_source_type(self, location: str) -> str:
+        """Human kind for one shared source row."""
+        path = Path(location)
+        try:
+            if path.is_dir():
+                return "Folder"
+            if path.is_file():
+                return "Picture"
+        except Exception:
+            pass
+        return "Picture" if path.suffix.lower() in _SOURCE_PICTURE_EXTENSIONS else "Folder"
+
+    @staticmethod
+    def _configure_source_tree(tree: "ttk.Treeview") -> None:
+        tree.heading("type", text="Type")
+        tree.heading("location", text="Location")
+        tree.heading("scope", text="Scope")
+        tree.heading("availability", text="Availability")
+        # Fixed column widths (no stretch): a stretch column re-requests the
+        # full allocation, and the clam theme's wider tree border then pushes
+        # winfo_reqwidth past the allocation by the border delta, clipping the
+        # row under the fixed 944x668 geometry. Fixed widths keep reqwidth
+        # deterministic and 20+ px inside the page width in both themes.
+        tree.column("type", width=88, stretch=False)
+        tree.column("location", width=560, stretch=False)
+        tree.column("scope", width=110, stretch=False)
+        tree.column("availability", width=120, stretch=False)
+
+    @staticmethod
+    def _configure_assignments_tree(tree: "ttk.Treeview") -> None:
+        tree.heading("monitor", text="Screen")
+        tree.heading("location", text="Folder")
+        tree.heading("availability", text="Availability")
+        # Fixed widths for the same clam-border margin reason as the source rows.
+        tree.column("monitor", width=160, stretch=False)
+        tree.column("location", width=480, stretch=False)
+        tree.column("availability", width=120, stretch=False)
+
+    def _refresh_shared_sources_view(self) -> None:
+        tree = vars(self).get("shared_sources_tree")
+        if tree is None:
+            return
+        scope = str(self.profile_var.get())
+        tree.delete(*tree.get_children())
+        for location in self._shared_sources_display:
+            tree.insert(
+                "",
+                tk.END,
+                values=(
+                    self._shared_source_type(location),
+                    location,
+                    scope,
+                    self._source_availability(location),
+                ),
+            )
+
+    def _refresh_web_sources_view(self) -> None:
+        tree = vars(self).get("web_sources_tree")
+        if tree is None:
+            return
+        scope = str(self.profile_var.get())
+        try:
+            cache_dir = web_source_cache_dir(Path(self.working_directory_var.get().strip() or "."))
+        except Exception:
+            cache_dir = None
+        tree.delete(*tree.get_children())
+        for kind, url in self._web_sources_display:
+            if cache_dir is None:
+                availability = "Not cached yet"
+            else:
+                count = web_source_cached_count(cache_dir, {"type": kind, "url": url})
+                availability = f"{count} cached" if count > 0 else "Not cached yet"
+            tree.insert(
+                "",
+                tk.END,
+                values=(_web_source_display_type(kind), url, scope, availability),
+            )
+
+    def _refresh_monitor_assignments_view(self) -> None:
+        tree = vars(self).get("monitor_assignments_tree")
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+        for monitor, paths in sorted(self._current_monitor_folders().items()):
+            for path in paths:
+                tree.insert(
+                    "",
+                    tk.END,
+                    values=(monitor, path, self._source_availability(path)),
+                )
+
+    def _selected_tree_location(self, tree: "ttk.Treeview") -> str | None:
+        """Location value of the single selected row, or None."""
+        selection = tree.selection()
+        if not selection:
+            return None
+        values = tree.item(selection[0], "values")
+        return str(values[1]) if len(values) > 1 else None
+
+    def _shared_sources_from_display(self, existing: "Profile | None") -> list[str]:
+        """Shared source paths for save; the saved list carries over when the
+        display list is absent (partial construction) so saving never wipes it."""
+        display = vars(self).get("_shared_sources_display")
+        if display is None:
+            return list(existing.shared_folders) if existing is not None else []
+        return [str(location).strip() for location in display if str(location).strip()]
 
     def _profile_from_fields(self, name: str) -> Profile:
         postcard_count_var = vars(self).get("postcard_count_var")
@@ -2137,26 +2301,23 @@ class SettingsApp(tk.Tk):
         existing = self.config_data.profiles.get(self.profile_var.get())
         excluded_images = list(existing.excluded_images) if existing is not None else []
         # Web sources live on the Sources page; carry the saved list forward when the
-        # widget is absent (partial construction) so saving never silently wipes URLs.
-        web_sources_text = vars(self).get("web_sources_text")
-        if web_sources_text is None:
+        # display list is absent (partial construction) so saving never silently wipes URLs.
+        web_sources_display = vars(self).get("_web_sources_display")
+        if web_sources_display is None:
             web_sources = list(existing.web_sources) if existing is not None else []
         else:
             web_sources: list[dict[str, str]] = []
             invalid_web_urls: list[str] = []
             seen_web_urls: set[str] = set()
-            for raw_line in str(web_sources_text.get("1.0", tk.END)).split("\n"):
-                line = raw_line.strip()
-                if not line:
-                    continue
-                kind, candidate = _split_web_source_line(line)
+            for kind, candidate in web_sources_display:
                 url = validate_web_url(candidate)
                 if url is None:
-                    invalid_web_urls.append(line)
+                    invalid_web_urls.append(str(candidate))
                     continue
                 if url in seen_web_urls:
                     continue
                 seen_web_urls.add(url)
+                kind = WEB_FEED_TYPE if kind == WEB_FEED_TYPE else WEB_SOURCE_TYPE
                 web_sources.append({"type": kind, "url": url})
             if len(web_sources) > MAX_WEB_SOURCES:
                 raise ValueError(f"A profile can list at most {MAX_WEB_SOURCES} web sources.")
@@ -2219,7 +2380,7 @@ class SettingsApp(tk.Tk):
             suppress_when_locked=suppress_when_locked,
             postcard_captions=postcard_captions,
             polaroid_captions=polaroid_captions,
-            shared_folders=[p.strip() for p in self.shared_text.get("1.0", tk.END).split("\n") if p.strip()],
+            shared_folders=self._shared_sources_from_display(existing),
             monitor_folders={monitor: list(paths) for monitor, paths in self._current_monitor_folders().items()},
             black_hotkey=self.hotkey_var.get().strip() or DEFAULT_BLACK_HOTKEY,
             next_hotkey=next_hotkey,
@@ -2352,19 +2513,6 @@ class SettingsApp(tk.Tk):
         values = sorted(self.config_data.profiles)
         self.profile_combo.configure(values=values)
 
-    def _append_text_line(self, text_widget: tk.Text, value: str) -> None:
-        value = value.strip()
-        if not value:
-            return
-        existing = [line.strip() for line in text_widget.get("1.0", tk.END).split("\n") if line.strip()]
-        if value in existing:
-            return
-        current = text_widget.get("1.0", tk.END).strip()
-        if current:
-            text_widget.insert(tk.END, "\n" + value)
-        else:
-            text_widget.insert(tk.END, value)
-
     def _selected_public_collection(self) -> public_collections.PublicCollection:
         selected_name = self.collections_name_var.get()
         for collection in public_collections.PUBLIC_COLLECTIONS:
@@ -2476,10 +2624,19 @@ class SettingsApp(tk.Tk):
     def _add_shared_folder(self, *, initialdir: str | None = None, title: str | None = None) -> None:
         folder = self._ask_folder(initialdir=initialdir, title=title)
         if folder:
-            self._append_text_line(self.shared_text, folder)
+            self._append_shared_source(folder)
 
     def _add_shared_folder_from_root(self) -> None:
         self._add_shared_folder(initialdir="/", title="Add a wallpaper folder from any mounted drive")
+
+    def _append_shared_source(self, location: str) -> bool:
+        """Add one shared source row (deduped). Returns False on duplicates."""
+        location = location.strip()
+        if not location or location in self._shared_sources_display:
+            return False
+        self._shared_sources_display.append(location)
+        self._refresh_shared_sources_view()
+        return True
 
     def _ask_picture(self) -> str:
         pictures = Path.home() / "Pictures"
@@ -2500,21 +2657,15 @@ class SettingsApp(tk.Tk):
             return
         try:
             picture = _selected_source_picture(selected)
-            existing = {
-                line.strip()
-                for line in self.shared_text.get("1.0", tk.END).split("\n")
-                if line.strip()
-            }
-            if str(picture) in existing:
-                messagebox.showinfo(
-                    "Picture already listed",
-                    f"This picture is already in the shared source list:\n{picture}",
-                    parent=self,
-                )
-                return
-            self._append_text_line(self.shared_text, str(picture))
         except Exception as exc:
             messagebox.showerror("Could not add picture", str(exc), parent=self)
+            return
+        if not self._append_shared_source(str(picture)):
+            messagebox.showinfo(
+                "Picture already listed",
+                f"This picture is already in the shared source list:\n{picture}",
+                parent=self,
+            )
             return
         messagebox.showinfo(
             "Picture added",
@@ -2522,24 +2673,66 @@ class SettingsApp(tk.Tk):
             parent=self,
         )
 
-    def _web_source_urls_from_text(self) -> list[str]:
-        text = vars(self).get("web_sources_text")
-        if text is None:
-            return []
-        return [line.strip() for line in str(text.get("1.0", tk.END)).split("\n") if line.strip()]
+    def _remove_selected_shared_source(self) -> None:
+        if self._any_worker_busy():
+            return
+        location = self._selected_tree_location(self.shared_sources_tree)
+        if location is None:
+            messagebox.showinfo(
+                "Select a source row first",
+                "Select a row in the shared source list, then choose Remove Selected.",
+                parent=self,
+            )
+            return
+        if location not in self._shared_sources_display:
+            self._refresh_shared_sources_view()
+            return
+        self._shared_sources_display.remove(location)
+        self._refresh_shared_sources_view()
+        messagebox.showinfo(
+            "Source removed",
+            f"Removed:\n{location}\n\nChoose Save Profile to keep this profile change.",
+            parent=self,
+        )
 
-    def _web_source_entries_from_text(self) -> list[tuple[str, str]]:
-        """Parse the list into (kind, url) pairs; invalid lines are dropped.
+    def _reveal_selected_shared_source(self) -> None:
+        location = self._selected_tree_location(self.shared_sources_tree)
+        if location is None:
+            messagebox.showinfo(
+                "Select a source row first",
+                "Select a row in the shared source list, then choose Reveal.",
+                parent=self,
+            )
+            return
+        path = Path(location)
+        try:
+            if path.is_dir():
+                _open_desktop_target(
+                    path,
+                    failure_subject="the selected source folder",
+                    recovery="Check the desktop file manager.",
+                )
+            elif path.is_file():
+                _open_desktop_target(
+                    path.parent,
+                    failure_subject="the selected picture's containing folder",
+                    recovery="Check the desktop file manager.",
+                )
+            else:
+                messagebox.showerror(
+                    "Source not found",
+                    f"This source no longer exists:\n{location}\n\nRemove the row if you no longer want it in the profile.",
+                    parent=self,
+                )
+        except Exception as exc:
+            messagebox.showerror("Could not reveal source", str(exc), parent=self)
 
-        Feed lines carry a ``[feed] `` prefix so both provider types share
-        one list box.
-        """
+    def _web_source_entries(self) -> list[tuple[str, str]]:
+        """Current (kind, url) pairs from the web source rows, deduped by URL."""
         entries: list[tuple[str, str]] = []
         seen: set[str] = set()
-        for line in self._web_source_urls_from_text():
-            kind, candidate = _split_web_source_line(line)
-            url = validate_web_url(candidate)
-            if url is None or url in seen:
+        for kind, url in self._web_sources_display:
+            if url in seen:
                 continue
             seen.add(url)
             entries.append((kind, url))
@@ -2568,7 +2761,7 @@ class SettingsApp(tk.Tk):
                 parent=self,
             )
             return
-        existing = [url for _kind, url in self._web_source_entries_from_text()]
+        existing = [url for _kind, url in self._web_source_entries()]
         if url in existing:
             messagebox.showinfo("Web source already listed", f"That URL is already listed:\n{url}", parent=self)
             return
@@ -2579,8 +2772,8 @@ class SettingsApp(tk.Tk):
                 parent=self,
             )
             return
-        line = f"{FEED_LINE_PREFIX}{url}" if is_feed else url
-        self._append_text_line(self.web_sources_text, line)
+        self._web_sources_display.append((kind, url))
+        self._refresh_web_sources_view()
         self.web_url_entry.delete(0, tk.END)
         what = "RSS/Atom feed" if is_feed else "web source"
         messagebox.showinfo(
@@ -2592,48 +2785,55 @@ class SettingsApp(tk.Tk):
     def _remove_selected_web_source(self) -> None:
         if self._any_worker_busy():
             return
-        text = self.web_sources_text
-        try:
-            selection = text.tag_ranges(tk.SEL)
-        except tk.TclError:
-            selection = ()
-        if not selection:
+        url = self._selected_tree_location(self.web_sources_tree)
+        if url is None:
             messagebox.showinfo(
                 "Select a web source first",
-                "Select a URL line in the list, then choose Remove Selected.",
+                "Select a row in the web source list, then choose Remove Selected.",
                 parent=self,
             )
             return
-        line_start = text.index(f"{selection[0]} linestart")
-        line_end = text.index(f"{selection[0]} lineend")
-        removed = text.get(line_start, line_end).strip()
-        # Delete the whole line without leaving a blank line behind: middle lines
-        # lose their trailing newline, the last real line its preceding one.
-        is_last_real = f"{line_end} +1c" == text.index("end")
-        if is_last_real:
-            start_index = line_start if line_start == "1.0" else f"{line_start} -1c"
-            end_index = line_end
-        else:
-            start_index = line_start
-            end_index = f"{line_end} +1c"
-        text.delete(start_index, end_index)
+        matching = [entry for entry in self._web_sources_display if entry[1] == url]
+        if not matching:
+            self._refresh_web_sources_view()
+            return
+        self._web_sources_display.remove(matching[0])
+        self._refresh_web_sources_view()
         messagebox.showinfo(
             "Web source removed",
-            f"Removed:\n{removed}\n\nChoose Save Profile to keep this profile change.",
+            f"Removed:\n{url}\n\nChoose Save Profile to keep this profile change.",
             parent=self,
         )
 
-    def _web_sources_text_matches_saved(self) -> bool:
-        if vars(self).get("web_sources_text") is None:
+    def _reveal_selected_web_source(self) -> None:
+        url = self._selected_tree_location(self.web_sources_tree)
+        if url is None:
+            messagebox.showinfo(
+                "Select a web source first",
+                "Select a row in the web source list, then choose Reveal.",
+                parent=self,
+            )
+            return
+        try:
+            _open_desktop_target(
+                Path(url),
+                failure_subject="the selected web source URL",
+                recovery="Check the default web browser.",
+            )
+        except Exception as exc:
+            messagebox.showerror("Could not reveal web source", str(exc), parent=self)
+
+    def _web_sources_display_matches_saved(self) -> bool:
+        if vars(self).get("_web_sources_display") is None:
             return True
         profile = self.config_data.profiles.get(self.profile_var.get())
         saved = [(entry["type"], entry["url"]) for entry in profile.web_sources] if profile is not None else []
-        return self._web_source_entries_from_text() == saved
+        return self._web_source_entries() == saved
 
     def _refresh_web_sources(self) -> None:
         if self._any_worker_busy() or self._web_refresh_busy:
             return
-        if not self._web_sources_text_matches_saved():
+        if not self._web_sources_display_matches_saved():
             messagebox.showinfo(
                 "Unsaved web sources",
                 "Choose Save Profile first so the listed URLs are kept, then Refresh Now.",
@@ -2686,12 +2886,11 @@ class SettingsApp(tk.Tk):
         data = self._optional_attr("monitor_folders_data")
         if isinstance(data, dict):
             return {str(monitor): [str(path) for path in paths] for monitor, paths in data.items()}
-        return self._parse_monitor_folders()
+        return {}
 
     def _write_monitor_folders(self, folders: dict[str, list[str]]) -> None:
         self.monitor_folders_data = {str(monitor): list(paths) for monitor, paths in folders.items() if paths}
-        lines = [f"{mon}=" + ";".join(paths) for mon, paths in sorted(self.monitor_folders_data.items())]
-        self._set_monitor_text("\n".join(lines))
+        self._refresh_monitor_assignments_view()
 
     def _insert_monitor_folder(self, monitor: str, folder: str) -> None:
         monitor = monitor.strip()
@@ -2772,6 +2971,32 @@ class SettingsApp(tk.Tk):
             return
         monitor, folder = choice
         self._remove_monitor_folder(monitor, folder)
+
+    def _reveal_selected_monitor_folder(self) -> None:
+        location = self._selected_tree_location(self.monitor_assignments_tree)
+        if location is None:
+            messagebox.showinfo(
+                "Select an assignment first",
+                "Select a row in the per-monitor assignments, then choose Reveal.",
+                parent=self,
+            )
+            return
+        path = Path(location)
+        try:
+            if not path.is_dir():
+                messagebox.showerror(
+                    "Source not found",
+                    f"This per-monitor folder no longer exists:\n{location}\n\nRemove the assignment if you no longer want it.",
+                    parent=self,
+                )
+                return
+            _open_desktop_target(
+                path,
+                failure_subject="the selected per-monitor folder",
+                recovery="Check the desktop file manager.",
+            )
+        except Exception as exc:
+            messagebox.showerror("Could not reveal folder", str(exc), parent=self)
 
     def _available_monitor_names(self) -> list[str]:
         names = list(dict.fromkeys(self._optional_attr("monitor_names", []) or []))
@@ -2910,6 +3135,8 @@ class SettingsApp(tk.Tk):
             self.shared_add_folder_button,
             self.shared_add_picture_button,
             self.shared_browse_drives_button,
+            self.shared_remove_button,
+            self.shared_reveal_button,
             self.working_browse_button,
             self.working_create_button,
             self.working_use_button,
@@ -2925,6 +3152,7 @@ class SettingsApp(tk.Tk):
             self.web_add_url_button,
             self.web_remove_button,
             self.web_refresh_button,
+            self.web_reveal_button,
         ):
             button.state(["disabled"] if busy else ["!disabled"])
         for control in (
@@ -3256,7 +3484,7 @@ class SettingsApp(tk.Tk):
 
                     source_note = "The profile source list was not changed."
                     if self.collections_add_source_var.get():
-                        self._append_text_line(self.shared_text, str(result.destination))
+                        self._append_shared_source(str(result.destination))
                         if self._save_current(show_success=False):
                             source_note = "The collection folder was added to the selected profile and saved."
                         else:
@@ -3318,6 +3546,8 @@ class SettingsApp(tk.Tk):
                             ),
                             parent=self,
                         )
+                    # Re-render availability (N cached) from the updated cache.
+                    self._refresh_web_sources_view()
                     continue
                 if kind == "apply-progress":
                     count, _path = result

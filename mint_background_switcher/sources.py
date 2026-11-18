@@ -179,6 +179,24 @@ def web_source_stem(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
 
 
+def web_source_cached_count(cache_dir: Path, entry: dict[str, str]) -> int:
+    """Count cache files currently held for one configured web source entry.
+
+    A direct URL counts its own cached image; a feed counts the cached
+    pictures its sidecar still lists. Fail-open: a missing or unreadable
+    cache directory reports zero, and callers treat zero as "not cached yet".
+    """
+    try:
+        url = entry["url"]
+        if entry.get("type") == WEB_FEED_TYPE:
+            stems = _read_feed_sidecar(_feed_sidecar_path(Path(cache_dir), url))
+        else:
+            stems = {web_source_stem(url)}
+        return sum(1 for stem in stems if _find_existing(Path(cache_dir), stem) is not None)
+    except Exception:
+        return 0
+
+
 def _describe_error(exc: Exception, url: str) -> str:
     reason = str(exc) or exc.__class__.__name__
     return f"{reason} ({url})"
