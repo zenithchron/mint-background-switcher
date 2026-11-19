@@ -716,7 +716,7 @@ class SettingsApp(tk.Tk):
         self.profile_context_frame = ttk.LabelFrame(
             root,
             text="Profile and layout",
-            padding=(6, 6),
+            padding=(2, 4),
         )
         self.profile_context_frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(self.profile_context_frame, text="Profile:").grid(row=0, column=0, sticky="w")
@@ -725,37 +725,37 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_var,
             values=sorted(self.config_data.profiles),
             state="readonly",
-            width=12,
+            width=7,
         )
-        self.profile_combo.grid(row=0, column=1, sticky="w", padx=(4, 6))
+        self.profile_combo.grid(row=0, column=1, sticky="w", padx=(2, 4))
         self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_selected)
         self.profile_new_button = ttk.Button(
             self.profile_context_frame,
             text="New",
             command=self._new_profile,
         )
-        self.profile_new_button.grid(row=0, column=2, padx=1)
+        self.profile_new_button.grid(row=0, column=2, padx=0)
         self.profile_rename_button = ttk.Button(
             self.profile_context_frame,
             text="Edit",
             command=self._rename_profile,
         )
-        self.profile_rename_button.grid(row=0, column=3, padx=1)
+        self.profile_rename_button.grid(row=0, column=3, padx=0)
         self.profile_delete_button = ttk.Button(
             self.profile_context_frame,
             text="Delete",
             command=self._delete_profile,
         )
-        self.profile_delete_button.grid(row=0, column=4, padx=1)
+        self.profile_delete_button.grid(row=0, column=4, padx=0)
         # Unsaved-changes indicator (empty while the loaded profile matches the fields).
         ttk.Label(self.profile_context_frame, textvariable=self.unsaved_var).grid(
-            row=0, column=5, sticky="w", padx=(2, 0)
+            row=0, column=5, sticky="w"
         )
         ttk.Label(self.profile_context_frame, text="Layout:").grid(
             row=0,
             column=7,
             sticky="e",
-            padx=(6, 0),
+            padx=(4, 0),
         )
         self.mode_menu = ttk.OptionMenu(
             self.profile_context_frame,
@@ -764,13 +764,13 @@ class SettingsApp(tk.Tk):
             *LAYOUT_CHOICES,
             command=lambda selected: self._select_layout(str(selected)),
         )
-        self.mode_menu.grid(row=0, column=8, sticky="w", padx=4)
+        self.mode_menu.grid(row=0, column=8, sticky="w", padx=2)
         self.profile_save_button = ttk.Button(
             self.profile_context_frame,
             text="Save Profile",
             command=self._save_current,
         )
-        self.profile_save_button.grid(row=0, column=9, sticky="e", padx=(6, 0))
+        self.profile_save_button.grid(row=0, column=9, sticky="e", padx=(4, 0))
         self.profile_context_frame.columnconfigure(6, weight=1)
 
         self.notebook = TwoRowNotebook(root)
