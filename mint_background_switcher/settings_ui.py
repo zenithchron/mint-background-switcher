@@ -710,7 +710,7 @@ class SettingsApp(tk.Tk):
         self.minsize(min_width, min_height)
 
     def _build(self) -> None:
-        root = ttk.Frame(self, padding=8)
+        root = ttk.Frame(self, padding=6)
         root.pack(fill=tk.BOTH, expand=True)
 
         self.profile_context_frame = ttk.LabelFrame(
@@ -1836,7 +1836,7 @@ class SettingsApp(tk.Tk):
         bottom = ttk.Frame(root)
         bottom.pack(fill=tk.X)
         self.apply_button = ttk.Button(bottom, text="Save & Apply Now", command=self._apply_next)
-        self.apply_button.pack(side=tk.LEFT, padx=1)
+        self.apply_button.pack(side=tk.LEFT, padx=0)
         # Reverts pending profile edits to the last saved values (safe edit
         # lifecycle); enabled only while the loaded profile differs from the fields.
         self.profile_revert_button = ttk.Button(
@@ -1845,27 +1845,27 @@ class SettingsApp(tk.Tk):
             command=self._revert_current,
             state=tk.DISABLED,
         )
-        self.profile_revert_button.pack(side=tk.LEFT, padx=1)
+        self.profile_revert_button.pack(side=tk.LEFT, padx=0)
         self.black_button = ttk.Button(bottom, text="Black Screen", command=self._black_screen)
-        self.black_button.pack(side=tk.LEFT, padx=1)
-        self.export_button = ttk.Button(bottom, text="Save Wallpaper...", command=self._export_current_wallpaper)
-        self.export_button.pack(side=tk.LEFT, padx=1)
+        self.black_button.pack(side=tk.LEFT, padx=0)
+        self.export_button = ttk.Button(bottom, text="Save Wallpaper", command=self._export_current_wallpaper)
+        self.export_button.pack(side=tk.LEFT, padx=0)
         self.current_pictures_button = ttk.Button(
             bottom,
-            text="View Pictures...",
+            text="View Pictures",
             command=self._view_current_pictures,
         )
-        self.current_pictures_button.pack(side=tk.LEFT, padx=1)
+        self.current_pictures_button.pack(side=tk.LEFT, padx=0)
         self.close_button = ttk.Button(bottom, text="Close", command=self._request_close)
-        self.close_button.pack(side=tk.RIGHT, padx=1)
+        self.close_button.pack(side=tk.RIGHT, padx=0)
         self.about_button = ttk.Button(
             bottom,
-            text="Updates & About",
+            text="About",
             command=lambda: self.notebook.select(self.about_tab),
         )
-        self.about_button.pack(side=tk.RIGHT, padx=1)
+        self.about_button.pack(side=tk.RIGHT, padx=0)
         self.footer_version_label = ttk.Label(bottom, text=f"v{__version__}")
-        self.footer_version_label.pack(side=tk.RIGHT, padx=(2, 4))
+        self.footer_version_label.pack(side=tk.RIGHT, padx=(0, 2))
         self._refresh_rollback_button()
         self._refresh_update_status()
 
