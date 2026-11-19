@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import copy
+import dataclasses
 import queue
 import shlex
 import shutil
@@ -522,6 +524,57 @@ class TwoRowNotebook(ttk.Frame):
 
 
 class SettingsApp(tk.Tk):
+    # Fields that feed _profile_from_fields; changes to any of them make the
+    # loaded profile dirty (safe edit lifecycle, roadmap increment 5).
+    _PROFILE_FIELD_VARS = (
+        "interval_var",
+        "mode_var",
+        "recursive_var",
+        "min_image_size_var",
+        "ignore_hidden_var",
+        "ignore_patterns_var",
+        "image_types_var",
+        "sequential_var",
+        "match_orientation_var",
+        "rotate_on_startup_var",
+        "night_black_screen_var",
+        "night_start_var",
+        "night_end_var",
+        "mirror_lockscreen_var",
+        "suppress_process_var",
+        "suppress_process_name_var",
+        "suppress_battery_var",
+        "suppress_remote_var",
+        "idle_only_var",
+        "idle_seconds_var",
+        "suppress_locked_var",
+        "hotkey_var",
+        "next_hotkey_var",
+        "pause_hotkey_var",
+        "previous_hotkey_var",
+        "redraw_hotkey_var",
+        "post_switch_command_var",
+        "desktop_var",
+        "effect_var",
+        "bar_color_var",
+        "fit_mode_var",
+        "postcard_background_var",
+        "postcard_count_var",
+        "postcard_size_var",
+        "postcard_span_var",
+        "postcard_tilt_var",
+        "postcard_captions_var",
+        "polaroid_count_var",
+        "polaroid_size_var",
+        "polaroid_span_var",
+        "polaroid_tilt_var",
+        "polaroid_captions_var",
+        "overlay_title_var",
+        "overlay_artist_var",
+        "overlay_date_var",
+        "overlay_calendar_var",
+    )
+
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{APP_NAME} Settings — {__version__}")
@@ -595,6 +648,8 @@ class SettingsApp(tk.Tk):
         self.working_directory_var = tk.StringVar(value=str(working_directory))
         self.working_status_var = tk.StringVar(value=_active_working_directory_status(working_directory))
         self.backup_status_var = tk.StringVar(value="No export, import, or reset done yet in this session.")
+        self.unsaved_var = tk.StringVar(value="")
+        self._loaded_profile: Profile | None = None
         self.monitor_folders_data: dict[str, list[str]] = {}
         self._update_busy = False
         self._update_worker: threading.Thread | None = None
@@ -623,6 +678,11 @@ class SettingsApp(tk.Tk):
         self.mode_var.trace_add("write", self._refresh_layout_workspace)
         self.postcard_span_var.trace_add("write", self._refresh_postcard_count_label)
         self.polaroid_span_var.trace_add("write", self._refresh_polaroid_count_label)
+        # Safe edit lifecycle (roadmap increment 5): every field that feeds
+        # _profile_from_fields reports changes so the unsaved-changes
+        # indicator stays in step with the pending profile edit.
+        for var_name in self._PROFILE_FIELD_VARS:
+            getattr(self, var_name).trace_add("write", self._on_profile_field_change)
         self._refresh_profile_scope_labels()
         self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._load_profile(self.profile_var.get())
@@ -665,36 +725,37 @@ class SettingsApp(tk.Tk):
             textvariable=self.profile_var,
             values=sorted(self.config_data.profiles),
             state="readonly",
-            width=14,
+            width=12,
         )
         self.profile_combo.grid(row=0, column=1, sticky="w", padx=(4, 6))
-        self.profile_combo.bind(
-            "<<ComboboxSelected>>",
-            lambda _e: self._load_profile(self.profile_var.get()),
-        )
+        self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_selected)
         self.profile_new_button = ttk.Button(
             self.profile_context_frame,
             text="New",
             command=self._new_profile,
         )
-        self.profile_new_button.grid(row=0, column=2, padx=2)
+        self.profile_new_button.grid(row=0, column=2, padx=1)
         self.profile_rename_button = ttk.Button(
             self.profile_context_frame,
             text="Edit",
             command=self._rename_profile,
         )
-        self.profile_rename_button.grid(row=0, column=3, padx=2)
+        self.profile_rename_button.grid(row=0, column=3, padx=1)
         self.profile_delete_button = ttk.Button(
             self.profile_context_frame,
             text="Delete",
             command=self._delete_profile,
         )
-        self.profile_delete_button.grid(row=0, column=4, padx=2)
+        self.profile_delete_button.grid(row=0, column=4, padx=1)
+        # Unsaved-changes indicator (empty while the loaded profile matches the fields).
+        ttk.Label(self.profile_context_frame, textvariable=self.unsaved_var).grid(
+            row=0, column=5, sticky="w", padx=(2, 0)
+        )
         ttk.Label(self.profile_context_frame, text="Layout:").grid(
             row=0,
-            column=6,
+            column=7,
             sticky="e",
-            padx=(8, 0),
+            padx=(6, 0),
         )
         self.mode_menu = ttk.OptionMenu(
             self.profile_context_frame,
@@ -703,14 +764,14 @@ class SettingsApp(tk.Tk):
             *LAYOUT_CHOICES,
             command=lambda selected: self._select_layout(str(selected)),
         )
-        self.mode_menu.grid(row=0, column=7, sticky="w", padx=5)
+        self.mode_menu.grid(row=0, column=8, sticky="w", padx=4)
         self.profile_save_button = ttk.Button(
             self.profile_context_frame,
             text="Save Profile",
             command=self._save_current,
         )
-        self.profile_save_button.grid(row=0, column=8, sticky="e", padx=(8, 0))
-        self.profile_context_frame.columnconfigure(5, weight=1)
+        self.profile_save_button.grid(row=0, column=9, sticky="e", padx=(6, 0))
+        self.profile_context_frame.columnconfigure(6, weight=1)
 
         self.notebook = TwoRowNotebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
@@ -1199,6 +1260,11 @@ class SettingsApp(tk.Tk):
         )
         self.overlay_calendar_position_combo.set(OVERLAY_CALENDAR_POSITION_CHOICES[0][0])
         self.overlay_calendar_position_combo.pack(side=tk.LEFT)
+        # The dirty-state snapshot reads this combo directly (its StringVar is
+        # not written on selection), so refresh the indicator explicitly.
+        self.overlay_calendar_position_combo.bind(
+            "<<ComboboxSelected>>", self._on_profile_field_change
+        )
         overlay_zones_frame = ttk.LabelFrame(self.overlays_tab, text="No-draw zones", padding=(10, 6))
         overlay_zones_frame.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(
@@ -1771,6 +1837,15 @@ class SettingsApp(tk.Tk):
         bottom.pack(fill=tk.X)
         self.apply_button = ttk.Button(bottom, text="Save & Apply Now", command=self._apply_next)
         self.apply_button.pack(side=tk.LEFT, padx=1)
+        # Reverts pending profile edits to the last saved values (safe edit
+        # lifecycle); enabled only while the loaded profile differs from the fields.
+        self.profile_revert_button = ttk.Button(
+            bottom,
+            text="Revert",
+            command=self._revert_current,
+            state=tk.DISABLED,
+        )
+        self.profile_revert_button.pack(side=tk.LEFT, padx=1)
         self.black_button = ttk.Button(bottom, text="Black Screen", command=self._black_screen)
         self.black_button.pack(side=tk.LEFT, padx=1)
         self.export_button = ttk.Button(bottom, text="Save Wallpaper...", command=self._export_current_wallpaper)
@@ -1895,6 +1970,11 @@ class SettingsApp(tk.Tk):
         self._refresh_no_draw_zones_list()
         self.no_draw_zones_status_var.set("")
         self._refresh_excluded_tab()
+        # Safe edit lifecycle: the loaded profile is the baseline for the
+        # dirty-state comparison; copy it so later config replacements or
+        # in-memory updates (for example exclusion syncs) cannot move it.
+        self._loaded_profile = copy.deepcopy(profile)
+        self._refresh_unsaved_indicator()
 
     def _refresh_excluded_tab(self) -> None:
         """Reload the Never Show Again page from the saved config and state."""
@@ -2421,12 +2501,99 @@ class SettingsApp(tk.Tk):
             self.config_data.active_profile = name
             save_config(self.config_data)
             self._refresh_profiles()
+            # The saved values become the new dirty-state baseline.
+            self._loaded_profile = copy.deepcopy(profile)
+            self._refresh_unsaved_indicator()
             if show_success:
                 messagebox.showinfo("Saved", f"Saved profile {name!r}.")
             return True
         except Exception as exc:
             messagebox.showerror("Save failed", str(exc))
             return False
+
+    def _on_profile_field_change(self, *_args: object) -> None:
+        self._refresh_unsaved_indicator()
+
+    @staticmethod
+    def _profile_edit_fields(profile: Profile) -> dict[str, Any]:
+        """The saved-profile fields that pending edits can change.
+
+        ``excluded_images`` is persisted immediately by the Never Show Again
+        page, and ``name`` identifies the profile rather than a pending edit
+        (renaming has its own explicit save path), so neither marks the
+        profile dirty.
+        """
+        data = dataclasses.asdict(profile)
+        data.pop("excluded_images", None)
+        data.pop("name", None)
+        return data
+
+    def _current_profile_snapshot(self) -> Profile | None:
+        """Build the profile from the current fields, or None when invalid."""
+        try:
+            return self._profile_from_fields(self.profile_var.get())
+        except ValueError:
+            return None
+
+    def profile_is_dirty(self) -> bool:
+        loaded = vars(self).get("_loaded_profile")
+        if loaded is None:
+            return False
+        current = self._current_profile_snapshot()
+        if current is None:
+            # An invalid edit cannot match the saved values.
+            return True
+        return self._profile_edit_fields(current) != self._profile_edit_fields(loaded)
+
+    def _refresh_unsaved_indicator(self) -> None:
+        unsaved_var = vars(self).get("unsaved_var")
+        if unsaved_var is None:
+            return
+        dirty = self.profile_is_dirty()
+        unsaved_var.set("Unsaved" if dirty else "")
+        revert_button = vars(self).get("profile_revert_button")
+        if revert_button is not None:
+            enabled = dirty and not self._any_worker_busy()
+            revert_button.state(["!disabled"] if enabled else ["disabled"])
+
+    def _revert_current(self) -> None:
+        if self._any_worker_busy():
+            return
+        loaded = vars(self).get("_loaded_profile")
+        if loaded is None or not self.profile_is_dirty():
+            return
+        self.profile_var.set(loaded.name)
+        self._load_profile(loaded.name)
+
+    def _on_profile_selected(self, _event: object = None) -> None:
+        loaded = vars(self).get("_loaded_profile")
+        loaded_name = loaded.name if loaded is not None else self.profile_var.get()
+        new_name = self.profile_var.get()
+        if new_name == loaded_name:
+            return
+        if not self.profile_is_dirty():
+            self._load_profile(new_name)
+            return
+        save = messagebox.askyesnocancel(
+            "Unsaved changes",
+            (
+                f"Profile {loaded_name!r} has unsaved changes.\n\n"
+                f"Save them before switching to {new_name!r}?"
+            ),
+            parent=self,
+        )
+        if save is None:
+            # Cancel: keep the loaded profile and restore the selection.
+            self.profile_var.set(loaded_name)
+            return
+        if save:
+            # Save the pending edits under the profile that owns them, then
+            # switch; a failed save keeps the user on the current profile.
+            self.profile_var.set(loaded_name)
+            if not self._save_current(show_success=False):
+                return
+        self.profile_var.set(new_name)
+        self._load_profile(new_name)
 
     def _ask_profile_name(self, title: str, prompt: str, *, initialvalue: str = "") -> str | None:
         return simpledialog.askstring(title, prompt, initialvalue=initialvalue, parent=self)
@@ -2636,6 +2803,7 @@ class SettingsApp(tk.Tk):
             return False
         self._shared_sources_display.append(location)
         self._refresh_shared_sources_view()
+        self._refresh_unsaved_indicator()
         return True
 
     def _ask_picture(self) -> str:
@@ -2689,6 +2857,7 @@ class SettingsApp(tk.Tk):
             return
         self._shared_sources_display.remove(location)
         self._refresh_shared_sources_view()
+        self._refresh_unsaved_indicator()
         messagebox.showinfo(
             "Source removed",
             f"Removed:\n{location}\n\nChoose Save Profile to keep this profile change.",
@@ -2775,6 +2944,7 @@ class SettingsApp(tk.Tk):
         self._web_sources_display.append((kind, url))
         self._refresh_web_sources_view()
         self.web_url_entry.delete(0, tk.END)
+        self._refresh_unsaved_indicator()
         what = "RSS/Atom feed" if is_feed else "web source"
         messagebox.showinfo(
             "Web source added",
@@ -2799,6 +2969,7 @@ class SettingsApp(tk.Tk):
             return
         self._web_sources_display.remove(matching[0])
         self._refresh_web_sources_view()
+        self._refresh_unsaved_indicator()
         messagebox.showinfo(
             "Web source removed",
             f"Removed:\n{url}\n\nChoose Save Profile to keep this profile change.",
@@ -2891,6 +3062,7 @@ class SettingsApp(tk.Tk):
     def _write_monitor_folders(self, folders: dict[str, list[str]]) -> None:
         self.monitor_folders_data = {str(monitor): list(paths) for monitor, paths in folders.items() if paths}
         self._refresh_monitor_assignments_view()
+        self._refresh_unsaved_indicator()
 
     def _insert_monitor_folder(self, monitor: str, folder: str) -> None:
         monitor = monitor.strip()
@@ -3103,6 +3275,7 @@ class SettingsApp(tk.Tk):
         for entry in (self.no_draw_x_entry, self.no_draw_y_entry, self.no_draw_w_entry, self.no_draw_h_entry):
             entry.delete(0, tk.END)
         self.no_draw_zones_status_var.set(f"Added zone: {self._zone_display_label(*zone)}. Save the profile to keep it.")
+        self._refresh_unsaved_indicator()
 
     def _remove_selected_no_draw_zone(self) -> None:
         selection = self.no_draw_zones_list.curselection()
@@ -3112,6 +3285,7 @@ class SettingsApp(tk.Tk):
         removed = self._no_draw_zones_display.pop(selection[0])
         self._refresh_no_draw_zones_list()
         self.no_draw_zones_status_var.set(f"Removed zone: {self._zone_display_label(*removed)}. Save the profile to keep it.")
+        self._refresh_unsaved_indicator()
 
     def _any_worker_busy(self) -> bool:
         return bool(
@@ -3173,6 +3347,9 @@ class SettingsApp(tk.Tk):
         else:
             self.update_button.state(["!disabled"])
             self._refresh_rollback_button()
+        # The Revert button is governed by the dirty state; recompute it here
+        # so worker-busy changes keep it disabled while an operation runs.
+        self._refresh_unsaved_indicator()
 
     def _browse_working_directory(self) -> None:
         current = Path(self.working_directory_var.get().strip() or "/").expanduser()
@@ -3992,6 +4169,18 @@ class SettingsApp(tk.Tk):
                 parent=self,
             )
             return
+        if self.profile_is_dirty():
+            name = self.profile_var.get()
+            save = messagebox.askyesnocancel(
+                "Unsaved changes",
+                f"Profile {name!r} has unsaved changes.\n\nSave them before closing Settings?",
+                parent=self,
+            )
+            if save is None:
+                return
+            if save and not self._save_current(show_success=False):
+                # The save failed and reported its error; keep Settings open.
+                return
         self.destroy()
 
     def _start_update_task(
@@ -4249,8 +4438,10 @@ class SettingsApp(tk.Tk):
     def _black_screen(self) -> None:
         if self._any_worker_busy():
             return
-        if not self._save_current(show_success=False):
-            return
+        # Emergency privacy action: the black screen is applied from the
+        # saved settings without persisting unrelated pending profile edits
+        # (safe edit lifecycle, roadmap increment 5). The sticky black-screen
+        # behavior itself is unchanged.
         profile_name = self.profile_var.get()
         self._apply_cancel.clear()
         self._set_apply_busy(True)

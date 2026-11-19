@@ -194,6 +194,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         )
         footer_controls = (
             app.apply_button,
+            app.profile_revert_button,
             app.black_button,
             app.export_button,
             app.current_pictures_button,
@@ -211,6 +212,19 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert app.apply_button.cget("text") == "Save & Apply Now"
         assert app.footer_version_label.cget("text") == f"v{settings_ui.__version__}"
         assert app.winfo_reqwidth() <= settings_ui.SETTINGS_WINDOW_TARGET_WIDTH
+
+        # The visible Unsaved indicator must fit the pinned geometry too.
+        app.interval_var.set("15")
+        app.update_idletasks()
+        app.update()
+        assert app.unsaved_var.get() == "Unsaved"
+        assert_visible_inside_window(app.profile_context_frame)
+        for control in context_controls:
+            assert_visible_inside_window(control)
+        app._revert_current()
+        app.update_idletasks()
+        app.update()
+        assert app.unsaved_var.get() == ""
 
         menu = app.nametowidget(app.mode_menu["menu"])
         layout_values = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
@@ -410,6 +424,18 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         if "clam" in style.theme_names():
             style.theme_use("clam")
             app.geometry("944x668+40+33")
+            # Clam is the tightest theme for the strip: verify it with the
+            # Unsaved indicator visible as well.
+            app.interval_var.set("15")
+            app.update_idletasks()
+            app.update()
+            assert app.unsaved_var.get() == "Unsaved"
+            assert_visible_inside_window(app.profile_context_frame)
+            for control in context_controls:
+                assert_visible_inside_window(control)
+            app._revert_current()
+            app.update_idletasks()
+            app.update()
             for layout in settings_ui.LAYOUT_CHOICES:
                 menu.invoke(layout_values.index(layout))
                 app.notebook.select(app.layout_tab)
@@ -5454,5 +5480,309 @@ def test_apply_rejected_when_collection_unresponsive_keeps_previous_profile(
         assert warnings
         assert warnings[0][0] == "Profile switch rejected"
         assert "Network" in warnings[0][1]
+    finally:
+        app.destroy()
+
+
+# --- Safe edit lifecycle (roadmap increment 5, v0.2.32) ---
+
+
+def _two_profile_app(monkeypatch, tmp_path):
+    """Real SettingsApp with Default and Second profiles, both saved on disk."""
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+    monkeypatch.setattr(app, "_ask_profile_name", lambda *_args, **_kwargs: "Second")
+    app._new_profile()
+    return app
+
+
+def _other_profile_name(app):
+    current = app.profile_var.get()
+    return "Default" if current == "Second" else "Second"
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_unsaved_indicator_tracks_field_edits(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.profile_is_dirty() is False
+        assert app.unsaved_var.get() == ""
+        assert "disabled" in app.profile_revert_button.state()
+
+        app.interval_var.set("15")
+        assert app.profile_is_dirty() is True
+        assert app.unsaved_var.get() == "Unsaved"
+        assert "disabled" not in app.profile_revert_button.state()
+
+        app.interval_var.set("10")  # back to the saved value
+        assert app.profile_is_dirty() is False
+        assert app.unsaved_var.get() == ""
+        assert "disabled" in app.profile_revert_button.state()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_unsaved_indicator_treats_invalid_edit_as_dirty(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        app.min_image_size_var.set("not-a-number")
+        assert app.profile_is_dirty() is True
+        assert app.unsaved_var.get() == "Unsaved"
+        app.min_image_size_var.set("0")
+        assert app.profile_is_dirty() is False
+        assert app.unsaved_var.get() == ""
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_revert_restores_saved_values_without_writing(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        before = settings_ui.config_file().read_bytes()
+        app.interval_var.set("15")
+        assert app.profile_is_dirty() is True
+        app._revert_current()
+        assert app.interval_var.get() == "10.0"
+        assert app.profile_is_dirty() is False
+        assert app.unsaved_var.get() == ""
+        assert "disabled" in app.profile_revert_button.state()
+        assert settings_ui.config_file().read_bytes() == before
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_profile_switch_save_choice_saves_under_current_profile(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        original = app.profile_var.get()
+        target = _other_profile_name(app)
+        app.interval_var.set("15")
+        monkeypatch.setattr(settings_ui.messagebox, "askyesnocancel", lambda *_args, **_kwargs: True)
+        app.profile_var.set(target)
+        app._on_profile_selected()
+        assert app.profile_var.get() == target
+        assert app.interval_var.get() == "10.0"  # target's saved value
+        # The pending edit was saved under the profile that owns it, not the
+        # profile being switched to.
+        assert load_config().profiles[original].interval_minutes == 15.0
+        assert load_config().profiles[target].interval_minutes == 10.0
+        assert app.profile_is_dirty() is False
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_profile_switch_discard_choice_keeps_disk_unchanged(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        before = settings_ui.config_file().read_bytes()
+        target = _other_profile_name(app)
+        app.interval_var.set("15")
+        monkeypatch.setattr(settings_ui.messagebox, "askyesnocancel", lambda *_args, **_kwargs: False)
+        app.profile_var.set(target)
+        app._on_profile_selected()
+        assert app.profile_var.get() == target
+        assert app.interval_var.get() == "10.0"
+        assert app.profile_is_dirty() is False
+        assert settings_ui.config_file().read_bytes() == before
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_profile_switch_cancel_choice_keeps_current_profile_and_edit(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        before = settings_ui.config_file().read_bytes()
+        original = app.profile_var.get()
+        target = _other_profile_name(app)
+        app.interval_var.set("15")
+        monkeypatch.setattr(settings_ui.messagebox, "askyesnocancel", lambda *_args, **_kwargs: None)
+        app.profile_var.set(target)
+        app._on_profile_selected()
+        assert app.profile_var.get() == original
+        assert app.interval_var.get() == "15"  # the pending edit survives the cancel
+        assert app.profile_is_dirty() is True
+        assert settings_ui.config_file().read_bytes() == before
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_profile_switch_without_edits_loads_immediately(monkeypatch, tmp_path):
+    prompts = []
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        target = _other_profile_name(app)
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "askyesnocancel",
+            lambda *_args, **_kwargs: prompts.append(1) or True,
+        )
+        app.profile_var.set(target)
+        app._on_profile_selected()
+        assert app.profile_var.get() == target
+        assert prompts == []  # no prompt when there is nothing to save
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_close_cancel_keeps_settings_open(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        app.interval_var.set("15")
+        monkeypatch.setattr(settings_ui.messagebox, "askyesnocancel", lambda *_args, **_kwargs: None)
+        app._request_close()
+        assert app.winfo_exists()
+        assert app.profile_is_dirty() is True
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_close_discard_destroys_without_saving(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        closed = []
+        before = settings_ui.config_file().read_bytes()
+        monkeypatch.setattr(app, "destroy", lambda: closed.append(True))
+        app.interval_var.set("15")
+        monkeypatch.setattr(settings_ui.messagebox, "askyesnocancel", lambda *_args, **_kwargs: False)
+        app._request_close()
+        assert closed == [True]
+        assert settings_ui.config_file().read_bytes() == before
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_close_save_persists_then_closes(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        closed = []
+        monkeypatch.setattr(app, "destroy", lambda: closed.append(True))
+        app.interval_var.set("15")
+        monkeypatch.setattr(settings_ui.messagebox, "askyesnocancel", lambda *_args, **_kwargs: True)
+        app._request_close()
+        assert closed == [True]
+        assert load_config().profiles[app._loaded_profile.name].interval_minutes == 15.0
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_black_screen_does_not_save_pending_edits(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        calls = []
+
+        def fake_black(profile, *, cancelled):
+            calls.append(profile)
+            return SimpleNamespace(wallpaper="/tmp/black.png")
+
+        monkeypatch.setattr(settings_ui, "black_screen", fake_black)
+        before = settings_ui.config_file().read_bytes()
+        app.interval_var.set("15")
+        app._black_screen()
+        _pump_until(app, lambda: not app._apply_busy)
+        assert calls == [app.profile_var.get()]
+        assert settings_ui.config_file().read_bytes() == before
+        assert app.profile_is_dirty() is True  # the edit is still pending
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_row_edits_mark_profile_dirty_and_revert_restores(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        # Shared source rows
+        assert app._append_shared_source(str(tmp_path / "new-folder"))
+        assert app.profile_is_dirty() is True
+        app._revert_current()
+        assert app.profile_is_dirty() is False
+
+        # Per-monitor folder rows
+        app._insert_monitor_folder("HDMI-1", str(tmp_path / "monitor"))
+        assert app.profile_is_dirty() is True
+
+        # Web source rows
+        app.web_url_entry.insert(0, "https://example.com/picture.jpg")
+        app._add_web_source_from_entry()
+        assert app.profile_is_dirty() is True
+
+        # No-draw zone rows
+        app.no_draw_x_entry.insert(0, "0")
+        app.no_draw_y_entry.insert(0, "0")
+        app.no_draw_w_entry.insert(0, "10")
+        app.no_draw_h_entry.insert(0, "10")
+        app._add_no_draw_zone()
+        assert app.profile_is_dirty() is True
+
+        # Back to a clean baseline, then exercise the overlay toggles.
+        app._revert_current()
+        assert app.profile_is_dirty() is False
+
+        # Overlay toggles and calendar position
+        app.overlay_title_var.set(True)
+        assert app.profile_is_dirty() is True
+        app.overlay_title_var.set(False)
+        assert app.profile_is_dirty() is False
+        app.overlay_calendar_position_combo.set("Top left")
+        app.overlay_calendar_position_combo.event_generate("<<ComboboxSelected>>")
+        assert app.profile_is_dirty() is True
+        assert app.unsaved_var.get() == "Unsaved"
+
+        app._revert_current()
+        assert app.profile_is_dirty() is False
+        assert app.unsaved_var.get() == ""
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_exclusion_changes_do_not_mark_profile_dirty(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        name = app.profile_var.get()
+        app.config_data.profiles[name].excluded_images = ["/tmp/picture.jpg"]
+        app._refresh_unsaved_indicator()
+        assert app.profile_is_dirty() is False
+        assert app.unsaved_var.get() == ""
+        # A real field edit still dirties the profile.
+        app.interval_var.set("15")
+        assert app.profile_is_dirty() is True
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_save_clears_unsaved_state_and_rebases(monkeypatch, tmp_path):
+    app = _two_profile_app(monkeypatch, tmp_path)
+    try:
+        name = app.profile_var.get()
+        app.interval_var.set("15")
+        assert app.profile_is_dirty() is True
+        assert app._save_current(show_success=False) is True
+        assert app.profile_is_dirty() is False
+        assert load_config().profiles[name].interval_minutes == 15.0
+        # The saved value is the new baseline: editing away from it dirties,
+        # editing back to the old value does not.
+        app.interval_var.set("20")
+        assert app.profile_is_dirty() is True
+        app.interval_var.set("15")
+        assert app.profile_is_dirty() is False
+        app.interval_var.set("10")
+        assert app.profile_is_dirty() is True
     finally:
         app.destroy()

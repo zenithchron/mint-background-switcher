@@ -84,7 +84,7 @@
 3. Clearly label the selected profile on collection actions and distinguish application-wide storage/update settings.
 4. Verify all old controls remain reachable and update documentation.
 
-## Increment 4: Structured source management
+## Increment 4: Structured source management — complete in `0.2.31`
 
 **Objective:** Replace editable multiline configuration syntax with safe, typed source rows.
 
@@ -95,7 +95,9 @@
 3. Remove ordinary-user dependence on `MONITOR=/path;/path` text editing.
 4. Test duplicate paths, unavailable volumes, invalid images, malformed legacy data, multi-monitor changes, and read-only source guarantees.
 
-## Increment 5: Safe edit lifecycle and action semantics
+**Status:** Implemented for `0.2.31`. The 129-test Settings suite and 919-test full suite pass under Xvfb, with row-view coverage for shared sources, web sources, and per-monitor folders, availability states, and empty-list save protection. Increment 5 followed in `0.2.32`.
+
+## Increment 5: Safe edit lifecycle and action semantics — complete in `0.2.32`
 
 **Objective:** Make pending edits visible and prevent accidental loss or unrelated persistence.
 
@@ -106,6 +108,8 @@
 3. Add save/discard/cancel prompts for profile switching and closing.
 4. Separate emergency Black Screen from saving unrelated edits while preserving sticky privacy behavior.
 5. Replace routine success dialogs with a persistent status area where safe; retain modal confirmation/errors where decisions are required.
+
+**Status:** Implemented for `0.2.32`. The 143-test Settings suite and 933-test full suite pass under Xvfb. A forced 944×668 client smoke (default and clam themes) verifies the Unsaved indicator, the footer Revert button, and all eight layout selections with every control mapped inside the window. Dirty-state coverage: field edits and invalid values, revert without write, save/discard/cancel on profile switch and close, black screen without persisting pending edits, row edits (sources, per-monitor folders, web sources, no-draw zones), exclusion non-dirty, and save rebasing. Step 5 (status-area feedback) is deferred with Increment 6 polish; modal confirmations remain where decisions are required. Increment 6 is next.
 
 ## Increment 6: Responsive and accessible polish
 

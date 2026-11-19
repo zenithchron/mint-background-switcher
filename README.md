@@ -16,6 +16,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
+- **Safe profile editing**: an **Unsaved** indicator on the Profile strip, a **Revert** button that restores the last saved values without writing, save / discard / cancel prompts when switching profiles or closing Settings, and an emergency Black Screen that applies from the saved settings without persisting unrelated pending edits.
 - Settings with a persistent Profile, Layout, and Save Profile strip above nine task-based pages: Sources, Layout & Appearance, Overlays, Rotation & Shortcuts, Conditions, Never Show Again, Public Collections, Storage, and Updates & About.
 - Configurable Postcard layouts with 1–100 bare native-aspect photos, a Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, twelve selectable solid or procedurally textured backgrounds, and optional virtual-desktop spanning.
 - Configurable Polaroid layouts with 1–100 native-aspect prints, a larger Small-to-Large size slider, randomized placement/stacking, optional random tilt, optional photo captions, and optional virtual-desktop spanning that permits monitor-boundary crossing and edge clipping.
@@ -45,6 +46,14 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.32 - 2026-11-19
+
+**Safe edit lifecycle** (Settings UI redesign Increment 5): pending profile edits are now visible and protected. An **Unsaved** indicator appears on the Profile strip whenever a field, source row, per-monitor folder, web source, or no-draw zone differs from the loaded profile (invalid values included), and a new **Revert** button in the action footer (next to Save & Apply Now) restores the last saved values without writing. Switching profiles or closing Settings with unsaved changes prompts save / discard / cancel, and the emergency Black Screen applies from the saved settings without persisting unrelated edits (Save & Apply Now and Register Hotkeys keep their explicit save behavior). Package version bumped to `0.2.32`.
+
+### 0.2.31 - 2026-11-18
+
+**Structured source management** (Settings UI redesign Increment 4): the editable free-text source lists are now read-only row views with explicit actions. Settings → Sources shows shared picture sources (Type / Location / Scope / Availability columns with Add folder / Add picture / Browse hard drives / Remove Selected / Reveal) and web picture sources (Image URL / Feed rows with Add URL / Add feed / Remove Selected / Refresh Now / Reveal); Layout & Appearance → per-monitor folders is a Screen / Folder / Availability row list with Add / Remove / Reveal. Rows render in-memory profile state — the on-disk config schema is unchanged — and saving with an empty display list cannot wipe a saved source list. Package version bumped to `0.2.31`.
 
 ### 0.2.30 - 2026-11-17
 

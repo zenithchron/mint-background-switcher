@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.32] - 2026-11-19
+
+### Added
+
+- **Safe edit lifecycle** (Settings UI redesign Increment 5) — pending profile edits are now visible and protected until explicitly saved:
+  - An **Unsaved** indicator appears on the persistent Profile strip whenever a profile field (interval, mode/layout, source options, overlays, hotkeys, conditions, post-switch command, per-monitor folders, web sources, or no-draw zones) differs from the loaded profile; values that fail validation also count as unsaved.
+  - A new **Revert** button in the action footer (next to **Save & Apply Now**) restores the last loaded/saved values for the current profile without writing to disk; it is enabled only while the profile is dirty (and never while a background operation runs).
+  - Switching profiles with unsaved changes prompts **Save / Discard / Cancel**: saving writes the pending edits under the profile being left, discarding switches without writing anything, and cancel returns to the current profile while keeping the edits.
+  - Closing Settings with unsaved changes prompts the same three options; a failed save keeps Settings open.
+  - The emergency **Black Screen** action no longer persists pending edits: it applies the black screen from the saved settings and the unsaved edits remain pending afterwards. **Save & Apply Now** (an explicit save action) and **Register Hotkeys** keep their existing save behavior.
+  - **Never Show Again** exclusions are excluded from the dirty state because they are persisted immediately by their own path.
+- Bumped the package version to `0.2.32`.
+
 ## [0.2.31] - 2026-11-18
 
 ### Added
