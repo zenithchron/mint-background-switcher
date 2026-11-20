@@ -85,6 +85,7 @@ class SwitchResult:
     web_sources: list[dict[str, str]] = field(default_factory=list)
     overlay_note: str = ""
     post_switch_note: str = ""
+    shuffle_note: str = ""
 
 
 # The post-switch command runs synchronously after a new wallpaper is applied;
@@ -94,6 +95,14 @@ POST_SWITCH_TIMEOUT_SECONDS = 30
 
 class SwitchCancelled(RuntimeError):
     """Raised when a background rotation is cancelled before desktop activation."""
+
+
+class ShuffleNotApplicableError(RuntimeError):
+    """Raised when shuffling is requested for a profile that is not in Per-monitor layout."""
+
+
+class NoShufflableMonitorsError(RuntimeError):
+    """Raised when a profile's per-monitor assignments are too small to shuffle."""
 
 
 class NoPreviousWallpaperError(RuntimeError):
@@ -1818,6 +1827,133 @@ def redraw_current(
         action="redraw-current",
         lockscreen_note=lockscreen_note,
     )
+
+
+def compute_shuffled_assignments(
+    assigned: dict[str, list[str]],
+    rng: random.Random | random.SystemRandom | None = None,
+) -> tuple[dict[str, list[str]], bool]:
+    """Redistribute per-monitor folders across the assigned monitors.
+
+    Every folder that is explicitly assigned to a monitor moves into one shared
+    pool, which is shuffled and dealt back out so that each monitor keeps the
+    number of folders it already had (monitors are dealt in sorted name order).
+    Monitors with no explicit assignment are not part of the mapping and keep
+    falling back to the profile's shared folders. Returns the new mapping and
+    whether anything changed.
+    """
+
+    random_source = rng or random.SystemRandom()
+    ordered = sorted(assigned)
+    counts = [len(assigned[monitor]) for monitor in ordered]
+    pool = [folder for monitor in ordered for folder in assigned[monitor]]
+    random_source.shuffle(pool)
+    shuffled: dict[str, list[str]] = {}
+    cursor = 0
+    for monitor, count in zip(ordered, counts):
+        shuffled[monitor] = list(pool[cursor : cursor + count])
+        cursor += count
+    changed = any(shuffled[monitor] != list(assigned[monitor]) for monitor in ordered)
+    return shuffled, changed
+
+
+def _shuffle_note(old_map: dict[str, list[str]], new_map: dict[str, list[str]]) -> str:
+    parts = []
+    for monitor in sorted(set(old_map) | set(new_map)):
+        parts.append(f"{monitor}: {', '.join(old_map.get(monitor, [])) or '(none)'} -> {', '.join(new_map.get(monitor, [])) or '(none)'}")
+    return "shuffled per-monitor folders (" + "; ".join(parts) + ")"
+
+
+def shuffle_monitor_assignments(
+    profile_name: str | None = None,
+    *,
+    dry_run: bool = False,
+    rng: random.Random | random.SystemRandom | None = None,
+) -> SwitchResult:
+    """Shuffle the profile's per-monitor folder assignments.
+
+    The folders explicitly assigned to each monitor are redistributed across
+    the assigned monitors, keeping each monitor's folder count. When the
+    shuffled mapping differs from the saved one, a live call persists it and
+    immediately applies a new wallpaper (like a manual switch) so the shuffled
+    assignment is visible on the desktop; a mapping that shuffles to itself is
+    reported as unchanged and applies nothing. Dry runs preview a randomly
+    computed mapping without saving or applying. Only the Per-monitor layout
+    uses per-monitor assignments, so other layouts are rejected.
+    """
+
+    cfg = load_config()
+    profile = cfg.get_profile(profile_name)
+    if profile.mode != "per-monitor":
+        raise ShuffleNotApplicableError(
+            f"shuffling monitor assignments only applies to the Per-monitor layout; "
+            f"profile {profile.name!r} is currently set to {profile.mode!r}"
+        )
+    assigned = {monitor: list(folders) for monitor, folders in profile.monitor_folders.items() if folders}
+    if len(assigned) < 2:
+        raise NoShufflableMonitorsError(
+            f"profile {profile.name!r} has per-monitor folders for {len(assigned)} monitor; "
+            "assign folders to at least two monitors to shuffle"
+        )
+    state = load_state()
+    monitors = detect_monitors()
+    if dry_run:
+        shuffled, changed = compute_shuffled_assignments(assigned, rng)
+        if not changed:
+            return SwitchResult(
+                profile.name,
+                Path(state.last_wallpaper or ""),
+                list(state.last_images),
+                monitors,
+                applied=False,
+                action="shuffle-monitor",
+                shuffle_note="per-monitor folders unchanged after shuffle; no new wallpaper would be applied",
+            )
+        return SwitchResult(
+            profile.name,
+            Path(state.last_wallpaper or ""),
+            list(state.last_images),
+            monitors,
+            applied=False,
+            action="shuffle-monitor",
+            shuffle_note=f"planned: {_shuffle_note(assigned, shuffled)}",
+        )
+    path = config_file()
+    fresh_assigned: dict[str, list[str]] = {}
+    new_map: dict[str, list[str]] = {}
+    changed = False
+    with locked_file(lock_path_for(path)):
+        config = Config.from_dict(read_json_unlocked(path)) if path.exists() else Config.default()
+        fresh_profile = config.get_profile(profile_name)
+        if fresh_profile.mode != "per-monitor":
+            raise ShuffleNotApplicableError(
+                f"shuffling monitor assignments only applies to the Per-monitor layout; "
+                f"profile {fresh_profile.name!r} is currently set to {fresh_profile.mode!r}"
+            )
+        fresh_assigned = {monitor: list(folders) for monitor, folders in fresh_profile.monitor_folders.items() if folders}
+        if len(fresh_assigned) < 2:
+            raise NoShufflableMonitorsError(
+                f"profile {fresh_profile.name!r} has per-monitor folders for {len(fresh_assigned)} monitor; "
+                "assign folders to at least two monitors to shuffle"
+            )
+        new_map, changed = compute_shuffled_assignments(fresh_assigned, rng)
+        if changed:
+            fresh_profile.monitor_folders = {monitor: list(folders) for monitor, folders in new_map.items()}
+            atomic_write_json_unlocked(path, config.to_dict())
+    if not changed:
+        return SwitchResult(
+            profile.name,
+            Path(state.last_wallpaper or ""),
+            list(state.last_images),
+            monitors,
+            applied=False,
+            action="shuffle-monitor",
+            shuffle_note="per-monitor folders unchanged after shuffle; no new wallpaper was applied",
+        )
+    result = switch_once(profile.name)
+    result.action = "shuffle-monitor"
+    result.shuffle_note = _shuffle_note(fresh_assigned, new_map)
+    return result
 
 
 def pause() -> RuntimeState:

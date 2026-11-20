@@ -4,6 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.33] - 2026-11-20
+
+### Added
+
+- **Shuffle monitor assignments** (JBS shuffle-monitor-assignments; the remaining per-monitor control from roadmap section 5):
+  - **Settings → Layout & Appearance → Per-monitor folders** gains a **Shuffle Assignments** button: the pending per-monitor folders are redistributed across the assigned screens, each screen keeping its folder count, as a normal pending edit (the **Unsaved** indicator applies; keep the change with **Save Profile** or **Save & Apply Now**).
+  - Tray **Shuffle Monitors** item and CLI `mint-background-switcher shuffle-monitor [--dry-run] [--profile NAME]`: the saved profile's per-monitor folders are shuffled, persisted, and a new wallpaper is applied immediately (like a manual switch) so the shuffle is visible; the old → new mapping is reported as a `shuffle` note.
+  - A shuffle that lands on the same mapping is reported as unchanged and applies nothing; fewer than two assigned monitors, or a profile that is not in the Per-monitor layout, is rejected with a one-line error (CLI exits 1). Screens without an explicit assignment keep falling back to the profile's shared folders.
+- Bumped the package version to `0.2.33`.
+
 ## [0.2.32] - 2026-11-19
 
 ### Added

@@ -27,6 +27,8 @@ from .rescue import run_rescue
 from .service import (
     NoCurrentWallpaperError,
     NoPreviousWallpaperError,
+    NoShufflableMonitorsError,
+    ShuffleNotApplicableError,
     add_web_source,
     black_screen,
     list_web_sources,
@@ -38,6 +40,7 @@ from .service import (
     resume,
     run_loop,
     save_current_wallpaper,
+    shuffle_monitor_assignments,
     switch_once,
     toggle_pause,
 )
@@ -78,6 +81,8 @@ def _print_result(result) -> None:
         print(f"overlays={result.overlay_note}")
     if result.post_switch_note:
         print(f"post_switch={result.post_switch_note}")
+    if result.shuffle_note:
+        print(f"shuffle={result.shuffle_note}")
     if result.web_sources:
         print("web_sources:")
         for status in result.web_sources:
@@ -108,6 +113,13 @@ def build_parser() -> argparse.ArgumentParser:
     redraw = sub.add_parser("redraw-current", help="Re-apply the current wallpaper without changing it")
     redraw.add_argument("--profile")
     redraw.add_argument("--dry-run", action="store_true")
+
+    shuffle = sub.add_parser(
+        "shuffle-monitor",
+        help="Shuffle the Per-monitor layout's per-monitor folder assignments and apply a new wallpaper",
+    )
+    shuffle.add_argument("--profile")
+    shuffle.add_argument("--dry-run", action="store_true")
 
     black = sub.add_parser("black-screen", help="Set all monitors black and pause rotation")
     black.add_argument("--profile")
@@ -273,6 +285,13 @@ def main(argv: list[str] | None = None) -> int:
         try:
             _print_result(redraw_current(args.profile, dry_run=args.dry_run))
         except NoCurrentWallpaperError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        return 0
+    if args.command == "shuffle-monitor":
+        try:
+            _print_result(shuffle_monitor_assignments(args.profile, dry_run=args.dry_run))
+        except (NoShufflableMonitorsError, ShuffleNotApplicableError, CollectionUnavailableError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         return 0

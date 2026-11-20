@@ -7,6 +7,7 @@ from pathlib import Path
 import copy
 import dataclasses
 import queue
+import random
 import shlex
 import shutil
 import subprocess
@@ -58,6 +59,7 @@ from .service import (
     remove_excluded_images,
     save_current_wallpaper,
     switch_once,
+    compute_shuffled_assignments,
 )
 from .sources import (
     MAX_WEB_SOURCES,
@@ -1202,6 +1204,10 @@ class SettingsApp(tk.Tk):
             monitor_buttons, text="Reveal", command=self._reveal_selected_monitor_folder
         )
         self.monitor_reveal_button.pack(side=tk.LEFT, padx=4)
+        self.monitor_shuffle_button = ttk.Button(
+            monitor_buttons, text="Shuffle Assignments", command=self._shuffle_monitor_assignments_pending
+        )
+        self.monitor_shuffle_button.pack(side=tk.LEFT, padx=4)
         self._refresh_layout_workspace()
         self._refresh_monitor_assignments_view()
 
@@ -3169,6 +3175,40 @@ class SettingsApp(tk.Tk):
             )
         except Exception as exc:
             messagebox.showerror("Could not reveal folder", str(exc), parent=self)
+
+    def _shuffle_monitor_assignments_pending(self) -> None:
+        if self.mode_var.get() != "per-monitor":
+            messagebox.showerror(
+                "Per-monitor layout required",
+                "Switch the layout to Per-monitor first: shuffling reassigns the per-monitor folders.",
+                parent=self,
+            )
+            return
+        folders = self._current_monitor_folders()
+        assigned = {monitor: list(paths) for monitor, paths in folders.items() if paths}
+        if len(assigned) < 2:
+            messagebox.showerror(
+                "Nothing to shuffle",
+                "Assign folders to at least two monitors first, then shuffle the assignments.",
+                parent=self,
+            )
+            return
+        shuffled, changed = compute_shuffled_assignments(assigned, random.SystemRandom())
+        if not changed:
+            messagebox.showinfo(
+                "No change",
+                "This shuffle matches the current assignments, so nothing was changed.",
+                parent=self,
+            )
+            return
+        self._write_monitor_folders(shuffled)
+        self._refresh_unsaved_indicator()
+        messagebox.showinfo(
+            "Assignments shuffled",
+            "The per-monitor folders were shuffled. Choose Save Profile to keep the change "
+            "(or Save & Apply Now to also apply a new wallpaper right away).",
+            parent=self,
+        )
 
     def _available_monitor_names(self) -> list[str]:
         names = list(dict.fromkeys(self._optional_attr("monitor_names", []) or []))

@@ -63,7 +63,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 
 - Never Show Again exclusions, including one image in a composite. Shipped in `0.2.18` (whole-current-wallpaper one-click exclusion; single-image exclusion within a composite remains future work).
 - Previous and redraw-current actions. Previous shipped in `0.2.27` as a per-profile 10-step history with tray, CLI, and hotkey access; redraw-current shipped in `0.2.28` as a re-apply-the-active-wallpaper action with tray, CLI, and hotkey access.
-- Shuffle current monitor assignments and clear background.
+- Shuffle current monitor assignments. Shipped in `0.2.33` as the **Shuffle Assignments** button on the Layout & Appearance per-monitor section (a pending edit kept with Save Profile / Save & Apply Now), the tray **Shuffle Monitors** item, and `shuffle-monitor [--dry-run]`: per-monitor folders are redistributed across the assigned screens (each keeps its folder count), and a live action persists the new assignment and applies a new wallpaper immediately. Clear background remains future work (the emergency Black screen is the current closest equivalent).
 - Browse recent cached pictures and navigate to their original sources.
 - Configurable global shortcuts and manual Next while automatic switching is paused.
 

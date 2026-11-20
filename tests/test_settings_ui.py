@@ -475,7 +475,13 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                     )
                 elif layout == "per-monitor":
                     clam_layout_controls.extend(
-                        (app.monitor_assignments_tree, app.monitor_add_button, app.monitor_remove_button, app.monitor_reveal_button)
+                        (
+                            app.monitor_assignments_tree,
+                            app.monitor_add_button,
+                            app.monitor_remove_button,
+                            app.monitor_reveal_button,
+                            app.monitor_shuffle_button,
+                        )
                     )
                 for control in clam_layout_controls:
                     assert_visible_inside_window(control)
@@ -5786,3 +5792,150 @@ def test_save_clears_unsaved_state_and_rebases(monkeypatch, tmp_path):
         assert app.profile_is_dirty() is True
     finally:
         app.destroy()
+
+
+class _ReversingRng:
+    """Deterministic shuffle for pending-assignment shuffle tests."""
+
+    def shuffle(self, x):
+        x.reverse()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_shuffle_monitor_button_is_visible_on_per_monitor_panel(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.layout_tab)
+        app.update()
+        assert app.monitor_shuffle_button.cget("text") == "Shuffle Assignments"
+
+        app.mode_var.set("per-monitor")
+        app._refresh_layout_workspace()
+        app.update()
+        assert app.monitor_shuffle_button.winfo_ismapped()
+        assert app.monitor_shuffle_button.winfo_width() >= app.monitor_shuffle_button.winfo_reqwidth()
+
+        app.mode_var.set("shared")
+        app._refresh_layout_workspace()
+        app.update()
+        assert not app.monitor_shuffle_button.winfo_ismapped()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_shuffle_monitor_assignments_updates_pending_and_marks_unsaved(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    infos = []
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showinfo",
+        lambda title, message, **_kwargs: infos.append((title, message)),
+    )
+    monkeypatch.setattr(
+        settings_ui.messagebox,
+        "showerror",
+        lambda title, message, **_kwargs: pytest.fail(f"unexpected error dialog: {title}: {message}"),
+    )
+    monkeypatch.setattr(settings_ui.random, "SystemRandom", lambda: _ReversingRng())
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.layout_tab)
+        app.update()
+        app.mode_var.set("per-monitor")
+        app._refresh_layout_workspace()
+        app.update()
+        # Persist the layout change so the dirty-state baseline is the
+        # per-monitor profile the test edits next.
+        assert app._save_current(show_success=False) is True
+        assert app.profile_is_dirty() is False
+
+        app.monitor_folders_data = {"DP-1": ["/a/folder"], "HDMI-1": ["/b/folder"]}
+        app._refresh_monitor_assignments_view()
+        app.update()
+        assert app.profile_is_dirty() is True
+
+        app._shuffle_monitor_assignments_pending()
+        app.update()
+
+        assert app.monitor_folders_data == {"DP-1": ["/b/folder"], "HDMI-1": ["/a/folder"]}
+        assert app.unsaved_var.get() == "Unsaved"
+        rows = [
+            [str(value) for value in app.monitor_assignments_tree.item(child, "values")]
+            for child in app.monitor_assignments_tree.get_children()
+        ]
+        assert [row[:2] for row in rows] == [
+            ["DP-1", "/b/folder"],
+            ["HDMI-1", "/a/folder"],
+        ]
+        # Pending edit only: the saved profile has the per-monitor layout but
+        # none of the shuffled folders until Save.
+        saved = load_config().get_profile("Default")
+        assert saved.mode == "per-monitor"
+        assert saved.monitor_folders == {}
+        assert infos
+        assert "shuffled" in infos[0][0].lower()
+    finally:
+        app.destroy()
+
+
+def test_shuffle_monitor_assignments_pending_requires_two_monitors(monkeypatch):
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kwargs: errors.append((title, message)))
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "mode_var", _Var("per-monitor"))
+    setattr(dummy, "monitor_folders_data", {"DP-1": ["/a"]})
+    setattr(dummy, "monitor_assignments_tree", _Tree())
+
+    settings_ui.SettingsApp._shuffle_monitor_assignments_pending(dummy)
+
+    assert errors
+    assert "Nothing to shuffle" in errors[0][0]
+    assert dummy.monitor_folders_data == {"DP-1": ["/a"]}
+
+
+def test_shuffle_monitor_assignments_pending_requires_per_monitor_mode(monkeypatch):
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message, **_kwargs: errors.append((title, message)))
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "mode_var", _Var("shared"))
+    setattr(dummy, "monitor_folders_data", {"DP-1": ["/a"], "HDMI-1": ["/b"]})
+    setattr(dummy, "monitor_assignments_tree", _Tree())
+
+    settings_ui.SettingsApp._shuffle_monitor_assignments_pending(dummy)
+
+    assert errors
+    assert "Per-monitor layout required" in errors[0][0]
+    assert dummy.monitor_folders_data == {"DP-1": ["/a"], "HDMI-1": ["/b"]}
+
+
+def test_shuffle_monitor_assignments_pending_reports_no_change(monkeypatch):
+    infos = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kwargs: infos.append((title, message)))
+    dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "mode_var", _Var("per-monitor"))
+    setattr(dummy, "monitor_folders_data", {"DP-1": ["/same"], "HDMI-1": ["/same"]})
+    setattr(dummy, "monitor_assignments_tree", _Tree())
+
+    settings_ui.SettingsApp._shuffle_monitor_assignments_pending(dummy)
+
+    assert infos
+    assert infos[0][0] == "No change"
+    assert dummy.monitor_folders_data == {"DP-1": ["/same"], "HDMI-1": ["/same"]}
