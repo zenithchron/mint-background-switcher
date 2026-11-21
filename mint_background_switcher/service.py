@@ -1154,14 +1154,15 @@ def _switch_once_with_state(
             action = "black-fallback"
         else:
             bucket = _profile_bucket(profile, "collage")
-            decode_retries_remaining = max(1, len(monitors) * 5)
+            collage_count = profile.collage_count
+            decode_retries_remaining = max(1, len(monitors) * collage_count)
             while True:
                 _cancel_if_requested(cancelled)
                 chosen = _draw_from_pool(
                     state,
                     pool,
                     bucket,
-                    len(monitors) * 5,
+                    len(monitors) * collage_count,
                     rng=rng,
                     sequential=profile.sequential,
                 )
@@ -1176,7 +1177,7 @@ def _switch_once_with_state(
                     action = "black-fallback"
                     break
                 collage_by_monitor = {
-                    monitor.name: chosen[index * 5 : (index + 1) * 5]
+                    monitor.name: chosen[index * collage_count : (index + 1) * collage_count]
                     for index, monitor in enumerate(monitors)
                 }
                 try:
@@ -1186,6 +1187,7 @@ def _switch_once_with_state(
                         wallpaper_path,
                         bar_color=profile.bar_color,
                         fit_mode=profile.fit_mode,
+                        count=collage_count,
                     )
                 except ImageDecodeError as exc:
                     _discard_from_pool(pool, exc.image_path)

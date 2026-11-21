@@ -13,7 +13,7 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - Random no-repeat rotation until each pool is exhausted, with an optional per-profile folder-order mode that cycles pictures in folder order and restarts from the beginning.
 - Optional per-profile **Rotate at startup** toggle that keeps the current background after login instead of rotating right away; the normal interval takes over from there.
 - Optional per-profile **night schedule** that keeps every monitor black during a configured nightly window (for example `22:00` to `06:00`, crossing midnight supported) and resumes rotation by itself when the window ends, while a manually triggered black screen stays sticky until resumed. Manually resuming inside an active window does not keep the desktop awake: the schedule re-applies the black screen on the next tick.
-- Shared, same-image, 2x2 montage, asymmetric collage, postcard, Polaroid, per-monitor, and spanned wallpaper modes.
+- Shared, same-image, 2x2 montage, collage (2–6 images per screen, 5 by default), postcard, Polaroid, per-monitor, and spanned wallpaper modes.
 - Fractional-scale aware monitor composition for Cinnamon/X11.
 - Named profiles for different folder/layout setups.
 - **Safe profile editing**: an **Unsaved** indicator on the Profile strip, a **Revert** button that restores the last saved values without writing, save / discard / cancel prompts when switching profiles or closing Settings, and an emergency Black Screen that applies from the saved settings without persisting unrelated pending edits.
@@ -42,11 +42,16 @@ Mint Background Switcher is a Linux Mint/Cinnamon wallpaper switcher for multi-m
 - **Redraw Current**: re-apply the wallpaper that is currently active (including the black screen, while one is active) without changing anything — from the tray **Redraw Current** item, `mint-background-switcher redraw-current [--dry-run]`, or the **Redraw Current** hotkey; it never advances the rotation, touches the history, or clears a pause or black screen.
 - **Post-switch command** under **Settings → Rotation & Shortcuts → Rotation**: a per-profile single-line command (run without a shell, 30 second timeout) that executes once after each new wallpaper is applied — via `next`, **Save & Apply Now**, or the background loop. A failed, missing, or wedged command is reported as a `post_switch` note by **Save & Apply Now**, `next`, and the background loop and never breaks the switch; an empty field disables the hook, and dry runs, the safe black fallback, Black screen, Previous, and Redraw Current never trigger it.
 - **Shuffle monitor assignments** (Per-monitor layout): randomly reassign which folders each screen uses, keeping every screen's folder count — from the **Shuffle Assignments** button under **Settings → Layout & Appearance → Per-monitor folders** (a pending edit kept with **Save Profile** / **Save & Apply Now**), the tray **Shuffle Monitors** item, or `mint-background-switcher shuffle-monitor [--dry-run]`. The tray and CLI actions persist the new assignment and immediately apply a new wallpaper so the shuffle is visible, and report the old → new mapping as a `shuffle` note; a shuffle that lands on the same mapping is reported as unchanged and applies nothing, and dry runs preview a random mapping without saving or applying.
+- **Collage picture count** under **Settings → Layout & Appearance → Collage**: choose how many pictures each screen's collage holds (2–6, default 5, saved with the profile). The default 5 keeps the classic asymmetric mosaic; other counts use a deterministic grid layout that tiles the whole panel with uncropped pictures.
 - Built-in rescue command for disabling startup and resetting Cinnamon wallpaper/session settings from a TTY.
 
 The Settings redesign is being delivered in independently verified increments. See the [product roadmap](ROADMAP.md) and [Settings UI redesign plan](docs/plans/settings-ui-redesign.md) for the implemented and planned work.
 
 ## Change log
+
+### 0.2.34 - 2026-11-21
+
+**Configurable collage image count** (JBS collage-count parity): the collage layout now shows a configurable number of pictures per screen. **Settings → Layout & Appearance → Collage** gains a **Pictures per collage** spinbox (2–6, default 5) that is saved with the profile; the default 5 keeps the classic asymmetric mosaic exactly, while 2 (side-by-side), 3 (top banner plus two bottom cells), 4 (2×2), and 6 (2×3) use deterministic grid layouts that tile the whole panel so every picture stays visible and uncropped. Legacy configs keep the default of 5, out-of-range saved values are clamped into 2–6 on load, and an invalid spinbox value is reported with a one-line save error. Package version bumped to `0.2.34`.
 
 ### 0.2.33 - 2026-11-20
 
@@ -653,7 +658,7 @@ Each profile has a mode:
 - `shared`: all monitors draw from one shared image pool, without duplicates within the same rotation when possible.
 - `same`: one image is picked from the shared image pool and fitted independently on every monitor.
 - `montage`: four images from the shared pool are arranged in a 2x2 grid on each monitor, with every complete image fitted inside its tile instead of cropped.
-- `collage`: five images from the shared pool are fitted without cropping into a deterministic asymmetric mosaic independently on each monitor.
+- `collage`: 2–6 images from the shared pool (5 by default) are fitted without cropping into a deterministic mosaic independently on each monitor; the default 5 keeps the classic asymmetric layout while 2, 3, 4, and 6 use simple grids, chosen in Settings.
 - `postcard`: 1–100 bare images from the shared pool are placed at native aspect ratios with randomized positions, overlap, stacking, optional tilt, and optional file-name captions on a dark background. By default the count applies per screen and each photo stays fully visible on its screen; optional Postcard Span makes the count desktop-wide and allows photos to cross screen boundaries or be clipped at the virtual desktop edge.
 - `polaroid`: 1–100 images from the shared pool are placed at native aspect ratios inside bottom-heavy white print frames with random placement, stacking, optional tilt, and optional file-name captions on the frame border. By default the count applies per screen and each print stays fully visible on its screen; optional Polaroid Span makes the count desktop-wide and allows prints to cross screen boundaries or be clipped at the virtual desktop edge.
 - `per-monitor`: each monitor uses its own folder list. If a monitor has no explicit folders, it falls back to the shared folders.

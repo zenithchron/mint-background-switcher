@@ -263,6 +263,8 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 )
             elif layout == "per-monitor":
                 layout_controls.extend((app.monitor_assignments_tree, app.monitor_add_button, app.monitor_remove_button, app.monitor_reveal_button))
+            elif layout == "collage":
+                layout_controls.extend((app.collage_count_label, app.collage_count_spinbox, app.collage_count_help))
             for control in layout_controls:
                 assert_visible_inside_window(control)
 
@@ -481,6 +483,15 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                             app.monitor_remove_button,
                             app.monitor_reveal_button,
                             app.monitor_shuffle_button,
+                        )
+                    )
+                elif layout == "collage":
+                    clam_layout_controls.extend(
+                        (
+                            app.collage_options,
+                            app.collage_count_label,
+                            app.collage_count_spinbox,
+                            app.collage_count_help,
                         )
                     )
                 for control in clam_layout_controls:
@@ -1981,6 +1992,73 @@ def test_settings_mode_menu_exposes_collage_and_applies_selection(monkeypatch, t
         _pump_until(app, lambda: not app._apply_busy)
         assert saved_modes == ["collage", "collage", "collage"]
         assert errors == [("Apply failed", "collage preview failed")]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_collage_options_are_visible_and_persist(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        menu = app.nametowidget(app.mode_menu["menu"])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)]
+        menu.invoke(labels.index("collage"))
+        app.update_idletasks()
+        app.update()
+        assert app.notebook.select() == str(app.layout_tab)
+        assert app.layout_panels["collage"].winfo_ismapped()
+        assert app.collage_options.winfo_ismapped()
+        assert int(float(app.collage_count_spinbox.cget("from"))) == 2
+        assert int(float(app.collage_count_spinbox.cget("to"))) == 6
+        assert app.collage_count_label.cget("text") == "Pictures per collage:"
+        assert app.collage_count_var.get() == 5
+        assert app.unsaved_var.get() == "Unsaved"
+        for control in (
+            app.collage_count_label,
+            app.collage_count_spinbox,
+            app.collage_count_help,
+        ):
+            assert control.winfo_ismapped()
+            assert control.winfo_width() >= control.winfo_reqwidth()
+
+        app.collage_count_var.set(3)
+        app.update_idletasks()
+        assert app.unsaved_var.get() == "Unsaved"
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.collage_count == 3
+        app._load_profile("Default")
+        assert app.collage_count_var.get() == 3
+
+        # Out-of-range spinbox values are clamped instead of failing the save.
+        app.collage_count_var.set(9)
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").collage_count == 6
+
+        # Invalid spinbox text fails the save with a friendly message instead
+        # of a TclError, and still counts as an unsaved edit.
+        app.collage_count_spinbox.delete(0, "end")
+        app.collage_count_spinbox.insert(0, "x")
+        app.update_idletasks()
+        assert app.profile_is_dirty() is True
+        errors = []
+        monkeypatch.setattr(
+            settings_ui.messagebox,
+            "showerror",
+            lambda title, message, **_kwargs: errors.append((title, message)),
+        )
+        assert app._save_current(show_success=False) is False
+        assert errors == [
+            ("Save failed", "Pictures per collage must be a whole number between 2 and 6.")
+        ]
     finally:
         app.destroy()
 

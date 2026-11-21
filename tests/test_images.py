@@ -20,6 +20,7 @@ from mint_background_switcher.images import (
     POSTCARD_BACKGROUND_COLORS,
     POSTCARD_BACKGROUND_COLOR,
     POSTCARD_CORKBOARD_COLOR,
+    _collage_cells,
     _collage_tile,
     _corkboard_texture,
     _polaroid_tile,
@@ -995,6 +996,74 @@ def test_compose_collage_places_five_uncropped_images_on_each_monitor(tmp_path: 
         }
         assert set(colors).issubset(rendered_colors)
     assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def _assert_cells_tile_panel(width: int, height: int, cells: tuple) -> None:
+    """Cells must be inside the panel, pairwise non-overlapping, and full-coverage."""
+    assert len(cells) > 0
+    total_area = 0
+    for left, top, right, bottom in cells:
+        assert 0 <= left < right <= width
+        assert 0 <= top < bottom <= height
+        total_area += (right - left) * (bottom - top)
+    for first_index, first in enumerate(cells):
+        for second in cells[first_index + 1 :]:
+            overlap_x = min(first[2], second[2]) - max(first[0], second[0])
+            overlap_y = min(first[3], second[3]) - max(first[1], second[1])
+            assert overlap_x <= 0 or overlap_y <= 0, (first, second)
+    assert total_area == width * height
+
+
+def test_collage_cell_layouts_tile_the_panel_for_each_supported_count():
+    for count in (2, 3, 4, 5, 6):
+        cells = _collage_cells(1000, 600, count)
+        assert len(cells) == count
+        _assert_cells_tile_panel(1000, 600, cells)
+        # Odd geometries must not create degenerate cells either.
+        for width, height in ((250, 160), (300, 201), (1280, 720), (100, 50)):
+            sized_cells = _collage_cells(width, height, count)
+            assert len(sized_cells) == count
+            _assert_cells_tile_panel(width, height, sized_cells)
+
+
+def test_collage_count_five_preserves_the_classic_asymmetric_mosaic():
+    # 250x160: main_x=round(250*0.60)=150, left_y=round(160*0.62)=99,
+    # right_y=round(160*0.42)=67, lower_left_x=150//2=75.
+    cells = _collage_cells(250, 160, 5)
+    assert cells == (
+        (0, 0, 150, 99),
+        (0, 99, 75, 160),
+        (75, 99, 150, 160),
+        (150, 0, 250, 67),
+        (150, 67, 250, 160),
+    )
+
+
+def test_compose_collage_counts_two_to_six_render_every_picture(tmp_path: Path):
+    monitors = [Monitor("A", 250, 160, 0, 0)]
+    for count in (2, 3, 4, 6):
+        colors = [
+            (230, 40, 50),
+            (40, 200, 80),
+            (50, 90, 230),
+            (230, 190, 40),
+            (180, 50, 210),
+            (200, 160, 30),
+        ][:count]
+        paths = []
+        for index, color in enumerate(colors):
+            path = tmp_path / f"collage-count-{count}-{index}.png"
+            Image.new("RGB", (120, 80), color).save(path)
+            paths.append(str(path))
+        output = compose_collage(monitors, {"A": paths}, tmp_path / f"collage-count-{count}.png", count=count)
+        with Image.open(output) as collage:
+            assert collage.size == (250, 160)
+            rendered_colors = {
+                color
+                for _count, color in collage.getcolors(maxcolors=collage.width * collage.height) or []
+                if isinstance(color, tuple) and len(color) == 3
+            }
+            assert set(colors).issubset(rendered_colors)
 
 
 def test_collage_tile_preserves_source_edges_and_fits_ultrawide_cells(tmp_path: Path):

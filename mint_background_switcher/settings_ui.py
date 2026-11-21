@@ -19,7 +19,10 @@ from typing import Any, Callable
 from . import APP_NAME, __version__, config_io, public_collections, updater
 from .config import (
     BAR_COLOR_CHOICES,
+    COLLAGE_COUNT_MAX,
+    COLLAGE_COUNT_MIN,
     DEFAULT_BLACK_HOTKEY,
+    DEFAULT_COLLAGE_COUNT,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
@@ -127,7 +130,7 @@ LAYOUT_DESCRIPTIONS = {
     "shared": "Show a different image from the shared picture sources on each screen.",
     "same": "Show the same image from the shared picture sources on every screen.",
     "montage": "Arrange four images from the shared picture sources in a grid on each screen.",
-    "collage": "Arrange five images from the shared picture sources in an asymmetric collage on each screen.",
+    "collage": "Arrange pictures from the shared picture sources in a collage on each screen (choose how many per collage below).",
     "postcard": "Randomly place bare photos from the shared picture sources without frames or pins.",
     "polaroid": "Randomly place overlapping Polaroid-style prints from the shared picture sources.",
     "per-monitor": "Choose separate picture folders for individual screens.",
@@ -571,6 +574,7 @@ class SettingsApp(tk.Tk):
         "polaroid_span_var",
         "polaroid_tilt_var",
         "polaroid_captions_var",
+        "collage_count_var",
         "overlay_title_var",
         "overlay_artist_var",
         "overlay_date_var",
@@ -633,6 +637,7 @@ class SettingsApp(tk.Tk):
         self.polaroid_count_var = tk.IntVar(value=4)
         self.polaroid_size_var = tk.DoubleVar(value=0.5)
         self.polaroid_span_var = tk.BooleanVar(value=False)
+        self.collage_count_var = tk.IntVar(value=DEFAULT_COLLAGE_COUNT)
         self.polaroid_tilt_var = tk.BooleanVar(value=True)
         self.polaroid_captions_var = tk.BooleanVar(value=False)
         self.monitor_folder_var = tk.StringVar()
@@ -1039,7 +1044,7 @@ class SettingsApp(tk.Tk):
             mode: ttk.Frame(self.layout_options_container) for mode in LAYOUT_CHOICES
         }
         for mode in LAYOUT_CHOICES:
-            if mode not in {"postcard", "polaroid", "per-monitor"}:
+            if mode not in {"postcard", "polaroid", "per-monitor", "collage"}:
                 ttk.Label(
                     self.layout_panels[mode],
                     text="This layout has no additional layout-specific options.",
@@ -1161,6 +1166,30 @@ class SettingsApp(tk.Tk):
             variable=self.polaroid_captions_var,
         )
         self.polaroid_captions_checkbutton.pack(side=tk.LEFT, padx=(24, 0))
+
+        collage_panel = self.layout_panels["collage"]
+        self.collage_options = ttk.LabelFrame(collage_panel, text="Collage options", padding=10)
+        self.collage_options.pack(fill=tk.X)
+        collage_layout_options = ttk.Frame(self.collage_options)
+        collage_layout_options.pack(fill=tk.X)
+        self.collage_count_label = ttk.Label(collage_layout_options, text="Pictures per collage:")
+        self.collage_count_label.pack(side=tk.LEFT)
+        self.collage_count_spinbox = ttk.Spinbox(
+            collage_layout_options,
+            from_=COLLAGE_COUNT_MIN,
+            to=COLLAGE_COUNT_MAX,
+            textvariable=self.collage_count_var,
+            width=4,
+        )
+        self.collage_count_spinbox.pack(side=tk.LEFT, padx=(5, 0))
+        self.collage_count_help = ttk.Label(
+            self.collage_options,
+            text="Each screen gets its own collage of that many pictures "
+            f"({COLLAGE_COUNT_MIN}-{COLLAGE_COUNT_MAX}; {DEFAULT_COLLAGE_COUNT} keeps the classic asymmetric mosaic).",
+            justify=tk.LEFT,
+            wraplength=820,
+        )
+        self.collage_count_help.pack(anchor="w", pady=(6, 0))
 
         monitor_frame = ttk.LabelFrame(self.layout_panels["per-monitor"], text="Per-monitor folders", padding=6)
         monitor_frame.pack(fill=tk.BOTH, expand=True)
@@ -1951,6 +1980,7 @@ class SettingsApp(tk.Tk):
         self.polaroid_span_var.set(profile.polaroid_span)
         self.polaroid_tilt_var.set(profile.polaroid_tilt)
         self.polaroid_captions_var.set(profile.polaroid_captions)
+        self.collage_count_var.set(profile.collage_count)
         self._shared_sources_display = [str(p) for p in profile.shared_folders]
         self._refresh_shared_sources_view()
         if vars(self).get("web_sources_tree") is not None:
@@ -2381,6 +2411,18 @@ class SettingsApp(tk.Tk):
         polaroid_tilt = bool(tilt_var.get()) if tilt_var is not None else True
         polaroid_captions_var = vars(self).get("polaroid_captions_var")
         polaroid_captions = bool(polaroid_captions_var.get()) if polaroid_captions_var is not None else False
+        collage_count_var = vars(self).get("collage_count_var")
+        collage_count = DEFAULT_COLLAGE_COUNT
+        if collage_count_var is not None:
+            try:
+                collage_count = max(
+                    COLLAGE_COUNT_MIN, min(COLLAGE_COUNT_MAX, int(collage_count_var.get()))
+                )
+            except (ValueError, tk.TclError):
+                raise ValueError(
+                    "Pictures per collage must be a whole number "
+                    f"between {COLLAGE_COUNT_MIN} and {COLLAGE_COUNT_MAX}."
+                ) from None
         fit_mode = FIT_MODE_LABEL_TO_VALUE.get(str(self.fit_mode_var.get()).strip(), "fit_bars")
         # Exclusions are managed on the Never Show Again page, not in these fields; carry the
         # current profile's list forward so saving or renaming never silently wipes it.
@@ -2484,6 +2526,7 @@ class SettingsApp(tk.Tk):
             polaroid_size=polaroid_size,
             polaroid_span=polaroid_span,
             polaroid_tilt=polaroid_tilt,
+            collage_count=collage_count,
             excluded_images=excluded_images,
             web_sources=web_sources,
             overlay_title=overlay_title,

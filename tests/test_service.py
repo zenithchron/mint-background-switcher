@@ -733,11 +733,12 @@ def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
     save_config(cfg)
     captured = {}
 
-    def fake_compose_collage(monitors, images_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars"):
+    def fake_compose_collage(monitors, images_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars", count=5):
         captured["monitors"] = [monitor.name for monitor in monitors]
         captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
         captured["bar_color"] = bar_color
         captured["fit_mode"] = fit_mode
+        captured["count"] = count
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(b"collage")
         return Path(output_path)
@@ -770,8 +771,54 @@ def test_collage_mode_uses_five_images_per_monitor(monkeypatch, tmp_path: Path):
     assert all(len(paths) == 5 for paths in captured["images_by_monitor"].values())
     assert captured["bar_color"] == "black"
     assert captured["fit_mode"] == "fit_bars"
+    assert captured["count"] == 5
     assert "profile:P:collage" not in state.remaining
     assert draw_counts == [("profile:P:collage", 10)]
+
+
+def test_collage_mode_uses_configured_picture_count_per_monitor(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    cfg = service.load_config()
+    cfg.get_profile("P").mode = "collage"
+    cfg.get_profile("P").collage_count = 3
+    save_config(cfg)
+    captured = {}
+
+    def fake_compose_collage(monitors, images_by_monitor, output_path, *, bar_color="black", fit_mode="fit_bars", count=5):
+        captured["monitors"] = [monitor.name for monitor in monitors]
+        captured["images_by_monitor"] = {name: list(paths) for name, paths in images_by_monitor.items()}
+        captured["count"] = count
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"collage")
+        return Path(output_path)
+
+    monkeypatch.setattr(service, "compose_collage", fake_compose_collage)
+    draw_counts = []
+    original_draw = service.LibrarySelection.draw
+
+    def observed_draw(selection, signature, bucket, count, *, rng=None, sequential=False, orientations=None):
+        draw_counts.append((bucket, count))
+        return original_draw(
+            selection,
+            signature,
+            bucket,
+            count,
+            rng=rng,
+            sequential=sequential,
+            orientations=orientations,
+        )
+
+    monkeypatch.setattr(service.LibrarySelection, "draw", observed_draw)
+
+    result = switch_once("P", dry_run=False, rng=random.Random(7))
+
+    assert result.action == "next"
+    assert len(result.images) == 6
+    assert captured["monitors"] == ["A", "B"]
+    assert captured["images_by_monitor"] == {"A": result.images[:3], "B": result.images[3:]}
+    assert all(len(paths) == 3 for paths in captured["images_by_monitor"].values())
+    assert captured["count"] == 3
+    assert draw_counts == [("profile:P:collage", 6)]
 
 
 def test_collage_dry_run_skips_malformed_images_without_changing_sources_or_state(
@@ -847,7 +894,7 @@ def test_collage_decode_retry_is_bounded_before_safe_black_fallback(monkeypatch,
     _write_images(image_dir, count=24)
     attempts = []
 
-    def fail_selected_source(_monitors, images_by_monitor, _output_path, *, bar_color="black", fit_mode="fit_bars"):
+    def fail_selected_source(_monitors, images_by_monitor, _output_path, *, bar_color="black", fit_mode="fit_bars", count=5):
         selected = [path for paths in images_by_monitor.values() for path in paths]
         attempts.append(selected)
         raise service.ImageDecodeError(selected[0])

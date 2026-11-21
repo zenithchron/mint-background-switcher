@@ -205,6 +205,25 @@ def test_collage_mode_is_valid():
     assert cfg.get_profile().mode == "collage"
 
 
+def test_collage_count_roundtrip_with_backward_compatible_default_and_bounds():
+    defaults = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "collage"}}})
+    assert defaults.get_profile().collage_count == 5
+    assert defaults.to_dict()["profiles"]["P"]["collage_count"] == 5
+
+    configured = Config.from_dict({"active_profile": "P", "profiles": {"P": {"collage_count": "4"}}})
+    assert configured.get_profile().collage_count == 4
+    assert configured.to_dict()["profiles"]["P"]["collage_count"] == 4
+
+    high = Config.from_dict({"active_profile": "P", "profiles": {"P": {"collage_count": 999}}})
+    low = Config.from_dict({"active_profile": "P", "profiles": {"P": {"collage_count": 0}}})
+    malformed = Config.from_dict({"active_profile": "P", "profiles": {"P": {"collage_count": "junk"}}})
+    missing = Config.from_dict({"active_profile": "P", "profiles": {"P": {}}})
+    assert high.get_profile().collage_count == 6
+    assert low.get_profile().collage_count == 2
+    assert malformed.get_profile().collage_count == 5
+    assert missing.get_profile().collage_count == 5
+
+
 def test_postcard_mode_is_valid():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "POSTCARD"}}})
     assert cfg.get_profile().mode == "postcard"

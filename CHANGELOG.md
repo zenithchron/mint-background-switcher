@@ -4,6 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.34] - 2026-11-21
+
+### Added
+
+- **Configurable collage image count** (JBS collage-count parity; roadmap section 2):
+  - **Settings → Layout & Appearance → Collage** gains a **Pictures per collage** spinbox (2–6, default 5): each screen gets its own collage of that many pictures, saved with the profile.
+  - The default 5 keeps the classic asymmetric mosaic exactly; 2 (side-by-side), 3 (top banner plus two bottom cells), 4 (2×2), and 6 (2×3) use deterministic grid layouts that tile the whole panel, so every picture stays visible and uncropped.
+  - Legacy configs keep the default of 5; out-of-range saved values are clamped into 2–6 on load; and an invalid spinbox value fails the save with a one-line message instead of a Tcl error.
+- Bumped the package version to `0.2.34`.
+
 ## [0.2.33] - 2026-11-20
 
 ### Added

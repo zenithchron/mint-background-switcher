@@ -69,7 +69,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 
 ### 6. Presentation depth
 
-- Configurable collage image count.
+- Configurable collage image count. Shipped in `0.2.34` as the **Pictures per collage** spinbox (2–6, default 5) on the Layout & Appearance collage section, saved per profile; the default 5 keeps the classic asymmetric mosaic exactly while 2, 3, 4, and 6 use deterministic grids that tile the whole panel.
 - Richer pile size, spacing, overlap, rotation, and backdrop controls.
 - Optional title, photographer, and date overlays.
 - No-draw zones, one- and three-month calendar choices, and fade transitions.

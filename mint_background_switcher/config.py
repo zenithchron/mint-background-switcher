@@ -116,6 +116,12 @@ DEFAULT_REDRAW_HOTKEY = "<Primary><Alt>r"
 # truncated so a config can never hold a silently altered entry.
 MAX_EXCLUDED_IMAGES = 1000
 MAX_EXCLUDED_PATH_LENGTH = 4096
+# Collage image count bounds: 5 is the classic asymmetric mosaic; fewer or
+# more pictures use a deterministic grid layout. Out-of-range saved values
+# are clamped so a malformed config can never request an unsupported mosaic.
+DEFAULT_COLLAGE_COUNT = 5
+COLLAGE_COUNT_MIN = 2
+COLLAGE_COUNT_MAX = 6
 
 
 def parse_night_time(value: Any) -> tuple[int, int] | None:
@@ -176,6 +182,15 @@ def _coerce_photo_count(value: Any, default: int = 4) -> int:
         return max(1, min(100, int(value)))
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+def _coerce_collage_count(value: Any, default: int = DEFAULT_COLLAGE_COUNT) -> int:
+    """Clamp a saved collage image count into the supported 2-6 range."""
+    try:
+        count = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(COLLAGE_COUNT_MIN, min(count, COLLAGE_COUNT_MAX))
 
 
 def _coerce_photo_size(value: Any, default: float = 0.5) -> float:
@@ -412,6 +427,10 @@ class Profile:
     previous_hotkey: str = DEFAULT_PREVIOUS_HOTKEY
     redraw_hotkey: str = DEFAULT_REDRAW_HOTKEY
     post_switch_command: str = ""
+    # Collage pictures per screen (2-6; 5 keeps the classic asymmetric
+    # mosaic). Appended last so the legacy positional-argument order stays
+    # stable (see tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
+    collage_count: int = DEFAULT_COLLAGE_COUNT
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -472,6 +491,7 @@ class Profile:
             previous_hotkey=_coerce_hotkey(data.get("previous_hotkey"), DEFAULT_PREVIOUS_HOTKEY),
             redraw_hotkey=_coerce_hotkey(data.get("redraw_hotkey"), DEFAULT_REDRAW_HOTKEY),
             post_switch_command=_coerce_post_switch_command(data.get("post_switch_command", "")),
+            collage_count=_coerce_collage_count(data.get("collage_count", DEFAULT_COLLAGE_COUNT)),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -520,6 +540,7 @@ class Profile:
             "previous_hotkey": self.previous_hotkey,
             "redraw_hotkey": self.redraw_hotkey,
             "post_switch_command": self.post_switch_command,
+            "collage_count": self.collage_count,
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,

@@ -14,7 +14,12 @@ import warnings
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageStat
 
-from .config import RANDOM_EFFECT_CHOICES
+from .config import (
+    COLLAGE_COUNT_MAX,
+    COLLAGE_COUNT_MIN,
+    DEFAULT_COLLAGE_COUNT,
+    RANDOM_EFFECT_CHOICES,
+)
 from .monitor import Monitor, normalized_position, virtual_canvas
 from .paths import xdg_cache_dir
 
@@ -676,6 +681,61 @@ def _collage_tile(
     return fit_image(source, size, fit_mode=fit_mode, bar_color=bar_color)
 
 
+def _collage_cells(width: int, height: int, count: int) -> tuple[tuple[int, int, int, int], ...]:
+    """Deterministic cell rectangles for a collage of ``count`` pictures.
+
+    Every layout tiles the whole panel with exactly ``count`` non-overlapping
+    cells so each picture stays visible. ``count == 5`` keeps the classic
+    asymmetric mosaic; the other supported counts use simple grids.
+    """
+    if count == 2:
+        mid_x = width // 2
+        return (
+            (0, 0, mid_x, height),
+            (mid_x, 0, width, height),
+        )
+    if count == 3:
+        top = round(height * 0.55)
+        mid_x = width // 2
+        return (
+            (0, 0, width, top),
+            (0, top, mid_x, height),
+            (mid_x, top, width, height),
+        )
+    if count == 4:
+        mid_x = width // 2
+        mid_y = height // 2
+        return (
+            (0, 0, mid_x, mid_y),
+            (mid_x, 0, width, mid_y),
+            (0, mid_y, mid_x, height),
+            (mid_x, mid_y, width, height),
+        )
+    if count == 6:
+        col_w = width // 3
+        mid_y = height // 2
+        return (
+            (0, 0, col_w, mid_y),
+            (col_w, 0, 2 * col_w, mid_y),
+            (2 * col_w, 0, width, mid_y),
+            (0, mid_y, col_w, height),
+            (col_w, mid_y, 2 * col_w, height),
+            (2 * col_w, mid_y, width, height),
+        )
+    # count == 5: the classic asymmetric mosaic.
+    main_x = round(width * 0.60)
+    left_y = round(height * 0.62)
+    right_y = round(height * 0.42)
+    lower_left_x = main_x // 2
+    return (
+        (0, 0, main_x, left_y),
+        (0, left_y, lower_left_x, height),
+        (lower_left_x, left_y, main_x, height),
+        (main_x, 0, width, right_y),
+        (main_x, right_y, width, height),
+    )
+
+
 def compose_collage(
     monitors: list[Monitor],
     images_by_monitor: dict[str, list[str]],
@@ -683,26 +743,22 @@ def compose_collage(
     *,
     bar_color: str = "black",
     fit_mode: str = "fit_bars",
+    count: int = DEFAULT_COLLAGE_COUNT,
 ) -> Path:
-    """Compose five uncropped local photos as an asymmetric mosaic per monitor."""
+    """Compose uncropped local photos as a per-monitor collage mosaic.
 
+    ``count`` is the number of pictures per screen (2-6; the default 5 keeps
+    the classic asymmetric mosaic). Monitors with fewer pictures leave the
+    remaining cells as the panel background.
+    """
+    count = max(COLLAGE_COUNT_MIN, min(COLLAGE_COUNT_MAX, int(count)))
     if not monitors:
         raise ValueError("Cannot compose wallpaper without monitors")
     width, height, min_x, min_y = virtual_canvas(monitors)
     combined = Image.new("RGB", (width, height), (0, 0, 0))
     for monitor in monitors:
         panel = Image.new("RGB", (monitor.width, monitor.height), (0, 0, 0))
-        main_x = round(monitor.width * 0.60)
-        left_y = round(monitor.height * 0.62)
-        right_y = round(monitor.height * 0.42)
-        lower_left_x = main_x // 2
-        cells = (
-            (0, 0, main_x, left_y),
-            (0, left_y, lower_left_x, monitor.height),
-            (lower_left_x, left_y, main_x, monitor.height),
-            (main_x, 0, monitor.width, right_y),
-            (main_x, right_y, monitor.width, monitor.height),
-        )
+        cells = _collage_cells(monitor.width, monitor.height, count)
         image_paths = images_by_monitor.get(monitor.name, [])
         for image_path, (left, top, right, bottom) in zip(image_paths, cells):
             cell_width = right - left
