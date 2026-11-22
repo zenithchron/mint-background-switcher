@@ -4,6 +4,16 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.35] - 2026-11-22
+
+### Changed
+
+- **Non-modal status feedback in Settings** (Settings UI redesign Increment 6, part 1): the Settings window now has a persistent status line above the action footer. Routine outcomes — saving a profile, adding/removing/revealing shared or web sources, per-monitor folder and shuffle outcomes, exporting/importing/resetting settings, working-folder changes, saving the current wallpaper, and update-check results ("up to date", no update installed, no rollback available) — are reported there instead of as pop-up dialogs, so the window stays the active context while you work.
+  - Status text is flattened to one line and truncated to 120 characters with an ellipsis.
+  - Detail-heavy operation reports (collection results, refresh summaries, hotkey registration reports), the About dialog, close-blocking warnings, and prompts inside the Current Pictures window remain modal dialogs.
+  - The Settings window keeps its pinned 944×668 geometry; the status line fits inside the existing layout.
+- Bumped the package version to `0.2.35`.
+
 ## [0.2.34] - 2026-11-21
 
 ### Added

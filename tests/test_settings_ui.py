@@ -193,6 +193,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
             app.profile_save_button,
         )
         footer_controls = (
+            app.status_label,
             app.apply_button,
             app.profile_revert_button,
             app.black_button,
@@ -864,22 +865,23 @@ def test_open_picture_accepts_a_long_running_desktop_handoff(monkeypatch, tmp_pa
 
 
 def test_view_current_pictures_reports_when_no_sources_are_recorded(monkeypatch):
-    messages = []
     dummy = object.__new__(settings_ui.SettingsApp)
     setattr(dummy, "_any_worker_busy", lambda: False)
     setattr(dummy, "_optional_attr", lambda _name, default=None: default)
+    setattr(dummy, "status_var", _Var("Ready."))
     monkeypatch.setattr(settings_ui, "current_source_images", lambda: [])
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showinfo",
-        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must be non-modal")),
     )
 
     settings_ui.SettingsApp._view_current_pictures(dummy)
 
-    assert messages and messages[0][0] == "No current pictures"
-    assert "Save & Apply Now" in messages[0][1]
-    assert messages[0][2]["parent"] is dummy
+    assert dummy.status_var.get() == (
+        "No source pictures are recorded for the current wallpaper. "
+        "Choose Save & Apply Now first."
+    )
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
@@ -1049,7 +1051,8 @@ def test_settings_effect_menu_exposes_vignette_and_is_visible(monkeypatch, tmp_p
         assert app.effect_var.get() == "vignette"
         assert app._save_current() is True
         assert saved_effects == ["vignette"]
-        assert messages and messages[-1][0] == "Saved"
+        assert app.status_var.get() == "Saved profile 'Default'."
+        assert messages == []
     finally:
         app.destroy()
 
@@ -2759,8 +2762,10 @@ def test_settings_add_feed_button_adds_prefixed_entry_and_persists(monkeypatch, 
             ["Image URL", "https://example.com/pic.jpg", "Default", "Not cached yet"],
             ["Feed", "https://example.com/gallery.rss", "Default", "Not cached yet"],
         ]
-        assert infos and infos[-1][0] == "Web source added"
-        assert "RSS/Atom feed" in infos[-1][1]
+        assert app.status_var.get() == (
+            "Added RSS/Atom feed: https://example.com/gallery.rss — "
+            "choose Save Profile to keep this profile change."
+        )
         assert app.web_url_entry.get() == ""
 
         assert app._save_current() is True
@@ -2811,13 +2816,16 @@ def test_settings_web_source_rejects_invalid_feed_url_and_duplicate(monkeypatch,
         app.web_url_entry.insert(0, "https://example.com/gallery.rss")
         app.web_add_feed_button.invoke()
         app.update()
-        assert infos and infos[-1][0] == "Web source added"
+        assert app.status_var.get() == (
+            "Added RSS/Atom feed: https://example.com/gallery.rss — "
+            "choose Save Profile to keep this profile change."
+        )
         errors.clear()
         app.web_url_entry.delete(0, settings_ui.tk.END)
         app.web_url_entry.insert(0, "https://example.com/gallery.rss")
         app.web_add_feed_button.invoke()
         app.update()
-        assert infos and infos[-1][0] == "Web source already listed"
+        assert app.status_var.get() == "That URL is already listed: https://example.com/gallery.rss"
         assert _web_source_rows(app) == [
             ["Feed", "https://example.com/gallery.rss", "Default", "Not cached yet"]
         ]
@@ -3581,8 +3589,8 @@ def test_export_current_wallpaper_uses_png_dialog_and_service(monkeypatch, tmp_p
     destination = tmp_path / "current-background.png"
     dialogs = []
     saves = []
-    messages = []
     dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "status_var", _Var("Ready."))
 
     monkeypatch.setattr(
         settings_ui.filedialog,
@@ -3597,7 +3605,7 @@ def test_export_current_wallpaper_uses_png_dialog_and_service(monkeypatch, tmp_p
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showinfo",
-        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("wallpaper feedback must be non-modal")),
     )
 
     settings_ui.SettingsApp._export_current_wallpaper(dummy)
@@ -3608,8 +3616,7 @@ def test_export_current_wallpaper_uses_png_dialog_and_service(monkeypatch, tmp_p
     assert dialogs[0]["confirmoverwrite"] is False
     assert ("PNG image", "*.png") in dialogs[0]["filetypes"]
     assert saves == [(destination, False)]
-    assert messages and messages[0][0] == "Wallpaper saved"
-    assert str(destination) in messages[0][1]
+    assert dummy.status_var.get().startswith("Saved the current wallpaper to ")
 
 
 def test_export_current_wallpaper_confirms_file_created_after_dialog(monkeypatch, tmp_path):
@@ -3617,6 +3624,7 @@ def test_export_current_wallpaper_confirms_file_created_after_dialog(monkeypatch
     saves = []
     confirmations = []
     dummy = object.__new__(settings_ui.SettingsApp)
+    setattr(dummy, "status_var", _Var("Ready."))
 
     def fake_save(path, *, overwrite=False):
         saves.append((path, overwrite))
@@ -3745,10 +3753,10 @@ def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_pat
     picture = tmp_path / "selected picture.PNG"
     Image.new("RGB", (16, 10), (20, 80, 140)).save(picture)
     dialogs = []
-    messages = []
     errors = []
     dummy = object.__new__(settings_ui.SettingsApp)
     setattr(dummy, "_shared_sources_display", ["/tmp/example/Pictures"])
+    setattr(dummy, "status_var", _Var("Ready."))
     monkeypatch.setattr(
         settings_ui.filedialog,
         "askopenfilename",
@@ -3757,7 +3765,7 @@ def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_pat
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showinfo",
-        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("add feedback must be non-modal")),
     )
     monkeypatch.setattr(
         settings_ui.messagebox,
@@ -3766,18 +3774,16 @@ def test_add_shared_picture_validates_and_reports_selection(monkeypatch, tmp_pat
     )
 
     settings_ui.SettingsApp._add_shared_picture(dummy)
-    settings_ui.SettingsApp._add_shared_picture(dummy)
 
     assert dialogs[0]["parent"] is dummy
     assert dialogs[0]["title"] == "Add an individual wallpaper picture"
     assert ("Supported pictures", settings_ui.SUPPORTED_PICTURE_PATTERNS) in dialogs[0]["filetypes"]
     assert dummy._shared_sources_display == ["/tmp/example/Pictures", str(picture.resolve())]
-    assert [title for title, _message, _kwargs in messages] == [
-        "Picture added",
-        "Picture already listed",
-    ]
-    assert "Choose Save Profile" in messages[0][1]
-    assert all(message[2]["parent"] is dummy for message in messages)
+    assert dummy.status_var.get().startswith("Added to the shared source list: ")
+
+    settings_ui.SettingsApp._add_shared_picture(dummy)
+
+    assert dummy.status_var.get().startswith("Picture already in the shared source list: ")
     assert errors == []
 
 
@@ -3858,7 +3864,7 @@ def test_settings_add_picture_is_visible_and_saves_individual_source(monkeypatch
 
         assert str(picture.resolve()) in app._shared_sources_display
         assert str(picture.resolve()) in settings_ui.load_config().get_profile("Default").shared_folders
-        assert [title for title, _message, _kwargs in messages][-2:] == ["Picture added", "Saved"]
+        assert app.status_var.get() == "Saved profile 'Default'."
         assert errors == []
     finally:
         app.destroy()
@@ -3939,13 +3945,13 @@ def test_remove_monitor_folder_dialog_can_delete_last_assignment():
 
 
 def test_remove_monitor_folder_dialog_shows_message_when_empty(monkeypatch):
-    messages = []
-    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message: messages.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must be non-modal")))
     dummy = object.__new__(settings_ui.SettingsApp)
     setattr(dummy, "monitor_folders_data", {})
+    setattr(dummy, "status_var", _Var("Ready."))
 
     assert settings_ui.SettingsApp._choose_monitor_folder_to_remove(dummy) is None
-    assert messages and messages[0][0] == "No per-monitor folders"
+    assert dummy.status_var.get() == "There are no per-monitor folder assignments to remove."
 
 
 def test_new_profile_prompts_for_name_and_saves(monkeypatch):
@@ -4189,7 +4195,6 @@ def test_working_folder_migration_runs_off_tk_thread_and_retains_source(monkeypa
     monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
     gate = threading.Event()
     real_migrate = settings_ui.migrate_working_directory
-    messages = []
 
     def delayed_migration(*args, **kwargs):
         assert gate.wait(timeout=2)
@@ -4200,7 +4205,7 @@ def test_working_folder_migration_runs_off_tk_thread_and_retains_source(monkeypa
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showinfo",
-        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("migration feedback must be non-modal")),
     )
     app = settings_ui.SettingsApp()
     try:
@@ -4220,8 +4225,8 @@ def test_working_folder_migration_runs_off_tk_thread_and_retains_source(monkeypa
         assert settings_ui.load_config().working_directory == str(target.resolve())
         assert active.read_bytes() == b"generated wallpaper"
         assert (target / active.name).read_bytes() == b"generated wallpaper"
-        assert messages and messages[-1][0] == "Working folder changed"
-        assert "retained" in messages[-1][1].lower()
+        assert app.status_var.get().startswith("MBS now uses")
+        assert str(target.resolve()) in app.status_var.get()
     finally:
         gate.set()
         app.destroy()
@@ -4618,25 +4623,25 @@ def test_up_to_date_managed_copy_reports_current_without_install(monkeypatch):
         "https://github.com/example/archive.tar.gz",
     )
     check = settings_ui.updater.UpdateCheck(settings_ui.__version__, release)
-    messages = []
     dummy = object.__new__(settings_ui.SettingsApp)
     setattr(
         dummy,
         "_install_checked_release",
         lambda _selected: (_ for _ in ()).throw(AssertionError("up-to-date managed copy must not install")),
     )
+    setattr(dummy, "status_var", _Var("Ready."))
     monkeypatch.setattr(settings_ui.updater, "is_managed_runtime", lambda: True)
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showinfo",
-        lambda title, message, **kwargs: messages.append((title, message, kwargs)),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("up-to-date feedback must be non-modal")),
     )
 
     settings_ui.SettingsApp._handle_update_check(dummy, check)
 
-    assert messages and messages[0][0] == "Up to date"
-    assert settings_ui.__version__ in messages[0][1]
-    assert messages[0][2]["parent"] is dummy
+    assert dummy.status_var.get() == (
+        f"Mint Background Switcher {settings_ui.__version__} is the latest public release."
+    )
 
 
 def test_successful_install_can_restart_into_managed_settings(monkeypatch, tmp_path):
@@ -5026,6 +5031,7 @@ def test_save_current_persists_hotkey_bindings(monkeypatch):
     setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
     setattr(dummy, "_shared_sources_display", ["/shared"])
     setattr(dummy, "monitor_folders_data", {})
+    setattr(dummy, "status_var", _Var("Ready."))
     setattr(dummy, "config_data", settings_ui.Config(active_profile="P", profiles={}))
 
     assert settings_ui.SettingsApp._save_current(dummy) is True
@@ -5073,6 +5079,7 @@ def test_save_current_partial_app_carries_forward_no_draw_zones(monkeypatch):
     setattr(dummy, "fit_mode_var", _Var("Fit with bars"))
     setattr(dummy, "_shared_sources_display", ["/shared"])
     setattr(dummy, "monitor_folders_data", {})
+    setattr(dummy, "status_var", _Var("Ready."))
     setattr(
         dummy,
         "config_data",
@@ -5151,7 +5158,7 @@ def test_export_settings_writes_file_and_reports_status(monkeypatch, tmp_path):
         document = json.loads(destination.read_text(encoding="utf-8"))
         assert document["config"] == app.config_data.to_dict()
         assert "Exported 1 profile" in app.backup_status_var.get()
-        assert infos and "mbs-settings.json" in infos[0][1]
+        assert app.status_var.get().startswith("Exported")
     finally:
         app.destroy()
 
@@ -5211,7 +5218,7 @@ def test_import_settings_replaces_config_and_refreshes_editor(monkeypatch, tmp_p
         assert app.profile_scope_var.get() == "Profile settings for “Work”"
         assert app.working_directory_var.get() == "/working/imported"
         assert "Imported 2 profiles" in app.backup_status_var.get()
-        assert infos and "donor.json" in infos[0][1]
+        assert app.status_var.get().startswith("Imported")
         # The on-disk config was replaced, not merged.
         assert settings_ui.load_config().to_dict() == donor.to_dict()
     finally:
@@ -5319,8 +5326,8 @@ def test_reset_to_defaults_replaces_config_and_refreshes_editor(monkeypatch, tmp
         assert app._shared_sources_display == [str(home / "Pictures")]
         assert app.working_directory_var.get() == "/working/reset"
         assert app.backup_status_var.get() == "Settings reset to the factory defaults."
-        assert infos and infos[0][0] == "Settings reset"
-        assert "working-folder setting was kept" in infos[0][1]
+        assert app.status_var.get().startswith("Settings reset to the factory defaults")
+        assert "working-folder setting was kept" in app.status_var.get()
     finally:
         app.destroy()
 
@@ -5915,11 +5922,10 @@ def test_settings_shuffle_monitor_assignments_updates_pending_and_marks_unsaved(
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
-    infos = []
     monkeypatch.setattr(
         settings_ui.messagebox,
         "showinfo",
-        lambda title, message, **_kwargs: infos.append((title, message)),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("shuffle feedback must be non-modal")),
     )
     monkeypatch.setattr(
         settings_ui.messagebox,
@@ -5968,8 +5974,7 @@ def test_settings_shuffle_monitor_assignments_updates_pending_and_marks_unsaved(
         saved = load_config().get_profile("Default")
         assert saved.mode == "per-monitor"
         assert saved.monitor_folders == {}
-        assert infos
-        assert "shuffled" in infos[0][0].lower()
+        assert app.status_var.get().startswith("The per-monitor folders were shuffled.")
     finally:
         app.destroy()
 
@@ -6005,15 +6010,14 @@ def test_shuffle_monitor_assignments_pending_requires_per_monitor_mode(monkeypat
 
 
 def test_shuffle_monitor_assignments_pending_reports_no_change(monkeypatch):
-    infos = []
-    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda title, message, **_kwargs: infos.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must be non-modal")))
     dummy = object.__new__(settings_ui.SettingsApp)
     setattr(dummy, "mode_var", _Var("per-monitor"))
     setattr(dummy, "monitor_folders_data", {"DP-1": ["/same"], "HDMI-1": ["/same"]})
     setattr(dummy, "monitor_assignments_tree", _Tree())
+    setattr(dummy, "status_var", _Var("Ready."))
 
     settings_ui.SettingsApp._shuffle_monitor_assignments_pending(dummy)
 
-    assert infos
-    assert infos[0][0] == "No change"
+    assert dummy.status_var.get() == "This shuffle matches the current assignments, so nothing was changed."
     assert dummy.monitor_folders_data == {"DP-1": ["/same"], "HDMI-1": ["/same"]}

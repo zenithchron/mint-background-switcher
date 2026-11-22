@@ -18,7 +18,7 @@ This roadmap turns the John’s Background Switcher 6.1 parity audit into an imp
 
 Before `0.2.3`, the Settings window exposed most features through navigation that reflected implementation history rather than user tasks: Profile context and Save were limited to General, while the selected layout was separate from the layout tab being viewed. Increment 1 made Profile, Layout, and Save persistent; Increment 2 replaced the eight peer layout tabs with one synchronized Layout workspace; Increment 3 grouped the remaining controls into profile tasks and application tasks.
 
-**Status:** Increments 1–3 are complete in `0.2.3` through `0.2.5`; Increment 4 is complete in `0.2.31`; Increment 5 is complete in `0.2.32`; Increment 6 is next.
+**Status:** Increments 1–3 are complete in `0.2.3` through `0.2.5`; Increment 4 is complete in `0.2.31`; Increment 5 is complete in `0.2.32`; Increment 6 is in progress — part 1 (nonmodal status feedback) shipped in `0.2.35`, with the remaining label/keyboard/focus/screen-reader/1024×768 polish next.
 
 Implement the redesign in small, testable increments:
 
@@ -27,7 +27,7 @@ Implement the redesign in small, testable increments:
 3. **Task-based navigation — complete in `0.2.5`** — profile controls now live under Sources, Layout & Appearance, and Rotation & Shortcuts; application controls live under Public Collections, Storage, and Updates & About. Scope labels name the selected profile or shared application scope, and keyboard traversal covers all six pages.
 4. **Structured source management — complete in `0.2.31`** — source lists are read-only rows showing source type, location, scope, and availability, with explicit Add, Remove, and Reveal actions.
 5. **Safe edit lifecycle — complete in `0.2.32`** — an Unsaved indicator, a Revert button, and save/discard/cancel protection when switching profiles or closing; emergency Black Screen applies from the saved settings without persisting unrelated pending edits.
-6. **Responsive and accessible polish** — improve labels, keyboard traversal, focus, nonmodal status feedback, screen-reader meaning, and 1024×768 behavior.
+6. **Responsive and accessible polish — in progress** — improve labels, keyboard traversal, focus, nonmodal status feedback, screen-reader meaning, and 1024×768 behavior. Nonmodal status feedback (the persistent Settings status line) shipped in `0.2.35`.
 
 UI work must preserve all profile/config fields, callbacks, update safety, source immutability, and wallpaper rendering behavior. Every increment requires focused Tk/Xvfb coverage and the full suite.
 

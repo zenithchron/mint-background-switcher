@@ -96,6 +96,9 @@ SETTINGS_WINDOW_MIN_WIDTH = 980
 SETTINGS_WINDOW_MIN_HEIGHT = 680
 SETTINGS_WINDOW_SCREEN_MARGIN_X = 80
 SETTINGS_WINDOW_SCREEN_MARGIN_Y = 100
+# Maximum characters shown in the settings status line; longer results are
+# flattened to one line and truncated with an ellipsis.
+STATUS_TEXT_LIMIT = 120
 PROJECT_URL = "https://github.com/zenithchron/mint-background-switcher"
 WORKING_DIRECTORY_STATUS_PATH_LIMIT = 64
 # Read-only source row columns (structured source management, roadmap increment 4).
@@ -1868,6 +1871,15 @@ class SettingsApp(tk.Tk):
         self.rollback_button.pack(side=tk.LEFT, padx=3)
         ttk.Label(maintenance, textvariable=self.update_status_var).pack(side=tk.LEFT, padx=(8, 3))
 
+        # Non-modal status line (roadmap increment 6): routine results and
+        # guidance prompts report here instead of modal popups, so everyday
+        # editing never interrupts the workflow. Detail-heavy operation
+        # reports and blocking warnings still use dialogs.
+        self.status_var = tk.StringVar(value="Ready.")
+        status_bar = ttk.Frame(root)
+        status_bar.pack(fill=tk.X, pady=(0, 2))
+        self.status_label = ttk.Label(status_bar, textvariable=self.status_var)
+        self.status_label.pack(side=tk.LEFT, padx=(2, 0))
         bottom = ttk.Frame(root)
         bottom.pack(fill=tk.X)
         self.apply_button = ttk.Button(bottom, text="Save & Apply Now", command=self._apply_next)
@@ -1912,6 +1924,21 @@ class SettingsApp(tk.Tk):
         self.collections_profile_scope_var.set(
             f"Optional source setup targets the selected profile: “{profile_name}”."
         )
+
+    def _set_status(self, text: str) -> None:
+        """Report a routine, non-blocking result in the settings status line.
+
+        Multi-line messages are flattened to one line and bounded by
+        ``STATUS_TEXT_LIMIT`` so the line always fits the pinned window
+        geometry under CI font metrics.
+        """
+
+        flat = " ".join(
+            part for part in (line.strip() for line in str(text).splitlines()) if part
+        )
+        if len(flat) > STATUS_TEXT_LIMIT:
+            flat = flat[: STATUS_TEXT_LIMIT - 1].rstrip() + "…"
+        self.status_var.set(flat or "Done.")
 
     def _select_layout(self, layout: str) -> None:
         """Show the workspace for a user-selected pending layout without saving it."""
@@ -2553,12 +2580,14 @@ class SettingsApp(tk.Tk):
             # The saved values become the new dirty-state baseline.
             self._loaded_profile = copy.deepcopy(profile)
             self._refresh_unsaved_indicator()
-            if show_success:
-                messagebox.showinfo("Saved", f"Saved profile {name!r}.")
-            return True
         except Exception as exc:
             messagebox.showerror("Save failed", str(exc))
             return False
+        # The status line is reporting only: a failure there must not flip an
+        # already-durable save into a reported failure.
+        if show_success:
+            self._set_status(f"Saved profile {name!r}.")
+        return True
 
     def _on_profile_field_change(self, *_args: object) -> None:
         self._refresh_unsaved_indicator()
@@ -2878,16 +2907,10 @@ class SettingsApp(tk.Tk):
             messagebox.showerror("Could not add picture", str(exc), parent=self)
             return
         if not self._append_shared_source(str(picture)):
-            messagebox.showinfo(
-                "Picture already listed",
-                f"This picture is already in the shared source list:\n{picture}",
-                parent=self,
-            )
+            self._set_status(f"Picture already in the shared source list: {picture}")
             return
-        messagebox.showinfo(
-            "Picture added",
-            f"Added to the shared source list:\n{picture}\n\nChoose Save Profile to keep this profile change.",
-            parent=self,
+        self._set_status(
+            f"Added to the shared source list: {picture} — choose Save Profile to keep this change."
         )
 
     def _remove_selected_shared_source(self) -> None:
@@ -2895,11 +2918,7 @@ class SettingsApp(tk.Tk):
             return
         location = self._selected_tree_location(self.shared_sources_tree)
         if location is None:
-            messagebox.showinfo(
-                "Select a source row first",
-                "Select a row in the shared source list, then choose Remove Selected.",
-                parent=self,
-            )
+            self._set_status("Select a source row first, then choose Remove Selected.")
             return
         if location not in self._shared_sources_display:
             self._refresh_shared_sources_view()
@@ -2907,20 +2926,14 @@ class SettingsApp(tk.Tk):
         self._shared_sources_display.remove(location)
         self._refresh_shared_sources_view()
         self._refresh_unsaved_indicator()
-        messagebox.showinfo(
-            "Source removed",
-            f"Removed:\n{location}\n\nChoose Save Profile to keep this profile change.",
-            parent=self,
+        self._set_status(
+            f"Removed from the shared source list: {location} — choose Save Profile to keep this change."
         )
 
     def _reveal_selected_shared_source(self) -> None:
         location = self._selected_tree_location(self.shared_sources_tree)
         if location is None:
-            messagebox.showinfo(
-                "Select a source row first",
-                "Select a row in the shared source list, then choose Reveal.",
-                parent=self,
-            )
+            self._set_status("Select a source row first, then choose Reveal.")
             return
         path = Path(location)
         try:
@@ -2964,11 +2977,9 @@ class SettingsApp(tk.Tk):
             return
         raw = self.web_url_entry.get().strip()
         if not raw:
-            messagebox.showinfo(
-                "Enter a web source URL",
-                f"Type a {noun} (http:// or https://), then choose {button}."
-                + (" Feeds are RSS/Atom documents whose items carry pictures." if is_feed else ""),
-                parent=self,
+            self._set_status(
+                f"Enter a {noun} (http:// or https://) and choose {button}."
+                + (" Feeds are RSS/Atom documents whose items carry pictures." if is_feed else "")
             )
             return
         url = validate_web_url(raw)
@@ -2981,7 +2992,7 @@ class SettingsApp(tk.Tk):
             return
         existing = [url for _kind, url in self._web_source_entries()]
         if url in existing:
-            messagebox.showinfo("Web source already listed", f"That URL is already listed:\n{url}", parent=self)
+            self._set_status(f"That URL is already listed: {url}")
             return
         if len(existing) >= MAX_WEB_SOURCES:
             messagebox.showerror(
@@ -2995,10 +3006,8 @@ class SettingsApp(tk.Tk):
         self.web_url_entry.delete(0, tk.END)
         self._refresh_unsaved_indicator()
         what = "RSS/Atom feed" if is_feed else "web source"
-        messagebox.showinfo(
-            "Web source added",
-            f"Added {what}:\n{url}\n\nChoose Save Profile to keep this profile change.",
-            parent=self,
+        self._set_status(
+            f"Added {what}: {url} — choose Save Profile to keep this profile change."
         )
 
     def _remove_selected_web_source(self) -> None:
@@ -3006,11 +3015,7 @@ class SettingsApp(tk.Tk):
             return
         url = self._selected_tree_location(self.web_sources_tree)
         if url is None:
-            messagebox.showinfo(
-                "Select a web source first",
-                "Select a row in the web source list, then choose Remove Selected.",
-                parent=self,
-            )
+            self._set_status("Select a web source row first, then choose Remove Selected.")
             return
         matching = [entry for entry in self._web_sources_display if entry[1] == url]
         if not matching:
@@ -3019,20 +3024,14 @@ class SettingsApp(tk.Tk):
         self._web_sources_display.remove(matching[0])
         self._refresh_web_sources_view()
         self._refresh_unsaved_indicator()
-        messagebox.showinfo(
-            "Web source removed",
-            f"Removed:\n{url}\n\nChoose Save Profile to keep this profile change.",
-            parent=self,
+        self._set_status(
+            f"Removed web source: {url} — choose Save Profile to keep this profile change."
         )
 
     def _reveal_selected_web_source(self) -> None:
         url = self._selected_tree_location(self.web_sources_tree)
         if url is None:
-            messagebox.showinfo(
-                "Select a web source first",
-                "Select a row in the web source list, then choose Reveal.",
-                parent=self,
-            )
+            self._set_status("Select a web source row first, then choose Reveal.")
             return
         try:
             _open_desktop_target(
@@ -3054,10 +3053,8 @@ class SettingsApp(tk.Tk):
         if self._any_worker_busy() or self._web_refresh_busy:
             return
         if not self._web_sources_display_matches_saved():
-            messagebox.showinfo(
-                "Unsaved web sources",
-                "Choose Save Profile first so the listed URLs are kept, then Refresh Now.",
-                parent=self,
+            self._set_status(
+                "Choose Save Profile first so the listed URLs are kept, then Refresh Now."
             )
             return
         name = self.profile_var.get()
@@ -3067,11 +3064,9 @@ class SettingsApp(tk.Tk):
             messagebox.showerror("Could not refresh web sources", str(exc), parent=self)
             return
         if not profile.web_sources:
-            messagebox.showinfo(
-                "No web sources listed",
-                f"This profile lists no web sources yet. Add direct image URLs or RSS/Atom feeds on this "
-                f"page, choose Save Profile, then Refresh Now.",
-                parent=self,
+            self._set_status(
+                "This profile lists no web sources yet. Add direct image URLs or RSS/Atom feeds, "
+                "choose Save Profile, then Refresh Now."
             )
             return
         self._web_refresh_cancel.clear()
@@ -3141,7 +3136,7 @@ class SettingsApp(tk.Tk):
         folders = self._current_monitor_folders()
         monitors = [monitor for monitor, paths in sorted(folders.items()) if paths]
         if not monitors:
-            messagebox.showinfo("No per-monitor folders", "There are no per-monitor folder assignments to remove.")
+            self._set_status("There are no per-monitor folder assignments to remove.")
             return None
 
         selected: dict[str, tuple[str, str] | None] = {"value": None}
@@ -3196,11 +3191,7 @@ class SettingsApp(tk.Tk):
     def _reveal_selected_monitor_folder(self) -> None:
         location = self._selected_tree_location(self.monitor_assignments_tree)
         if location is None:
-            messagebox.showinfo(
-                "Select an assignment first",
-                "Select a row in the per-monitor assignments, then choose Reveal.",
-                parent=self,
-            )
+            self._set_status("Select a per-monitor assignment row first, then choose Reveal.")
             return
         path = Path(location)
         try:
@@ -3238,19 +3229,15 @@ class SettingsApp(tk.Tk):
             return
         shuffled, changed = compute_shuffled_assignments(assigned, random.SystemRandom())
         if not changed:
-            messagebox.showinfo(
-                "No change",
-                "This shuffle matches the current assignments, so nothing was changed.",
-                parent=self,
+            self._set_status(
+                "This shuffle matches the current assignments, so nothing was changed."
             )
             return
         self._write_monitor_folders(shuffled)
         self._refresh_unsaved_indicator()
-        messagebox.showinfo(
-            "Assignments shuffled",
+        self._set_status(
             "The per-monitor folders were shuffled. Choose Save Profile to keep the change "
-            "(or Save & Apply Now to also apply a new wallpaper right away).",
-            parent=self,
+            "(or Save & Apply Now to also apply a new wallpaper right away)."
         )
 
     def _available_monitor_names(self) -> list[str]:
@@ -3571,14 +3558,9 @@ class SettingsApp(tk.Tk):
             return
         count_text = self._profile_count_text(len(self.config_data.profiles))
         self.backup_status_var.set(f"Exported {count_text} to {path}")
-        messagebox.showinfo(
-            "Settings exported",
-            (
-                f"Exported {count_text} to\n{path}\n\n"
-                "The export contains the saved settings; unsaved editor changes "
-                "are not included."
-            ),
-            parent=self,
+        self._set_status(
+            f"Exported {count_text} to {path}. "
+            "The export contains the saved settings; unsaved editor changes are not included."
         )
 
     def _import_settings(self) -> None:
@@ -3632,14 +3614,9 @@ class SettingsApp(tk.Tk):
         self.working_directory_var.set(str(working_directory))
         self.working_status_var.set(_active_working_directory_status(working_directory))
         self.backup_status_var.set(f"Imported {count_text} from {source}")
-        messagebox.showinfo(
-            "Settings imported",
-            (
-                f"Imported {count_text} from\n{source}\n\n"
-                "The imported settings are active; the background loop uses them from "
-                "its next rotation."
-            ),
-            parent=self,
+        self._set_status(
+            f"Imported {count_text} from {source}. "
+            "The imported settings are active; the background loop uses them from its next rotation."
         )
 
     def _reset_to_defaults(self) -> None:
@@ -3673,15 +3650,10 @@ class SettingsApp(tk.Tk):
         self.working_directory_var.set(str(working_directory))
         self.working_status_var.set(_active_working_directory_status(working_directory))
         self.backup_status_var.set("Settings reset to the factory defaults.")
-        messagebox.showinfo(
-            "Settings reset",
-            (
-                "Every profile was replaced with the factory default profile, and "
-                "every option is back to its built-in value.\n\n"
-                "The working-folder setting was kept; the background loop uses the "
-                "reset settings from its next rotation."
-            ),
-            parent=self,
+        self._set_status(
+            "Settings reset to the factory defaults. "
+            "The working-folder setting was kept; the background loop uses the reset "
+            "settings from its next rotation."
         )
 
     def _set_apply_busy(self, busy: bool) -> None:
@@ -3712,13 +3684,9 @@ class SettingsApp(tk.Tk):
                         self.config_data = load_config()
                         self.working_directory_var.set(str(result.destination))
                         self.working_status_var.set(_active_working_directory_status(result.destination))
-                        messagebox.showinfo(
-                            "Working folder changed",
-                            (
-                                f"MBS now uses:\n{result.destination}\n\n"
-                                f"Previous generated files were retained at:\n{result.source}"
-                            ),
-                            parent=self,
+                        self._set_status(
+                            f"MBS now uses {result.destination}. "
+                            f"Previous generated files were retained at {result.source}."
                         )
                     continue
                 if kind == "collection-progress":
@@ -3924,11 +3892,7 @@ class SettingsApp(tk.Tk):
                 ):
                     return
                 saved = save_current_wallpaper(destination, overwrite=True)
-            messagebox.showinfo(
-                "Wallpaper saved",
-                f"Saved the current wallpaper to:\n{saved}",
-                parent=self,
-            )
+            self._set_status(f"Saved the current wallpaper to {saved}.")
         except Exception as exc:
             messagebox.showerror("Save current wallpaper failed", str(exc), parent=self)
 
@@ -3951,10 +3915,8 @@ class SettingsApp(tk.Tk):
 
         images = current_source_images()
         if not images:
-            messagebox.showinfo(
-                "No current pictures",
-                "No source pictures are recorded for the current wallpaper. Choose Save & Apply Now first.",
-                parent=self,
+            self._set_status(
+                "No source pictures are recorded for the current wallpaper. Choose Save & Apply Now first."
             )
             return
 
@@ -4337,13 +4299,9 @@ class SettingsApp(tk.Tk):
             return
 
         if updater.version_key(check.current_version) > updater.version_key(check.latest.version):
-            messagebox.showinfo(
-                "No update installed",
-                (
-                    f"This copy is version {check.current_version}, newer than the latest public "
-                    f"release ({check.latest.version})."
-                ),
-                parent=self,
+            self._set_status(
+                f"This copy is version {check.current_version}, newer than the latest public "
+                f"release ({check.latest.version})."
             )
             return
 
@@ -4361,10 +4319,8 @@ class SettingsApp(tk.Tk):
                 self._install_checked_release(check.latest)
             return
 
-        messagebox.showinfo(
-            "Up to date",
-            f"Mint Background Switcher {check.current_version} is the latest public release.",
-            parent=self,
+        self._set_status(
+            f"Mint Background Switcher {check.current_version} is the latest public release."
         )
 
     def _install_checked_release(self, release: updater.ReleaseInfo) -> None:
@@ -4419,11 +4375,7 @@ class SettingsApp(tk.Tk):
     def _rollback_update(self) -> None:
         candidate = updater.rollback_candidate()
         if candidate is None:
-            messagebox.showinfo(
-                "No rollback available",
-                "No previous managed version is available yet.",
-                parent=self,
-            )
+            self._set_status("No previous managed version is available yet.")
             return
         if not messagebox.askyesno(
             "Roll back",
