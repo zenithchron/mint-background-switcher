@@ -2262,6 +2262,108 @@ def test_run_loop_rotates_on_first_cycle_by_default(monkeypatch, tmp_path: Path)
     assert len(calls) == 2
 
 
+def _run_loop_first_sleeps(monkeypatch, tmp_path: Path, *, stop_after_sleeps: int, **run_kwargs) -> tuple[list, list]:
+    """Run run_loop until it has slept ``stop_after_sleeps`` times; return (switch calls, sleeps)."""
+    calls: list = []
+
+    class FakeResult:
+        wallpaper = str(tmp_path / "generated.png")
+        monitors = ["monitor-a"]
+
+    monkeypatch.setattr(
+        service, "switch_once", lambda *args, **kwargs: calls.append((args, kwargs)) or FakeResult()
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= stop_after_sleeps:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", **run_kwargs)
+    except _StopLoop:
+        pass
+    return calls, sleeps
+
+
+def _setup_startup_delay_profile(monkeypatch, tmp_path: Path, delay_minutes: float) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    save_config(
+        Config(
+            active_profile="P",
+            profiles={
+                "P": Profile(
+                    name="P",
+                    shared_folders=[str(tmp_path / "images")],
+                    desktop="unknown",
+                    startup_delay_minutes=delay_minutes,
+                )
+            },
+        )
+    )
+
+
+def test_run_loop_startup_delay_defers_first_change_by_configured_minutes(monkeypatch, tmp_path: Path):
+    _setup_startup_delay_profile(monkeypatch, tmp_path, 2.0)
+
+    calls, sleeps = _run_loop_first_sleeps(monkeypatch, tmp_path, stop_after_sleeps=2)
+
+    # The first sleep is the 2-minute startup delay (no immediate switch);
+    # the second sleep is the 10-minute rotation interval after it.
+    assert len(calls) == 1
+    assert sleeps[0] == pytest.approx(120.0)
+    assert sleeps[1] == pytest.approx(600.0)
+
+
+def test_run_loop_default_startup_delay_keeps_immediate_first_change(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+
+    calls, sleeps = _run_loop_first_sleeps(monkeypatch, tmp_path, stop_after_sleeps=2)
+
+    # No startup delay: the first switch happens before any sleep, so the
+    # first recorded sleep is already the rotation interval (and the second
+    # cycle has switched again by the time it records its sleep).
+    assert len(calls) == 2
+    assert sleeps[0] == pytest.approx(600.0)
+
+
+def test_run_loop_startup_delay_composes_with_defer_first(monkeypatch, tmp_path: Path):
+    _setup_startup_delay_profile(monkeypatch, tmp_path, 30.0)
+
+    calls, sleeps = _run_loop_first_sleeps(
+        monkeypatch,
+        tmp_path,
+        stop_after_sleeps=1,
+        defer_first=True,
+        first_delay_min_seconds=90.0,
+    )
+
+    # The 30-minute delay beats both the one-interval safe-start floor
+    # (10 minutes) and the 90-second readiness guard.
+    assert len(calls) == 0
+    assert sleeps[0] == pytest.approx(1800.0)
+
+
+def test_run_loop_defer_first_interval_floor_wins_over_shorter_startup_delay(monkeypatch, tmp_path: Path):
+    _setup_startup_delay_profile(monkeypatch, tmp_path, 2.0)
+
+    calls, sleeps = _run_loop_first_sleeps(monkeypatch, tmp_path, stop_after_sleeps=1, defer_first=True)
+
+    # Safe-start still floors the first change at one full rotation interval.
+    assert len(calls) == 0
+    assert sleeps[0] == pytest.approx(600.0)
+
+
+def test_run_loop_startup_delay_prints_delay_note(monkeypatch, tmp_path: Path, capsys):
+    _setup_startup_delay_profile(monkeypatch, tmp_path, 1.5)
+
+    _run_loop_first_sleeps(monkeypatch, tmp_path, stop_after_sleeps=1)
+
+    assert "Startup delay is 1.5 minute(s); first scheduled change in 90 second(s)" in capsys.readouterr().out
+
+
 def test_run_loop_prints_overlay_note(monkeypatch, tmp_path: Path, capsys):
     # The background loop surfaces the overlay outcome exactly like the
     # lockscreen note (documented contract: Save & Apply Now, loop, CLI).

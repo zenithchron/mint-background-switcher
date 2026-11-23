@@ -4,6 +4,18 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.36] - 2026-11-23
+
+### Added
+
+- **Startup delay** (JBS start-delay parity; roadmap section 4 "startup delay"):
+  - **Settings → Rotation & Shortcuts → Rotation** gains a **Startup delay (minutes)** field, saved with the profile.
+  - After the background loop starts, the first scheduled wallpaper change is postponed by the configured minutes; subsequent changes keep the normal rotation interval from the first change. A value of 0 (the default, and the behavior of every legacy profile) switches on the normal schedule immediately, exactly as before.
+  - The delay composes with the safe-start readiness guard: when the loop is started at login, the first change is still never earlier than one full rotation interval.
+  - Values are clamped to 0–720 minutes on load and save; non-numeric input fails the save with a one-line message ("Startup delay must be a number of minutes between 0 and 720.") and does not touch the saved profile.
+  - The background loop prints a one-line note naming the delay when it applies.
+- Bumped the package version to `0.2.36`.
+
 ## [0.2.35] - 2026-11-22
 
 ### Changed

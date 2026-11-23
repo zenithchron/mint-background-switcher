@@ -122,6 +122,11 @@ MAX_EXCLUDED_PATH_LENGTH = 4096
 DEFAULT_COLLAGE_COUNT = 5
 COLLAGE_COUNT_MIN = 2
 COLLAGE_COUNT_MAX = 6
+# Startup delay bounds (minutes): 0 keeps the historic immediate-first-switch
+# behavior. The cap keeps a malformed saved value from postponing rotation by
+# more than half a day.
+DEFAULT_STARTUP_DELAY_MINUTES = 0.0
+MAX_STARTUP_DELAY_MINUTES = 720.0
 
 
 def parse_night_time(value: Any) -> tuple[int, int] | None:
@@ -191,6 +196,21 @@ def _coerce_collage_count(value: Any, default: int = DEFAULT_COLLAGE_COUNT) -> i
     except (TypeError, ValueError, OverflowError):
         return default
     return max(COLLAGE_COUNT_MIN, min(count, COLLAGE_COUNT_MAX))
+
+
+def _coerce_startup_delay(value: Any, default: float = DEFAULT_STARTUP_DELAY_MINUTES) -> float:
+    """Clamp a saved startup delay (minutes) into the supported 0-720 range.
+
+    Non-numeric or non-finite values fall back to the default so a malformed
+    saved value can never wedge the background loop at a bogus delay.
+    """
+    try:
+        delay = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not math.isfinite(delay):
+        return default
+    return max(0.0, min(delay, MAX_STARTUP_DELAY_MINUTES))
 
 
 def _coerce_photo_size(value: Any, default: float = 0.5) -> float:
@@ -431,6 +451,12 @@ class Profile:
     # mosaic). Appended last so the legacy positional-argument order stays
     # stable (see tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
     collage_count: int = DEFAULT_COLLAGE_COUNT
+    # Minutes to wait after the background loop starts before the first
+    # scheduled wallpaper change (JBS-style startup delay). 0 = switch on the
+    # normal schedule immediately. Appended last so the legacy
+    # positional-argument order stays stable (see
+    # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
+    startup_delay_minutes: float = DEFAULT_STARTUP_DELAY_MINUTES
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -492,6 +518,9 @@ class Profile:
             redraw_hotkey=_coerce_hotkey(data.get("redraw_hotkey"), DEFAULT_REDRAW_HOTKEY),
             post_switch_command=_coerce_post_switch_command(data.get("post_switch_command", "")),
             collage_count=_coerce_collage_count(data.get("collage_count", DEFAULT_COLLAGE_COUNT)),
+            startup_delay_minutes=_coerce_startup_delay(
+                data.get("startup_delay_minutes", DEFAULT_STARTUP_DELAY_MINUTES)
+            ),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -541,6 +570,7 @@ class Profile:
             "redraw_hotkey": self.redraw_hotkey,
             "post_switch_command": self.post_switch_command,
             "collage_count": self.collage_count,
+            "startup_delay_minutes": self.startup_delay_minutes,
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,

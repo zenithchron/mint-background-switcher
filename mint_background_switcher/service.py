@@ -2070,9 +2070,23 @@ def run_loop(
     cfg: Config = load_config()
     profile = cfg.get_profile(profile_name)
     print(f"Running Mint Background Switcher profile {profile.name!r}; interval={profile.interval_minutes} minute(s)")
-    if defer_first:
-        delay = max(profile.interval_minutes * 60.0, first_delay_min_seconds, 5.0)
-        print(f"Deferring first wallpaper change for {delay:.0f} second(s)", flush=True)
+    # The per-profile startup delay (JBS-style) postpones the first scheduled
+    # change by a user-set number of minutes; 0 keeps the historic behavior of
+    # rotating on the normal schedule. A safe-start (defer_first) additionally
+    # floors the first change at one full rotation interval.
+    startup_floor_seconds = profile.startup_delay_minutes * 60.0
+    if defer_first or startup_floor_seconds > 0:
+        delay = max(startup_floor_seconds, first_delay_min_seconds, 5.0)
+        if defer_first:
+            delay = max(delay, profile.interval_minutes * 60.0)
+        if startup_floor_seconds > 0:
+            print(
+                f"Startup delay is {profile.startup_delay_minutes:g} minute(s); "
+                f"first scheduled change in {delay:.0f} second(s)",
+                flush=True,
+            )
+        else:
+            print(f"Deferring first wallpaper change for {delay:.0f} second(s)", flush=True)
         time.sleep(delay)
     while True:
         state = load_state()

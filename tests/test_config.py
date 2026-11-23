@@ -224,6 +224,27 @@ def test_collage_count_roundtrip_with_backward_compatible_default_and_bounds():
     assert missing.get_profile().collage_count == 5
 
 
+def test_startup_delay_minutes_roundtrip_with_backward_compatible_default_and_bounds():
+    defaults = Config.from_dict({"active_profile": "P", "profiles": {"P": {}}})
+    assert defaults.get_profile().startup_delay_minutes == 0.0
+    assert defaults.to_dict()["profiles"]["P"]["startup_delay_minutes"] == 0.0
+
+    configured = Config.from_dict({"active_profile": "P", "profiles": {"P": {"startup_delay_minutes": "2.5"}}})
+    assert configured.get_profile().startup_delay_minutes == 2.5
+    assert configured.to_dict()["profiles"]["P"]["startup_delay_minutes"] == 2.5
+
+    high = Config.from_dict({"active_profile": "P", "profiles": {"P": {"startup_delay_minutes": 999999}}})
+    negative = Config.from_dict({"active_profile": "P", "profiles": {"P": {"startup_delay_minutes": -5}}})
+    malformed = Config.from_dict({"active_profile": "P", "profiles": {"P": {"startup_delay_minutes": "junk"}}})
+    none_value = Config.from_dict({"active_profile": "P", "profiles": {"P": {"startup_delay_minutes": None}}})
+    nan_value = Config.from_dict({"active_profile": "P", "profiles": {"P": {"startup_delay_minutes": float("nan")}}})
+    assert high.get_profile().startup_delay_minutes == 720.0
+    assert negative.get_profile().startup_delay_minutes == 0.0
+    assert malformed.get_profile().startup_delay_minutes == 0.0
+    assert none_value.get_profile().startup_delay_minutes == 0.0
+    assert nan_value.get_profile().startup_delay_minutes == 0.0
+
+
 def test_postcard_mode_is_valid():
     cfg = Config.from_dict({"active_profile": "P", "profiles": {"P": {"mode": "POSTCARD"}}})
     assert cfg.get_profile().mode == "postcard"

@@ -368,6 +368,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.interval_entry,
                 app.sequential_checkbutton,
                 app.rotate_on_startup_checkbutton,
+                app.startup_delay_entry,
                 app.night_black_screen_checkbutton,
                 app.night_start_entry,
                 app.night_end_entry,
@@ -3146,6 +3147,100 @@ def test_settings_loads_rotate_on_startup_flag_from_saved_profile(monkeypatch, t
         app.update_idletasks()
         app.update()
         assert app.rotate_on_startup_var.get() is False
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_startup_delay_entry_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message))
+    )
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        assert app.startup_delay_var.get() == "0"
+        assert is_descendant(app.startup_delay_entry, app.rotation_tab)
+        assert app.startup_delay_entry.winfo_ismapped()
+        assert app.startup_delay_entry.winfo_width() >= app.startup_delay_entry.winfo_reqwidth()
+        assert app.startup_delay_entry.winfo_height() >= app.startup_delay_entry.winfo_reqheight()
+
+        # A valid delay persists and reloads.
+        app.startup_delay_var.set("45")
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.startup_delay_minutes == 45.0
+        app._load_profile("Default")
+        assert app.startup_delay_var.get() == "45"
+
+        # Fractional minutes are allowed.
+        app.startup_delay_var.set("3.25")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").startup_delay_minutes == 3.25
+        app._load_profile("Default")
+        assert app.startup_delay_var.get() == "3.25"
+
+        # Non-numeric input is rejected without saving.
+        app.startup_delay_var.set("soon")
+        assert app._save_current() is False
+        assert errors and "Startup delay must be a number of minutes" in errors[-1][1]
+        assert settings_ui.load_config().get_profile("Default").startup_delay_minutes == 3.25
+
+        # Non-finite input ("nan"/"inf") is rejected the same way instead of
+        # silently saving as the 720-minute cap.
+        app.startup_delay_var.set("nan")
+        assert app._save_current() is False
+        assert errors and "Startup delay must be a number of minutes" in errors[-1][1]
+        assert settings_ui.load_config().get_profile("Default").startup_delay_minutes == 3.25
+        app.startup_delay_var.set("inf")
+        assert app._save_current() is False
+        assert settings_ui.load_config().get_profile("Default").startup_delay_minutes == 3.25
+
+        # Negative delays are clamped to 0 rather than rejected.
+        app.startup_delay_var.set("-5")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").startup_delay_minutes == 0.0
+        app._load_profile("Default")
+        assert app.startup_delay_var.get() == "0"
+    finally:
+        app.destroy()
+
+
+def test_settings_loads_startup_delay_from_saved_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    saved = settings_ui.Config(
+        active_profile="Default",
+        profiles={"Default": settings_ui.Profile(name="Default", startup_delay_minutes=3.25)},
+    )
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui, "load_config", lambda: saved)
+    app = settings_ui.SettingsApp()
+    try:
+        app.update_idletasks()
+        app.update()
+        assert app.startup_delay_var.get() == "3.25"
     finally:
         app.destroy()
 

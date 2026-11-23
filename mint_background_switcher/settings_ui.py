@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 import copy
 import dataclasses
+import math
 import queue
 import random
 import shlex
@@ -30,6 +31,7 @@ from .config import (
     DEFAULT_PAUSE_HOTKEY,
     DEFAULT_PREVIOUS_HOTKEY,
     DEFAULT_REDRAW_HOTKEY,
+    DEFAULT_STARTUP_DELAY_MINUTES,
     EFFECT_CHOICES,
     FIT_MODE_CHOICES,
     FIT_MODE_LABELS,
@@ -38,6 +40,7 @@ from .config import (
     MAX_IGNORE_PATTERNS,
     MAX_IDLE_SECONDS,
     MAX_POST_SWITCH_COMMAND_LENGTH,
+    MAX_STARTUP_DELAY_MINUTES,
     MAX_SUPPRESS_PROCESS_LENGTH,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
@@ -545,6 +548,7 @@ class SettingsApp(tk.Tk):
         "sequential_var",
         "match_orientation_var",
         "rotate_on_startup_var",
+        "startup_delay_var",
         "night_black_screen_var",
         "night_start_var",
         "night_end_var",
@@ -601,6 +605,7 @@ class SettingsApp(tk.Tk):
         self.sequential_var = tk.BooleanVar()
         self.match_orientation_var = tk.BooleanVar()
         self.rotate_on_startup_var = tk.BooleanVar(value=True)
+        self.startup_delay_var = tk.StringVar(value="0")
         self.night_black_screen_var = tk.BooleanVar(value=False)
         self.night_start_var = tk.StringVar(value=DEFAULT_NIGHT_START)
         self.night_end_var = tk.StringVar(value=DEFAULT_NIGHT_END)
@@ -1374,15 +1379,26 @@ class SettingsApp(tk.Tk):
             variable=self.rotate_on_startup_var,
         )
         self.rotate_on_startup_checkbutton.pack(side=tk.LEFT, padx=(20, 0))
+        ttk.Label(rotation_schedule, text="Startup delay (minutes):").grid(row=2, column=0, sticky="w", pady=(2, 0))
+        self.startup_delay_entry = ttk.Entry(
+            rotation_schedule, textvariable=self.startup_delay_var, width=10
+        )
+        self.startup_delay_entry.grid(row=2, column=1, sticky="w", padx=5, pady=(2, 0))
+        ttk.Label(
+            rotation_schedule,
+            text="Wait this many minutes before the first scheduled change (0 = none).",
+            justify=tk.LEFT,
+            wraplength=570,
+        ).grid(row=2, column=2, sticky="w", padx=(16, 0), pady=(2, 0))
         self.night_black_screen_checkbutton = ttk.Checkbutton(
             rotation_schedule,
             text="Keep the desktop black during a nightly window",
             variable=self.night_black_screen_var,
         )
-        self.night_black_screen_checkbutton.grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
-        ttk.Label(rotation_schedule, text="Night window:").grid(row=3, column=0, sticky="w", padx=(20, 0))
+        self.night_black_screen_checkbutton.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        ttk.Label(rotation_schedule, text="Night window:").grid(row=4, column=0, sticky="w", padx=(20, 0))
         night_window_frame = ttk.Frame(rotation_schedule)
-        night_window_frame.grid(row=3, column=1, sticky="w", padx=5)
+        night_window_frame.grid(row=4, column=1, sticky="w", padx=5)
         self.night_start_entry = ttk.Entry(night_window_frame, textvariable=self.night_start_var, width=6)
         self.night_start_entry.pack(side=tk.LEFT)
         ttk.Label(night_window_frame, text="to").pack(side=tk.LEFT, padx=(6, 6))
@@ -1393,20 +1409,20 @@ class SettingsApp(tk.Tk):
             text="Local HH:MM; may cross midnight; auto-resumes.",
             justify=tk.LEFT,
             wraplength=430,
-        ).grid(row=3, column=2, sticky="w", padx=(16, 0))
+        ).grid(row=4, column=2, sticky="w", padx=(16, 0))
         self.night_black_screen_var.trace_add("write", self._refresh_night_time_state)
         self._refresh_night_time_state()
-        ttk.Label(rotation_schedule, text="Post-switch command:").grid(row=4, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(rotation_schedule, text="Post-switch command:").grid(row=5, column=0, sticky="w", pady=(2, 0))
         self.post_switch_command_entry = ttk.Entry(
             rotation_schedule, textvariable=self.post_switch_command_var, width=30
         )
-        self.post_switch_command_entry.grid(row=4, column=1, sticky="w", padx=5, pady=(2, 0))
+        self.post_switch_command_entry.grid(row=5, column=1, sticky="w", padx=5, pady=(2, 0))
         ttk.Label(
             rotation_schedule,
             text="Runs once after each new wallpaper is applied; leave empty to disable.",
             justify=tk.LEFT,
             wraplength=480,
-        ).grid(row=4, column=2, sticky="w", padx=(16, 0), pady=(2, 0))
+        ).grid(row=5, column=2, sticky="w", padx=(16, 0), pady=(2, 0))
 
         shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=4)
         shortcuts.pack(fill=tk.X, pady=(0, 3))
@@ -1975,6 +1991,7 @@ class SettingsApp(tk.Tk):
         self.sequential_var.set(profile.sequential)
         self.match_orientation_var.set(profile.match_orientation)
         self.rotate_on_startup_var.set(profile.rotate_on_startup)
+        self.startup_delay_var.set(f"{profile.startup_delay_minutes:g}")
         self.night_black_screen_var.set(profile.night_black_screen)
         self.night_start_var.set(profile.night_start)
         self.night_end_var.set(profile.night_end)
@@ -2450,6 +2467,22 @@ class SettingsApp(tk.Tk):
                     "Pictures per collage must be a whole number "
                     f"between {COLLAGE_COUNT_MIN} and {COLLAGE_COUNT_MAX}."
                 ) from None
+        startup_delay_var = vars(self).get("startup_delay_var")
+        startup_delay_minutes = DEFAULT_STARTUP_DELAY_MINUTES
+        if startup_delay_var is not None:
+            try:
+                candidate = float(startup_delay_var.get())
+                # Non-finite values ("nan", "inf") are malformed for this field
+                # and must not silently save as the 720-minute cap, matching
+                # the config loader's treatment of non-finite saved values.
+                if not math.isfinite(candidate):
+                    raise ValueError
+                startup_delay_minutes = max(0.0, min(MAX_STARTUP_DELAY_MINUTES, candidate))
+            except (ValueError, tk.TclError):
+                raise ValueError(
+                    "Startup delay must be a number of minutes between "
+                    f"0 and {MAX_STARTUP_DELAY_MINUTES:g}."
+                ) from None
         fit_mode = FIT_MODE_LABEL_TO_VALUE.get(str(self.fit_mode_var.get()).strip(), "fit_bars")
         # Exclusions are managed on the Never Show Again page, not in these fields; carry the
         # current profile's list forward so saving or renaming never silently wipes it.
@@ -2554,6 +2587,7 @@ class SettingsApp(tk.Tk):
             polaroid_span=polaroid_span,
             polaroid_tilt=polaroid_tilt,
             collage_count=collage_count,
+            startup_delay_minutes=startup_delay_minutes,
             excluded_images=excluded_images,
             web_sources=web_sources,
             overlay_title=overlay_title,
