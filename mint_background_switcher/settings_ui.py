@@ -1488,13 +1488,13 @@ class SettingsApp(tk.Tk):
             text="Mirror wallpaper to the lock screen",
             variable=self.mirror_lockscreen_var,
         )
-        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        self.mirror_lockscreen_checkbutton.grid(row=1, column=0, sticky="w", pady=(2, 0))
         ttk.Label(
             desktop_integration,
             text="GNOME writes the lock-screen image on each rotation; Cinnamon already mirrors it.",
             justify=tk.LEFT,
             wraplength=800,
-        ).grid(row=2, column=0, columnspan=3, sticky="w", padx=(20, 0))
+        ).grid(row=1, column=1, columnspan=2, sticky="w", padx=(16, 0))
         desktop_integration.columnconfigure(2, weight=1)
 
         self.conditions_scope_label = ttk.Label(
