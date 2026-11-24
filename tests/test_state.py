@@ -74,3 +74,16 @@ def test_black_reason_roundtrips_and_defaults_to_empty():
     assert RuntimeState().black_reason == ""
     assert RuntimeState.from_dict({"black_screen": True}).black_reason == ""
     assert RuntimeState.from_dict({"black_reason": None}).black_reason == ""
+
+
+def test_last_topology_roundtrips_and_defaults_to_none():
+    state = RuntimeState(last_wallpaper="/tmp/active-0.png", last_topology="A:100x80+0+0|B:120x80+100+0")
+    assert state.to_dict()["last_topology"] == "A:100x80+0+0|B:120x80+100+0"
+    assert RuntimeState.from_dict(state.to_dict()).last_topology == state.last_topology
+
+    assert RuntimeState().last_topology is None
+    assert RuntimeState.from_dict({}).last_topology is None
+    # Malformed values degrade to None instead of crashing the load.
+    assert RuntimeState.from_dict({"last_topology": None}).last_topology is None
+    assert RuntimeState.from_dict({"last_topology": {}}).last_topology is None
+    assert RuntimeState.from_dict({"last_topology": ""}).last_topology is None

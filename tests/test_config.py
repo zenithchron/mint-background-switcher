@@ -771,3 +771,18 @@ def test_hotkey_bindings_reject_unusable_saved_values():
         == "<Primary><Alt>b"
     )
     assert Profile.from_dict("P", {"next_hotkey": 42}).next_hotkey == "<Primary><Alt>n"
+
+
+def test_redraw_on_topology_change_roundtrip_with_backward_compatible_default():
+    defaults = Config.from_dict({"active_profile": "P", "profiles": {"P": {}}})
+    assert defaults.get_profile().redraw_on_topology_change is True
+    assert defaults.to_dict()["profiles"]["P"]["redraw_on_topology_change"] is True
+
+    off = Config.from_dict({"active_profile": "P", "profiles": {"P": {"redraw_on_topology_change": False}}})
+    assert off.get_profile().redraw_on_topology_change is False
+    assert off.to_dict()["profiles"]["P"]["redraw_on_topology_change"] is False
+
+    malformed = Config.from_dict({"active_profile": "P", "profiles": {"P": {"redraw_on_topology_change": "junk"}}})
+    none_value = Config.from_dict({"active_profile": "P", "profiles": {"P": {"redraw_on_topology_change": None}}})
+    assert malformed.get_profile().redraw_on_topology_change is True
+    assert none_value.get_profile().redraw_on_topology_change is True

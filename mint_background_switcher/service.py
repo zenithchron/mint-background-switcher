@@ -42,7 +42,7 @@ from .images import (
     scan_images,
 )
 from .library_index import IndexSnapshot, LibraryIndex, LibrarySelection, orientation_matches
-from .monitor import Monitor, detect_monitors, monitor_orientation
+from .monitor import Monitor, detect_monitors, monitor_orientation, topology_fingerprint
 from .overlays import (
     OverlayPanel,
     apply_overlays,
@@ -91,6 +91,11 @@ class SwitchResult:
 # The post-switch command runs synchronously after a new wallpaper is applied;
 # a bounded timeout keeps a wedged command from stalling the background loop.
 POST_SWITCH_TIMEOUT_SECONDS = 30
+
+# How often the background loop wakes from its long sleep to check whether the
+# connected monitor layout changed (topology-change refresh). A plugged or
+# unplugged monitor is therefore re-drawn within at most this many seconds.
+TOPOLOGY_POLL_SECONDS = 30.0
 
 
 class SwitchCancelled(RuntimeError):
@@ -1564,6 +1569,9 @@ def _switch_once_with_state(
         )
     state.last_wallpaper = str(wallpaper)
     state.last_images = images_used
+    # The applied wallpaper now corresponds to this exact monitor layout; the
+    # topology-change refresh compares against this fingerprint.
+    state.last_topology = topology_fingerprint(monitors)
     return SwitchResult(
         profile.name,
         wallpaper,
@@ -1658,6 +1666,9 @@ def black_screen(
         state.paused = True
         state.last_wallpaper = str(wallpaper)
         state.last_images = []
+        # The black screen was composed for this exact layout; if the layout
+        # changes while black, the topology watcher only needs to record it.
+        state.last_topology = topology_fingerprint(monitors)
 
     return SwitchResult(
         profile.name,
@@ -1754,6 +1765,8 @@ def previous_wallpaper(
         DesktopSetter(dry_run=False).apply(wallpaper, profile.desktop)
         lockscreen_note = _mirror_lockscreen(profile, wallpaper, dry_run=False)
         monitors = detect_monitors()
+        # The restored snapshot is now the active wallpaper for this layout.
+        state.last_topology = topology_fingerprint(monitors)
     return SwitchResult(
         profile.name,
         wallpaper,
@@ -1820,6 +1833,9 @@ def redraw_current(
         if wallpaper.is_file():
             lockscreen_note = _mirror_lockscreen(profile, wallpaper, dry_run=dry_run)
         monitors = detect_monitors()
+        if not dry_run:
+            # The current wallpaper is active again for this exact layout.
+            state.last_topology = topology_fingerprint(monitors)
     return SwitchResult(
         profile.name,
         wallpaper,
@@ -1829,6 +1845,229 @@ def redraw_current(
         action="redraw-current",
         lockscreen_note=lockscreen_note,
     )
+
+
+def _compose_recorded_images(
+    profile: Profile,
+    monitors: list[Monitor],
+    images: list[str],
+    output: Path,
+) -> tuple[Path, list[OverlayPanel] | None]:
+    """Recompose the recorded source images for the current monitor layout.
+
+    ``images`` is the list of source pictures of the wallpaper that is (or was
+    last) active, in the order they were applied for the previous layout. The
+    composition follows the same per-mode rules a normal switch uses; monitors
+    beyond the end of the recorded list reuse the last recorded picture (or
+    picture chunk) so no monitor is left without a wallpaper.
+    """
+    mode = profile.mode
+    if mode == "span":
+        wallpaper = compose_span(
+            monitors,
+            images[0],
+            output,
+            bar_color=profile.bar_color,
+            fit_mode=profile.fit_mode,
+        )
+        return wallpaper, [panel_for_span(monitors, images[0])]
+    if mode == "same":
+        selections = {monitor.name: images[0] for monitor in monitors}
+        wallpaper = compose_per_monitor(
+            monitors,
+            selections,
+            output,
+            bar_color=profile.bar_color,
+            fit_mode=profile.fit_mode,
+        )
+        return wallpaper, panels_for_monitors(monitors, selections)
+    if mode in ("shared", "per-monitor"):
+        selections = {
+            monitor.name: images[index] if index < len(images) else images[-1]
+            for index, monitor in enumerate(monitors)
+        }
+        wallpaper = compose_per_monitor(
+            monitors,
+            selections,
+            output,
+            bar_color=profile.bar_color,
+            fit_mode=profile.fit_mode,
+        )
+        return wallpaper, panels_for_monitors(monitors, selections)
+    if mode in ("montage", "collage", "postcard", "polaroid"):
+        if mode == "montage":
+            count = 4
+        elif mode == "collage":
+            count = profile.collage_count
+        elif mode == "postcard":
+            count = profile.postcard_count
+        else:
+            count = profile.polaroid_count
+        if mode == "postcard" and profile.postcard_span or mode == "polaroid" and profile.polaroid_span:
+            per_monitor = {monitors[0].name: images}
+        else:
+            per_monitor = {}
+            for index, monitor in enumerate(monitors):
+                chunk = images[index * count : (index + 1) * count]
+                if len(chunk) != count:
+                    # Fewer pictures recorded than this monitor needs (the
+                    # layout gained monitors): reuse the last recorded chunk.
+                    chunk = images[-count:] if len(images) >= count else images
+                per_monitor[monitor.name] = list(chunk)
+        if mode == "montage":
+            wallpaper = compose_montage(
+                monitors,
+                per_monitor,
+                output,
+                bar_color=profile.bar_color,
+                fit_mode=profile.fit_mode,
+            )
+        elif mode == "collage":
+            wallpaper = compose_collage(
+                monitors,
+                per_monitor,
+                output,
+                bar_color=profile.bar_color,
+                fit_mode=profile.fit_mode,
+                count=count,
+            )
+        elif mode == "postcard":
+            wallpaper = compose_postcard(
+                monitors,
+                per_monitor,
+                output,
+                bar_color=profile.bar_color,
+                size=profile.postcard_size,
+                span=profile.postcard_span,
+                tilt=profile.postcard_tilt,
+                background=profile.postcard_background,
+                captions=profile.postcard_captions,
+                rng=None,
+            )
+        else:
+            wallpaper = compose_polaroid(
+                monitors,
+                per_monitor,
+                output,
+                bar_color=profile.bar_color,
+                size=profile.polaroid_size,
+                span=profile.polaroid_span,
+                tilt=profile.polaroid_tilt,
+                captions=profile.polaroid_captions,
+                rng=None,
+            )
+        # Multi-picture layouts have no single picture to describe, like the
+        # normal switch path.
+        return wallpaper, None
+    raise ValueError(f"unsupported profile mode for topology redraw: {mode!r}")
+
+
+def _topology_redraw(
+    profile_name: str,
+    monitors: list[Monitor],
+    fingerprint: str,
+) -> SwitchResult | None:
+    """Re-apply the recorded current wallpaper for a new monitor layout.
+
+    Recomposes the wallpaper's own source pictures for the new layout (the
+    same pipeline a normal switch finishes with: compose, effect, overlays,
+    activate, lock-screen mirror). If a recorded source picture is no longer
+    on disk (for example a pruned web-source cache file), the already-composed
+    wallpaper file is re-applied instead. Returns None when there is nothing
+    left to apply; the new layout is recorded in every path so the loop does
+    not retry on the next tick.
+    """
+    cfg = load_config()
+    profile = cfg.get_profile(profile_name)
+    working_directory = ensure_configured_working_directory(cfg)
+    with state_transaction() as state:
+        images = [str(path) for path in state.last_images if str(path).strip()]
+        if not images:
+            state.last_topology = fingerprint
+            return None
+        sources_present = [path for path in images if is_usable_image(Path(path).expanduser())]
+        lockscreen_note = ""
+        overlay_note = ""
+        if len(sources_present) == len(images):
+            wallpaper_path, next_slot = _next_wallpaper_path(
+                profile,
+                state,
+                dry_run=False,
+                working_directory=working_directory,
+            )
+            wallpaper, overlay_panels = _compose_recorded_images(
+                profile,
+                monitors,
+                images,
+                wallpaper_path,
+            )
+            lockscreen_note, overlay_note = _apply_composed_wallpaper(
+                profile,
+                wallpaper,
+                dry_run=False,
+                rng=None,
+                cancelled=None,
+                monitors=monitors,
+                overlay_panels=overlay_panels,
+            )
+            if next_slot is not None:
+                state.wallpaper_slot = next_slot
+            state.last_wallpaper = str(wallpaper)
+        else:
+            fallback = (
+                Path(state.last_wallpaper).expanduser() if state.last_wallpaper else None
+            )
+            if fallback is None or not fallback.is_file():
+                state.last_topology = fingerprint
+                return None
+            wallpaper = fallback
+            DesktopSetter(dry_run=False).apply(wallpaper, profile.desktop)
+            lockscreen_note = _mirror_lockscreen(profile, wallpaper, dry_run=False)
+        state.last_topology = fingerprint
+        return SwitchResult(
+            profile.name,
+            wallpaper,
+            images,
+            monitors,
+            applied=True,
+            action="topology-redraw",
+            lockscreen_note=lockscreen_note,
+            overlay_note=overlay_note,
+        )
+
+
+def refresh_on_topology_change(profile_name: str | None = None) -> SwitchResult | None:
+    """Re-apply the current wallpaper if the monitor layout changed.
+
+    Returns a redraw result when the connected monitor set or geometry
+    differs from the layout the current wallpaper was applied for and the
+    profile has the topology-change refresh enabled; None when nothing
+    changed or nothing is applicable. Detection failure fails open (returns
+    None) so a broken xrandr cannot stall the background loop. While the
+    desktop is black, or no wallpaper is recorded yet, the new layout is
+    only recorded.
+    """
+    cfg = load_config()
+    profile = cfg.get_profile(profile_name)
+    if not profile.redraw_on_topology_change:
+        return None
+    try:
+        monitors = detect_monitors()
+    except Exception:
+        return None
+    if not monitors:
+        return None
+    fingerprint = topology_fingerprint(monitors)
+    state = load_state()
+    if fingerprint == state.last_topology:
+        return None
+    if not state.last_images or state.black_screen:
+        # Nothing to re-apply (no recorded wallpaper, or the desktop is
+        # intentionally black): record the layout and wait for a real switch.
+        with state_transaction() as transaction:
+            transaction.last_topology = fingerprint
+        return None
+    return _topology_redraw(profile.name, monitors, fingerprint)
 
 
 def compute_shuffled_assignments(
@@ -2059,6 +2298,58 @@ def resume(profile_name: str | None = None, *, dry_run: bool = False) -> SwitchR
     return switch_once(profile_name, dry_run=dry_run, clear_black=True)
 
 
+def _handle_topology_change_once(profile_name: str | None, dry_run: bool) -> None:
+    """One topology-change check from the background loop; never raises.
+
+    A redraw result only re-applies the *current* wallpaper for the new
+    monitor layout — it never picks a new picture and never clears a black
+    screen. Dry runs never touch the desktop, so the check is skipped there.
+    """
+    if dry_run:
+        return
+    try:
+        result = refresh_on_topology_change(profile_name)
+    except Exception as exc:
+        print(f"Mint Background Switcher error: {exc}", flush=True)
+        return
+    if result is None:
+        return
+    print(
+        f"Monitor layout changed; re-applied the current wallpaper for "
+        f"{len(result.monitors)} monitor(s)",
+        flush=True,
+    )
+    if result.lockscreen_note:
+        print(result.lockscreen_note, flush=True)
+    if result.overlay_note:
+        print(result.overlay_note, flush=True)
+
+
+def _watched_sleep(
+    seconds: float,
+    profile: Profile,
+    dry_run: bool,
+    has_wallpaper: bool,
+) -> None:
+    """Sleep for the loop interval, waking periodically for the topology check.
+
+    The interval is sliced into TOPOLOGY_POLL_SECONDS chunks only when a
+    redraw is actually possible — the profile enables the topology-change
+    refresh, a wallpaper is recorded to re-apply, and this is not a dry run.
+    Every other path is a plain sleep, so unchanged layouts cost nothing and
+    dry runs behave exactly like before.
+    """
+    if dry_run or not profile.redraw_on_topology_change or not has_wallpaper:
+        time.sleep(seconds)
+        return
+    remaining = seconds
+    while remaining > 0:
+        chunk = min(remaining, TOPOLOGY_POLL_SECONDS)
+        time.sleep(chunk)
+        remaining -= chunk
+        _handle_topology_change_once(profile.name, dry_run)
+
+
 def run_loop(
     profile_name: str | None = None,
     *,
@@ -2087,7 +2378,15 @@ def run_loop(
             )
         else:
             print(f"Deferring first wallpaper change for {delay:.0f} second(s)", flush=True)
-        time.sleep(delay)
+        # The topology check still applies during the startup delay: a monitor
+        # plugged in before the first scheduled change gets the recorded
+        # wallpaper re-drawn for the new layout while we wait.
+        try:
+            startup_state = load_state()
+            has_wallpaper = bool(startup_state.last_images) and not startup_state.black_screen
+        except Exception:
+            has_wallpaper = False
+        _watched_sleep(delay, profile, dry_run, has_wallpaper)
     while True:
         state = load_state()
         cfg = load_config()
@@ -2151,10 +2450,17 @@ def run_loop(
                 except Exception as exc:
                     print(f"Mint Background Switcher error: {exc}", flush=True)
         if state.black_screen:
-            time.sleep(retry_delay)
+            # While black there is nothing to re-apply, so the topology check
+            # is disabled for this sleep (it would only record the layout).
+            _watched_sleep(retry_delay, profile, dry_run, False)
             continue
         if rotated_this_tick:
-            time.sleep(max(profile.interval_minutes * 60.0, 5.0))
+            _watched_sleep(
+                max(profile.interval_minutes * 60.0, 5.0),
+                profile,
+                dry_run,
+                bool(state.last_images) and not state.black_screen,
+            )
             continue
         if not state.paused:
             if suppressed_reasons:
@@ -2187,9 +2493,12 @@ def run_loop(
                     )
                 except Exception as exc:
                     print(f"Mint Background Switcher error: {exc}", flush=True)
+        has_wallpaper = bool(state.last_images) and not state.black_screen
         if suppressed_reasons:
             # Retry on a short cadence so a clearing condition resumes the
-            # schedule without waiting a full interval.
-            time.sleep(retry_delay)
+            # schedule without waiting a full interval. The topology check
+            # still applies: pausing scheduled switching does not mean the
+            # desktop should keep a stretched wallpaper after a monitor change.
+            _watched_sleep(retry_delay, profile, dry_run, has_wallpaper)
         else:
-            time.sleep(max(profile.interval_minutes * 60.0, 5.0))
+            _watched_sleep(max(profile.interval_minutes * 60.0, 5.0), profile, dry_run, has_wallpaper)

@@ -3250,3 +3250,403 @@ def test_switch_once_still_rotates_local_folders_when_web_source_fails(monkeypat
     assert result.web_sources == [
         {"url": url, "status": "failed", "path": None, "detail": "connection timed out"}
     ]
+
+
+# ---------------------------------------------------------------------------
+# Topology-change refresh (JBS monitor-change parity)
+# ---------------------------------------------------------------------------
+
+
+def _record_applies(monkeypatch, tmp_path: Path) -> list:
+    """Install a DesktopSetter fake that records every apply path; return it."""
+    applies: list = []
+
+    class _RecordingDesktopSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def apply(self, path, *_args, **_kwargs):
+            applies.append(str(path))
+            return ["fake"]
+
+        def apply_black(self, *_args, **_kwargs):
+            return ["fake-black"]
+
+        def supports_solid_black(self, *_args, **_kwargs):
+            return False
+
+    monkeypatch.setattr(service, "DesktopSetter", _RecordingDesktopSetter)
+    return applies
+
+
+def test_switch_once_records_topology_fingerprint(monkeypatch, tmp_path: Path):
+    from mint_background_switcher.monitor import parse_test_monitors, topology_fingerprint
+
+    _setup_profile(monkeypatch, tmp_path)
+    service.switch_once("P")
+    state = load_state()
+    monitors = parse_test_monitors(os.environ["MBS_TEST_MONITORS"])
+    assert state.last_topology == topology_fingerprint(monitors)
+    assert state.last_topology is not None
+
+
+def test_redraw_on_topology_change_reapplies_recorded_wallpaper(monkeypatch, tmp_path: Path):
+    from mint_background_switcher.monitor import parse_test_monitors, topology_fingerprint
+
+    _setup_profile(monkeypatch, tmp_path)
+    applies = _record_applies(monkeypatch, tmp_path)
+    first = service.switch_once("P")
+    recorded_images = [str(path) for path in first.images]
+
+    # Unplug monitor B: the layout (and its fingerprint) changes.
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    result = service.refresh_on_topology_change("P")
+
+    assert result is not None
+    assert result.action == "topology-redraw"
+    assert result.applied is True
+    assert [str(path) for path in result.images] == recorded_images
+    assert [monitor.name for monitor in result.monitors] == ["A"]
+    assert result.wallpaper != first.wallpaper
+    assert result.wallpaper.is_file()
+    # The recomposed wallpaper went through the desktop setter.
+    assert applies[-1] == str(result.wallpaper)
+    state = load_state()
+    assert state.last_wallpaper == str(result.wallpaper)
+    assert state.last_topology == topology_fingerprint(parse_test_monitors(os.environ["MBS_TEST_MONITORS"]))
+    # Idempotent: with the layout unchanged, nothing happens on the next check.
+    assert service.refresh_on_topology_change("P") is None
+
+
+def test_redraw_on_topology_change_recomposes_when_layout_grows(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    service.switch_once("P")
+    # Plug in a third monitor: the recorded pictures must be recomposed for
+    # the wider canvas (monitors beyond the recorded list reuse the last one).
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0,B:120x80+100+0,C:90x70+220+0")
+    result = service.refresh_on_topology_change("P")
+
+    assert result is not None
+    assert [monitor.name for monitor in result.monitors] == ["A", "B", "C"]
+    with Image.open(result.wallpaper) as canvas:
+        assert canvas.size == (310, 80)
+
+
+def test_redraw_on_topology_change_falls_back_to_composed_file_when_source_missing(
+    monkeypatch, tmp_path: Path
+):
+    _setup_profile(monkeypatch, tmp_path)
+    applies = _record_applies(monkeypatch, tmp_path)
+    first = service.switch_once("P")
+    # Simulate a pruned web-source cache file: one recorded source vanishes,
+    # so a recomposition is impossible and the composed file is re-applied.
+    Path(first.images[0]).unlink()
+
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    result = service.refresh_on_topology_change("P")
+
+    assert result is not None
+    assert result.action == "topology-redraw"
+    assert result.applied is True
+    assert result.wallpaper == first.wallpaper
+    assert applies[-1] == str(first.wallpaper)
+    assert load_state().last_topology is not None
+    assert service.refresh_on_topology_change("P") is None
+
+
+def test_redraw_on_topology_change_disabled_in_profile(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    service.switch_once("P")
+    old_topology = load_state().last_topology
+
+    cfg = load_config()
+    cfg.get_profile("P").redraw_on_topology_change = False
+    save_config(cfg)
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+
+    assert service.refresh_on_topology_change("P") is None
+    # The layout is deliberately not recorded while the feature is off, so
+    # re-enabling it redraws against the stale (pre-change) layout.
+    assert load_state().last_topology == old_topology
+
+
+def test_redraw_on_topology_change_without_recorded_wallpaper_only_records(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    assert load_state().last_topology is None
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+
+    assert service.refresh_on_topology_change("P") is None
+    state = load_state()
+    assert state.last_topology is not None
+    # Same layout: still nothing to do.
+    assert service.refresh_on_topology_change("P") is None
+
+
+def test_redraw_on_topology_change_while_black_only_records(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    service.switch_once("P")
+    service.black_screen("P", reason="manual")
+    old_topology = load_state().last_topology
+
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    assert service.refresh_on_topology_change("P") is None
+    state = load_state()
+    assert state.black_screen is True
+    # The layout is recorded so the loop does not re-check every tick, but
+    # the desktop stays black.
+    assert state.last_topology != old_topology
+    assert state.last_topology is not None
+
+
+def test_redraw_on_topology_change_fails_open_when_detection_breaks(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    service.switch_once("P")
+    old_topology = load_state().last_topology
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("xrandr: command not found")
+
+    monkeypatch.setattr(service, "detect_monitors", _boom)
+    assert service.refresh_on_topology_change("P") is None
+    assert load_state().last_topology == old_topology
+
+
+def test_compose_recorded_images_reuses_last_picture_or_chunk(monkeypatch, tmp_path: Path):
+    from mint_background_switcher.monitor import parse_test_monitors
+
+    _setup_profile(monkeypatch, tmp_path)
+    image_dir = tmp_path / "images"
+    pics = [str((image_dir / f"img{i}.png").resolve()) for i in range(4)]
+    three = parse_test_monitors("A:100x80+0+0,B:120x80+100+0,C:90x70+220+0")
+    out = tmp_path / "out.png"
+
+    per_monitor = Profile(name="PM", mode="per-monitor", shared_folders=[str(image_dir)], desktop="unknown")
+    wallpaper, panels = service._compose_recorded_images(per_monitor, three, pics[:2], out)
+    assert wallpaper.is_file()
+    assert panels is not None and len(panels) == 3
+
+    montage = Profile(name="MG", mode="montage", shared_folders=[str(image_dir)], desktop="unknown")
+    out2 = tmp_path / "out2.png"
+    wallpaper2, panels2 = service._compose_recorded_images(montage, three, pics, out2)
+    assert wallpaper2.is_file()
+    assert panels2 is None
+
+    span = Profile(name="SP", mode="span", shared_folders=[str(image_dir)], desktop="unknown")
+    out3 = tmp_path / "out3.png"
+    wallpaper3, panels3 = service._compose_recorded_images(span, three, pics[:1], out3)
+    assert wallpaper3.is_file()
+    assert panels3 is not None and len(panels3) == 1
+
+    # The remaining single-picture and multi-picture modes follow the same
+    # reuse rules (one shared picture / last recorded chunk per monitor).
+    same = Profile(name="SM", mode="same", shared_folders=[str(image_dir)], desktop="unknown")
+    wallpaper4, panels4 = service._compose_recorded_images(same, three, pics[:1], tmp_path / "out4.png")
+    assert wallpaper4.is_file()
+    assert panels4 is not None and len(panels4) == 3
+
+    collage = Profile(name="CO", mode="collage", shared_folders=[str(image_dir)], desktop="unknown")
+    wallpaper5, panels5 = service._compose_recorded_images(collage, three, pics, tmp_path / "out5.png")
+    assert wallpaper5.is_file()
+    assert panels5 is None
+
+    postcard = Profile(name="PC", mode="postcard", shared_folders=[str(image_dir)], desktop="unknown")
+    wallpaper6, panels6 = service._compose_recorded_images(postcard, three, pics, tmp_path / "out6.png")
+    assert wallpaper6.is_file()
+    assert panels6 is None
+
+    polaroid = Profile(name="PL", mode="polaroid", shared_folders=[str(image_dir)], desktop="unknown")
+    wallpaper7, panels7 = service._compose_recorded_images(polaroid, three, pics, tmp_path / "out7.png")
+    assert wallpaper7.is_file()
+    assert panels7 is None
+
+
+def test_watched_sleep_slices_into_topology_polls(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    profile = load_config().get_profile("P")
+    sleeps: list = []
+    monkeypatch.setattr(service.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(service, "_handle_topology_change_once", lambda *args, **kwargs: None)
+
+    service._watched_sleep(95.0, profile, False, True)
+    assert sleeps == [30.0, 30.0, 30.0, 5.0]
+    sleeps.clear()
+    # No wallpaper recorded, or feature disabled: a plain, unsliced sleep.
+    service._watched_sleep(95.0, profile, False, False)
+    assert sleeps == [95.0]
+    sleeps.clear()
+    profile.redraw_on_topology_change = False
+    service._watched_sleep(95.0, profile, False, True)
+    assert sleeps == [95.0]
+    sleeps.clear()
+    profile.redraw_on_topology_change = True
+    service._watched_sleep(95.0, profile, True, True)
+    assert sleeps == [95.0]
+
+
+def test_run_loop_redraws_current_wallpaper_when_topology_changes(monkeypatch, tmp_path: Path, capsys):
+    _setup_profile(monkeypatch, tmp_path)
+    applies = _record_applies(monkeypatch, tmp_path)
+    first = service.switch_once("P")
+
+    # The layout changes while the loop is sleeping its rotation interval.
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    stub_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: stub_calls.append((args, kwargs))
+        or SimpleNamespace(
+            wallpaper=str(tmp_path / "stub.png"),
+            monitors=["A"],
+            lockscreen_note="",
+            overlay_note="",
+            post_switch_note="",
+        ),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 2:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    # The scheduled switch is stubbed and fires once at tick start; the
+    # topology redraw happens in the first 30s chunk of the interval sleep.
+    assert len(stub_calls) == 1
+    assert sleeps[0] == pytest.approx(service.TOPOLOGY_POLL_SECONDS)
+    assert "Monitor layout changed" in capsys.readouterr().out
+    state = load_state()
+    assert state.last_wallpaper != str(first.wallpaper)
+    assert applies[-1] == str(state.last_wallpaper)
+    assert Path(applies[-1]).is_file()
+
+
+def test_run_loop_topology_redraw_does_not_consume_rotate_at_startup_skip(
+    monkeypatch, tmp_path: Path, capsys
+):
+    _setup_profile(monkeypatch, tmp_path)
+    # A wallpaper is recorded, so the topology watch is active.
+    service.switch_once("P")
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    stub_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: stub_calls.append((args, kwargs))
+        or SimpleNamespace(
+            wallpaper=str(tmp_path / "stub.png"),
+            monitors=["A"],
+            lockscreen_note="",
+            overlay_note="",
+            post_switch_note="",
+        ),
+    )
+    sleeps: list = []
+    stub_calls_at_tick1_end: list = []
+    # The 10-minute default interval slices into 30-second topology polls.
+    chunks_per_interval = int(600.0 // service.TOPOLOGY_POLL_SECONDS)
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == chunks_per_interval:
+            # Last 30s chunk of tick 1: the whole skip tick has run.
+            stub_calls_at_tick1_end.append(len(stub_calls))
+        if len(sleeps) >= chunks_per_interval + 1:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", skip_first=True)
+    except _StopLoop:
+        pass
+    out = capsys.readouterr().out
+
+    # Tick 1 is the rotate-at-startup skip tick: even though the layout
+    # changed mid-sleep, no scheduled switch happens — the topology redraw
+    # is not a scheduled switch and must not consume the skip.
+    assert "Rotate at startup is off" in out
+    assert "Monitor layout changed" in out
+    assert sleeps[0] == pytest.approx(service.TOPOLOGY_POLL_SECONDS)
+    assert stub_calls_at_tick1_end == [0]
+    # Tick 2: the normal rotation resumes, so the skip fired exactly once.
+    assert len(stub_calls) == 1
+
+
+def test_run_loop_dry_run_never_triggers_topology_redraw(monkeypatch, tmp_path: Path, capsys):
+    _setup_profile(monkeypatch, tmp_path)
+    applies = _record_applies(monkeypatch, tmp_path)
+    first = service.switch_once("P")
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    stub_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: stub_calls.append(1)
+        or SimpleNamespace(
+            wallpaper=str(tmp_path / "stub.png"),
+            monitors=["A"],
+            lockscreen_note="",
+            overlay_note="",
+            post_switch_note="",
+        ),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 1:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P", dry_run=True)
+    except _StopLoop:
+        pass
+
+    # The interval is not sliced and the desktop is never touched.
+    assert sleeps == [pytest.approx(600.0)]
+    assert applies == [str(first.wallpaper)]
+    assert "Monitor layout changed" not in capsys.readouterr().out
+
+
+def test_run_loop_skips_topology_watch_when_profile_disables_it(monkeypatch, tmp_path: Path, capsys):
+    _setup_profile(monkeypatch, tmp_path)
+    service.switch_once("P")
+    cfg = load_config()
+    cfg.get_profile("P").redraw_on_topology_change = False
+    save_config(cfg)
+    monkeypatch.setenv("MBS_TEST_MONITORS", "A:100x80+0+0")
+    stub_calls: list = []
+    monkeypatch.setattr(
+        service,
+        "switch_once",
+        lambda *args, **kwargs: stub_calls.append(1)
+        or SimpleNamespace(
+            wallpaper=str(tmp_path / "stub.png"),
+            monitors=["A"],
+            lockscreen_note="",
+            overlay_note="",
+            post_switch_note="",
+        ),
+    )
+    sleeps: list = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 1:
+            raise _StopLoop
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    try:
+        service.run_loop("P")
+    except _StopLoop:
+        pass
+
+    assert sleeps == [pytest.approx(600.0)]
+    assert "Monitor layout changed" not in capsys.readouterr().out

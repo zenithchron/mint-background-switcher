@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.37] - 2026-11-24
+
+### Added
+
+- **Topology-change refresh** (JBS monitor-change parity; roadmap section 4 "topology-change refresh"):
+  - **Settings → Conditions → Reactions** gains a **Re-apply the current wallpaper when the monitor configuration changes** toggle (on by default), saved with the profile.
+  - When a monitor is plugged in, unplugged, moved, or resized, the background loop notices within about half a minute and re-draws the *current* wallpaper for the new layout — using the current wallpaper's own source pictures, so no new picture is ever picked. Monitors that appeared after the current wallpaper was applied reuse the last recorded picture (or picture chunk) so no screen is left empty.
+  - The redraw runs the same pipeline as a normal switch (compose, effect, overlays, lock-screen mirror) into the alternating active wallpaper files; it is not a scheduled switch, does not consume the rotate-at-startup skip, and never clears a black screen (a layout change while the desktop is black is only recorded and picked up by the next real switch).
+  - If a recorded source picture is no longer on disk (for example a pruned web-source cache file), the already-composed wallpaper file is re-applied instead of failing.
+  - Detection failure (for example xrandr unavailable) fails open: the loop keeps running and the last known layout stays recorded.
+  - The feature is a per-profile setting, so one profile can stay quiet while another keeps the desktop correct; legacy profiles get the on-by-default behavior.
+- Bumped the package version to `0.2.37`.
+
 ## [0.2.36] - 2026-11-23
 
 ### Added

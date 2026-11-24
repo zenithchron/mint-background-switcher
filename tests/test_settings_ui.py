@@ -316,6 +316,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.suppress_remote_checkbutton, app.conditions_tab)
         assert is_descendant(app.idle_only_checkbutton, app.conditions_tab)
         assert is_descendant(app.suppress_locked_checkbutton, app.conditions_tab)
+        assert is_descendant(app.redraw_topology_checkbutton, app.conditions_tab)
         assert is_descendant(app.excluded_current_button, app.excluded_tab)
         assert is_descendant(app.excluded_list, app.excluded_tab)
         assert is_descendant(app.collections_download_button, app.collections_tab)
@@ -390,6 +391,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.idle_only_checkbutton,
                 app.idle_seconds_entry,
                 app.suppress_locked_checkbutton,
+                app.redraw_topology_checkbutton,
             ),
             str(app.excluded_tab): (
                 app.excluded_scope_label,
@@ -3440,6 +3442,51 @@ def test_settings_run_condition_controls_are_visible_and_persist(monkeypatch, tm
         saved = settings_ui.load_config().get_profile("Default")
         assert saved.suppress_process == ""
         assert saved.suppress_on_battery is True
+    finally:
+        app.destroy()
+
+
+def test_settings_topology_redraw_control_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.conditions_tab)
+        app.update()
+        # On by default: a changed monitor layout re-draws the current wallpaper.
+        assert app.redraw_topology_var.get() is True
+        assert is_descendant(app.redraw_topology_checkbutton, app.conditions_tab)
+        assert app.redraw_topology_checkbutton.winfo_ismapped()
+        assert app.redraw_topology_checkbutton.winfo_width() >= app.redraw_topology_checkbutton.winfo_reqwidth()
+
+        app.redraw_topology_var.set(False)
+        assert app._save_current() is True
+        saved = settings_ui.load_config().get_profile("Default")
+        assert saved.redraw_on_topology_change is False
+
+        app._load_profile("Default")
+        assert app.redraw_topology_var.get() is False
+
+        app.redraw_topology_var.set(True)
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").redraw_on_topology_change is True
     finally:
         app.destroy()
 

@@ -319,6 +319,23 @@ def detect_monitors() -> list[Monitor]:
     return [Monitor("Virtual-0", 1920, 1080, 0, 0, primary=True)]
 
 
+def topology_fingerprint(monitors: list[Monitor]) -> str:
+    """Stable identity of the connected monitor layout.
+
+    Each connected monitor contributes its name, physical size, and position;
+    the per-monitor entries are sorted, so the xrandr enumeration order
+    cannot change the fingerprint. A different string — a monitor plugged in
+    or unplugged, moved, or resized — is what the topology-change refresh
+    reacts to.
+    """
+    return "|".join(
+        sorted(
+            f"{monitor.name}:{monitor.width}x{monitor.height}+{monitor.x}+{monitor.y}"
+            for monitor in monitors
+        )
+    )
+
+
 def virtual_canvas(monitors: list[Monitor]) -> tuple[int, int, int, int]:
     if not monitors:
         raise ValueError("No monitors available")

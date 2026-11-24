@@ -127,6 +127,11 @@ COLLAGE_COUNT_MAX = 6
 # more than half a day.
 DEFAULT_STARTUP_DELAY_MINUTES = 0.0
 MAX_STARTUP_DELAY_MINUTES = 720.0
+# Topology-change refresh (JBS monitor-change parity): when the connected
+# monitor layout changes, re-apply the current wallpaper for the new layout.
+# On by default so a plugged-in or unplugged monitor gets the wallpaper
+# re-drawn instead of a stretched leftover.
+DEFAULT_REDRAW_ON_TOPOLOGY_CHANGE = True
 
 
 def parse_night_time(value: Any) -> tuple[int, int] | None:
@@ -457,6 +462,11 @@ class Profile:
     # positional-argument order stays stable (see
     # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
     startup_delay_minutes: float = DEFAULT_STARTUP_DELAY_MINUTES
+    # Re-apply the current wallpaper when the connected monitor layout changes
+    # (topology-change refresh, JBS monitor-change parity). Appended last so the
+    # legacy positional-argument order stays stable (see
+    # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
+    redraw_on_topology_change: bool = DEFAULT_REDRAW_ON_TOPOLOGY_CHANGE
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -521,6 +531,9 @@ class Profile:
             startup_delay_minutes=_coerce_startup_delay(
                 data.get("startup_delay_minutes", DEFAULT_STARTUP_DELAY_MINUTES)
             ),
+            redraw_on_topology_change=_coerce_bool(
+                data.get("redraw_on_topology_change"), default=DEFAULT_REDRAW_ON_TOPOLOGY_CHANGE
+            ),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -571,6 +584,7 @@ class Profile:
             "post_switch_command": self.post_switch_command,
             "collage_count": self.collage_count,
             "startup_delay_minutes": self.startup_delay_minutes,
+            "redraw_on_topology_change": self.redraw_on_topology_change,
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,

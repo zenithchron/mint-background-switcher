@@ -1,4 +1,11 @@
-from mint_background_switcher.monitor import parse_test_monitors, parse_xrandr, virtual_canvas, normalized_position
+from mint_background_switcher.monitor import (
+    Monitor,
+    normalized_position,
+    parse_test_monitors,
+    parse_xrandr,
+    topology_fingerprint,
+    virtual_canvas,
+)
 
 
 def test_parse_xrandr_three_monitors():
@@ -113,3 +120,24 @@ def test_negative_offsets_normalize():
     assert (width, height, min_x, min_y) == (300, 100, -100, 0)
     assert normalized_position(monitors[0], min_x, min_y) == (0, 0)
     assert normalized_position(monitors[1], min_x, min_y) == (100, 0)
+
+
+def test_topology_fingerprint_is_order_invariant_and_layout_sensitive():
+    a = Monitor(name="A", width=100, height=80, x=0, y=0)
+    b = Monitor(name="B", width=120, height=80, x=100, y=0)
+    base = topology_fingerprint([a, b])
+    # xrandr enumeration order must not matter.
+    assert base == topology_fingerprint([b, a])
+    # Moving, removing, or adding a monitor all change the layout.
+    moved_b = Monitor(name="B", width=120, height=80, x=400, y=0)
+    assert topology_fingerprint([a, moved_b]) != base
+    assert topology_fingerprint([a]) != base
+    added_c = Monitor(name="C", width=90, height=70, x=220, y=0)
+    assert topology_fingerprint([a, b, added_c]) != base
+    # A scale (DPI) change at the same physical layout needs no redraw.
+    assert topology_fingerprint(
+        [
+            Monitor(name="A", width=100, height=80, x=0, y=0, scale=1.5),
+            Monitor(name="B", width=120, height=80, x=100, y=0, scale=1.5),
+        ]
+    ) == base

@@ -560,6 +560,7 @@ class SettingsApp(tk.Tk):
         "idle_only_var",
         "idle_seconds_var",
         "suppress_locked_var",
+        "redraw_topology_var",
         "hotkey_var",
         "next_hotkey_var",
         "pause_hotkey_var",
@@ -617,6 +618,7 @@ class SettingsApp(tk.Tk):
         self.idle_only_var = tk.BooleanVar(value=False)
         self.idle_seconds_var = tk.StringVar(value=str(DEFAULT_IDLE_SECONDS))
         self.suppress_locked_var = tk.BooleanVar(value=False)
+        self.redraw_topology_var = tk.BooleanVar(value=True)
         self.overlay_title_var = tk.BooleanVar(value=False)
         self.overlay_artist_var = tk.BooleanVar(value=False)
         self.overlay_date_var = tk.BooleanVar(value=False)
@@ -1563,6 +1565,24 @@ class SettingsApp(tk.Tk):
         self.suppress_process_var.trace_add("write", self._refresh_run_condition_states)
         self.idle_only_var.trace_add("write", self._refresh_run_condition_states)
         self._refresh_run_condition_states()
+        reactions = ttk.LabelFrame(self.conditions_tab, text="Reactions", padding=(10, 6))
+        reactions.pack(fill=tk.X, pady=(0, 8))
+        self.redraw_topology_checkbutton = ttk.Checkbutton(
+            reactions,
+            text="Re-apply the current wallpaper when the monitor configuration changes",
+            variable=self.redraw_topology_var,
+        )
+        self.redraw_topology_checkbutton.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        ttk.Label(
+            reactions,
+            text=(
+                "When a monitor is plugged in, unplugged, or moved, the current wallpaper is re-drawn "
+                "for the new layout within about half a minute. It never picks a new picture and never "
+                "wakes a black screen; the next scheduled switch behaves as usual."
+            ),
+            justify=tk.LEFT,
+            wraplength=860,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         self.excluded_scope_label = ttk.Label(
             self.excluded_tab,
@@ -2003,6 +2023,7 @@ class SettingsApp(tk.Tk):
         self.idle_only_var.set(profile.idle_only)
         self.idle_seconds_var.set(str(profile.idle_seconds))
         self.suppress_locked_var.set(profile.suppress_when_locked)
+        self.redraw_topology_var.set(profile.redraw_on_topology_change)
         self.hotkey_var.set(profile.black_hotkey)
         self.next_hotkey_var.set(profile.next_hotkey)
         self.pause_hotkey_var.set(profile.pause_hotkey)
@@ -2403,6 +2424,8 @@ class SettingsApp(tk.Tk):
             raise ValueError(f"The idle time must be between 0 and {MAX_IDLE_SECONDS} seconds.")
         suppress_locked_var = vars(self).get("suppress_locked_var")
         suppress_when_locked = bool(suppress_locked_var.get()) if suppress_locked_var is not None else False
+        redraw_topology_var = vars(self).get("redraw_topology_var")
+        redraw_on_topology_change = bool(redraw_topology_var.get()) if redraw_topology_var is not None else True
         next_hotkey_var = vars(self).get("next_hotkey_var")
         next_hotkey = (
             str(next_hotkey_var.get()).strip() if next_hotkey_var is not None else ""
@@ -2588,6 +2611,7 @@ class SettingsApp(tk.Tk):
             polaroid_tilt=polaroid_tilt,
             collage_count=collage_count,
             startup_delay_minutes=startup_delay_minutes,
+            redraw_on_topology_change=redraw_on_topology_change,
             excluded_images=excluded_images,
             web_sources=web_sources,
             overlay_title=overlay_title,

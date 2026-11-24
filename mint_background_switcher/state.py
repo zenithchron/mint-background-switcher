@@ -29,6 +29,10 @@ class RuntimeState:
     last_images: list[str] = field(default_factory=list)
     wallpaper_slot: int = 0
     wallpaper_history: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Monitor topology (topology_fingerprint) the current wallpaper was last
+    # applied for; None until the first apply. Read by the topology-change
+    # refresh to decide whether a redraw is due.
+    last_topology: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeState":
@@ -43,6 +47,7 @@ class RuntimeState:
             else {}
         )
         last_images_raw = data.get("last_images", [])
+        last_topology_raw = data.get("last_topology")
         try:
             wallpaper_slot = int(data.get("wallpaper_slot", 0) or 0) % 2
         except (TypeError, ValueError):
@@ -57,6 +62,7 @@ class RuntimeState:
             last_images=[str(v) for v in last_images_raw] if isinstance(last_images_raw, list) else [],
             wallpaper_slot=wallpaper_slot,
             wallpaper_history=_parse_wallpaper_history(data.get("wallpaper_history")),
+            last_topology=last_topology_raw if isinstance(last_topology_raw, str) and last_topology_raw else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,6 +76,7 @@ class RuntimeState:
             "last_images": self.last_images,
             "wallpaper_slot": self.wallpaper_slot,
             "wallpaper_history": self.wallpaper_history,
+            "last_topology": self.last_topology,
         }
 
 
