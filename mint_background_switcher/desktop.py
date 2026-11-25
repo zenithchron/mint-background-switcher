@@ -28,6 +28,35 @@ def file_uri(path: str | Path) -> str:
     return Path(path).expanduser().resolve().as_uri()
 
 
+def open_desktop_target(target: Path, *, failure_subject: str, recovery: str) -> Path:
+    """Launch one existing path through xdg-open without invoking a shell."""
+
+    opener = shutil.which("xdg-open")
+    if opener is None:
+        raise RuntimeError(f"xdg-open is unavailable; install xdg-utils to open {failure_subject}")
+    process = subprocess.Popen(
+        [opener, str(target)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        start_new_session=True,
+        shell=False,
+    )
+    try:
+        return_code = process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        # Some desktop openers remain attached to the launched application. Once
+        # the validated opener has stayed alive this long, let the detached
+        # handoff continue instead of blocking the caller or terminating it.
+        return target
+    if return_code != 0:
+        raise RuntimeError(
+            f"xdg-open could not open {failure_subject} (exit status {return_code}). {recovery}"
+        )
+    return target
+
+
 def _parse_gsettings_output(value: str) -> object:
     value = value.strip()
     if value == "true":

@@ -346,6 +346,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.web_remove_button,
                 app.web_refresh_button,
                 app.web_reveal_button,
+                app.web_cached_pictures_button,
             ),
             str(app.layout_tab): (app.layout_scope_label, app.effect_menu, app.bar_color_menu, app.fit_mode_menu),
             str(app.overlays_tab): (
@@ -2684,6 +2685,7 @@ def _assert_web_row_controls(app):
         app.web_remove_button,
         app.web_refresh_button,
         app.web_reveal_button,
+        app.web_cached_pictures_button,
     ):
         assert is_descendant(control, app.sources_tab)
         assert control.winfo_ismapped()

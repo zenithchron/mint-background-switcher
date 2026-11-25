@@ -24,6 +24,7 @@ from .monitor import detect_monitors
 from .overlays import DEFAULT_OVERLAY_CALENDAR_POSITION, overlays_enabled, read_picture_info, render_overlay_preview
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
+from .sources import all_web_source_entries, list_cached_pictures, web_source_cache_dir
 from .service import (
     NoCurrentWallpaperError,
     NoPreviousWallpaperError,
@@ -46,7 +47,7 @@ from .service import (
 )
 from .startup import safe_start
 from .state import load_state
-from .working_storage import WorkingDirectoryError
+from .working_storage import WorkingDirectoryError, configured_working_directory
 
 
 def _monitor_to_dict(monitor) -> dict:
@@ -236,6 +237,22 @@ def build_parser() -> argparse.ArgumentParser:
     ws_refresh = web_source_sub.add_parser("refresh", help="Download/update the profile's web sources now")
     ws_refresh.add_argument("--profile")
     ws_refresh.add_argument("--dry-run", action="store_true", help="Report cache state without downloading")
+
+    cached_pictures = sub.add_parser(
+        "cached-pictures",
+        help="Browse the web source cache: open the picture browser, or print the list with --json",
+    )
+    cached_pictures.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the cached picture list as JSON and exit (no GUI)",
+    )
+    cached_pictures.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Maximum number of pictures to list (1-1000, default 200)",
+    )
 
     overlay_info = sub.add_parser(
         "overlay-info",
@@ -479,6 +496,35 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         except (ValueError, WorkingDirectoryError) as exc:
             print(f"web-source failed: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "cached-pictures":
+        try:
+            config = load_config(create=False)
+            cache_dir = web_source_cache_dir(configured_working_directory(config))
+            if args.json:
+                entries = all_web_source_entries(config)
+                pictures = list_cached_pictures(cache_dir, entries, limit=args.limit)
+                print(
+                    json.dumps(
+                        {
+                            "cache_dir": str(cache_dir),
+                            "count": len(pictures),
+                            "pictures": [picture.to_dict() for picture in pictures],
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+                return 0
+            try:
+                from .cached_pictures import run_cached_pictures_gui
+            except ImportError as exc:
+                raise RuntimeError(
+                    "The cached picture browser requires Tkinter. On Mint/Ubuntu install python3-tk."
+                ) from exc
+            return run_cached_pictures_gui(limit=args.limit)
+        except (ValueError, WorkingDirectoryError, RuntimeError) as exc:
+            print(f"cached-pictures failed: {exc}", file=sys.stderr)
             return 1
     if args.command == "overlay-info":
         info = read_picture_info(Path(args.image))

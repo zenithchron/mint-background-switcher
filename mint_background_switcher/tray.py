@@ -204,6 +204,7 @@ class TrayApp:
         self.timer_id: int | None = None
         self.rotation_runner = RotationRunner(self.GLib.idle_add, error_handler=self._report_error)
         self._settings_process: subprocess.Popen | None = None
+        self._cached_pictures_process: subprocess.Popen | None = None
         self.indicator = self.AppIndicator.Indicator.new(
             "mint-background-switcher",
             icon_name,
@@ -247,6 +248,10 @@ class TrayApp:
         item_black = Gtk.MenuItem(label="Black Screen")
         item_black.connect("activate", self._black)
         menu.append(item_black)
+
+        item_cached = Gtk.MenuItem(label="Cached Pictures")
+        item_cached.connect("activate", self._cached_pictures)
+        menu.append(item_cached)
 
         profiles_item = Gtk.MenuItem(label="Profiles")
         profiles_menu = Gtk.Menu()
@@ -344,6 +349,26 @@ class TrayApp:
         self._settings_process = None
         self._build_menu()
         self._schedule_timer()
+        return False
+
+    def _cached_pictures(self, *_):
+        if self._cached_pictures_process is not None and self._cached_pictures_process.poll() is None:
+            return
+        try:
+            self._cached_pictures_process = subprocess.Popen(
+                source_wrapper_argv() + ["cached-pictures"],
+                close_fds=True,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            self._report_error(exc)
+            return
+        self.GLib.timeout_add_seconds(1, self._poll_cached_pictures)
+
+    def _poll_cached_pictures(self) -> bool:
+        if self._cached_pictures_process is not None and self._cached_pictures_process.poll() is None:
+            return True
+        self._cached_pictures_process = None
         return False
 
     def _report_error(self, error: BaseException) -> bool:

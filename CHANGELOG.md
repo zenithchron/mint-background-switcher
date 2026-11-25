@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.38] - 2026-11-25
+
+### Added
+
+- **Cached Picture Browser** (JBS parity; roadmap section 5 "browse recent cached pictures"):
+  - The shared web source cache (`<working folder>/web_sources`) can now be browsed read-only. **Settings → Sources → Web picture sources** gains a **Cached Pictures…** button (next to **Reveal**) that opens the browser; the tray menu gains a **Cached Pictures** item, and the CLI gains `cached-pictures [--json] [--limit N]`.
+  - The window lists every cached picture newest first with four columns of inline detail: file name, source (the direct image URL, `[feed] <feed URL>` for feed pictures, or "source removed from settings" for orphans left behind when a source was removed from the profile), the file's date, and its size. A header line reports the picture count and the cache folder.
+  - Selecting a row enables **Open Picture** (launches the file in the default image application) and **Open Containing Folder** (opens the cache folder in the file manager); **Refresh** re-scans the cache, keeping the selection when the picture survives, and **Close** dismisses the window. Opening is re-validated against disk at launch time, so a picture pruned by a refresh since the list was drawn is reported with a one-line error instead of crashing the window.
+  - The browser is read-only: it lists, opens, and reveals cache files but never deletes or prunes them — pruning remains the refresh path's job. Listing is fail-open: a missing, unreadable, or empty cache directory shows a "no cached pictures yet" hint with instructions, and a malformed feed sidecar simply leaves its pictures unlabeled as orphans.
+  - `cached-pictures --json` prints the listing as deterministic JSON (`cache_dir`, `count`, `pictures`) without opening a display, so the same data is scriptable headless; `--limit` bounds the listing (clamped to 1–1000, default 200) in every entry point.
+  - Pictures whose file name stem matches no configured source across any profile are listed as orphans (their source was removed from the settings and the file has not been pruned yet); direct URL entries take precedence over feed sidecars for the same stem.
+- Bumped the package version to `0.2.38`.
+
 ## [0.2.37] - 2026-11-24
 
 ### Added

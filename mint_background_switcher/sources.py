@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import io
 import json
@@ -52,7 +53,7 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids import cycles
-    from .config import Profile
+    from .config import Config, Profile
 
 WEB_SOURCE_TYPE = "url"
 WEB_FEED_TYPE = "feed"
@@ -195,6 +196,120 @@ def web_source_cached_count(cache_dir: Path, entry: dict[str, str]) -> int:
         return sum(1 for stem in stems if _find_existing(Path(cache_dir), stem) is not None)
     except Exception:
         return 0
+
+
+@dataclass(frozen=True, slots=True)
+class CachedPicture:
+    """One image file in the shared web source cache, labeled with its source."""
+
+    path: str
+    name: str
+    source_url: str | None
+    source_type: str  # "url" | "feed" | "orphan"
+    mtime: float
+    size: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "path": self.path,
+            "source_url": self.source_url,
+            "source_type": self.source_type,
+            "cached_at": datetime.fromtimestamp(self.mtime, tz=timezone.utc).isoformat(),
+            "size": self.size,
+        }
+
+
+def all_web_source_entries(config: "Config") -> list[dict[str, str]]:
+    """Deduplicated web source entries across every profile, in profile order.
+
+    The cache directory is shared by all profiles, so the browser labels each
+    cached picture against the union of every profile's configured sources.
+    """
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for profile in config.profiles.values():
+        for entry in profile.web_sources:
+            if entry["url"] not in seen:
+                seen.add(entry["url"])
+                entries.append(entry)
+    return entries
+
+
+def list_cached_pictures(
+    cache_dir: Path | str,
+    entries: list[dict[str, str]] | None = None,
+    *,
+    limit: int = 200,
+) -> list[CachedPicture]:
+    """List cached web source images, newest first, without touching the cache.
+
+    ``entries`` is the configured web source list (``all_web_source_entries``
+    across profiles, or a single profile's list) used to label each cached
+    picture with the source URL it belongs to. A picture whose stem matches no
+    configured source is reported as an ``orphan`` — its source was removed
+    from the settings and its file has not been pruned yet. Direct URL entries
+    take precedence over feed sidecars for the same stem. Missing, unreadable,
+    or empty cache directories yield an empty list; a malformed sidecar simply
+    leaves its pictures unlabeled. At most ``limit`` pictures are returned
+    (clamped to 1–1000), sorted by newest modification time.
+    """
+    try:
+        bounded = int(limit)
+    except (TypeError, ValueError, OverflowError):
+        bounded = 200
+    bounded = max(1, min(bounded, 1000))
+    cache = Path(cache_dir)
+    try:
+        candidates = [
+            path
+            for path in cache.iterdir()
+            if path.is_file() and path.suffix.lower() in _SUPPORTED_IMAGE_EXTENSIONS
+        ]
+    except OSError:
+        return []
+    stems: dict[str, tuple[str, str]] = {}
+    if entries:
+        for entry in entries:
+            url = entry.get("url")
+            if not url:
+                continue
+            if entry.get("type") == WEB_FEED_TYPE:
+                try:
+                    feed_stems = _read_feed_sidecar(_feed_sidecar_path(cache, url))
+                except Exception:
+                    feed_stems = set()
+                for stem in feed_stems:
+                    stems.setdefault(stem, (url, WEB_FEED_TYPE))
+        for entry in entries:
+            url = entry.get("url")
+            if not url or entry.get("type") == WEB_FEED_TYPE:
+                continue
+            stems[web_source_stem(url)] = (url, WEB_SOURCE_TYPE)
+    pictures: list[CachedPicture] = []
+    for path in candidates:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        stem = path.name[: len(path.name) - len(path.suffix)]
+        source = stems.get(stem)
+        if source is not None:
+            source_url, source_type = source
+        else:
+            source_url, source_type = None, "orphan"
+        pictures.append(
+            CachedPicture(
+                path=str(path),
+                name=path.name,
+                source_url=source_url,
+                source_type=source_type,
+                mtime=stat.st_mtime,
+                size=stat.st_size,
+            )
+        )
+    pictures.sort(key=lambda picture: (-picture.mtime, picture.name))
+    return pictures[:bounded]
 
 
 def _describe_error(exc: Exception, url: str) -> str:

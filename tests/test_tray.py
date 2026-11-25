@@ -153,3 +153,35 @@ def test_open_settings_launches_independent_process(monkeypatch):
             {"close_fds": True, "start_new_session": True},
         )
     ]
+
+
+def test_open_cached_pictures_launches_independent_process(monkeypatch):
+    calls = []
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return FakeProcess()
+
+    class FakeGLib:
+        @staticmethod
+        def timeout_add_seconds(_seconds, _callback):
+            return 1
+
+    app = TrayApp.__new__(TrayApp)
+    app.GLib = FakeGLib()
+    app._cached_pictures_process = None
+    monkeypatch.setattr(tray_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(tray_module, "source_wrapper_argv", lambda: ["/managed/mbs"])
+
+    app._cached_pictures()
+
+    assert calls == [
+        (
+            ["/managed/mbs", "cached-pictures"],
+            {"close_fds": True, "start_new_session": True},
+        )
+    ]

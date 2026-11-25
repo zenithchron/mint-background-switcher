@@ -71,6 +71,9 @@ from .sources import (
     MAX_WEB_SOURCES,
     WEB_FEED_TYPE,
     WEB_SOURCE_TYPE,
+    CachedPicture,
+    all_web_source_entries,
+    list_cached_pictures,
     validate_web_url,
     web_source_cached_count,
     web_source_cache_dir,
@@ -992,6 +995,12 @@ class SettingsApp(tk.Tk):
             command=self._reveal_selected_web_source,
         )
         self.web_reveal_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_cached_pictures_button = ttk.Button(
+            web_entry_row,
+            text="Cached Pictures...",
+            command=self._open_cached_pictures,
+        )
+        self.web_cached_pictures_button.pack(side=tk.LEFT, padx=(4, 0))
 
         self.layout_scope_label = ttk.Label(
             self.layout_tab,
@@ -3953,6 +3962,32 @@ class SettingsApp(tk.Tk):
             self._set_status(f"Saved the current wallpaper to {saved}.")
         except Exception as exc:
             messagebox.showerror("Save current wallpaper failed", str(exc), parent=self)
+
+    def _open_cached_pictures(self) -> None:
+        if self._any_worker_busy():
+            return
+        existing_window = self._optional_attr("_cached_pictures_window", None)
+        try:
+            if existing_window is not None and existing_window.winfo_exists():
+                existing_window.deiconify()
+                existing_window.lift()
+                existing_window.focus_force()
+                return
+        except tk.TclError:
+            self._cached_pictures_window = None
+        # Lazy import: the headless CLI paths never need tkinter for this page.
+        from .cached_pictures import CachedPicturesWindow
+
+        working_directory = Path(self.working_directory_var.get().strip() or ".")
+        cache_dir = web_source_cache_dir(working_directory)
+
+        def loader() -> list[CachedPicture]:
+            config = load_config(create=False)
+            entries = all_web_source_entries(config)
+            return list_cached_pictures(cache_dir, entries)
+
+        window = CachedPicturesWindow(self, loader, cache_dir)
+        self._cached_pictures_window = window
 
     def _view_current_pictures(self) -> None:
         if self._any_worker_busy():
