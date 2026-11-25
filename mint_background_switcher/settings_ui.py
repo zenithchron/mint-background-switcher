@@ -971,36 +971,39 @@ class SettingsApp(tk.Tk):
         self.web_sources_tree.pack(fill=tk.X)
         web_entry_row = ttk.Frame(web_frame)
         web_entry_row.pack(fill=tk.X)
-        self.web_url_entry = ttk.Entry(web_entry_row)
+        # width=8 keeps the row's minimum demand low enough for the pinned
+        # 944x668 geometry under CI font metrics (clam theme); the entry
+        # still expands to fill the row on normal displays.
+        self.web_url_entry = ttk.Entry(web_entry_row, width=8)
         self.web_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.web_add_url_button = ttk.Button(
             web_entry_row, text="Add URL", command=lambda: self._add_web_source_from_entry(WEB_SOURCE_TYPE)
         )
-        self.web_add_url_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_add_url_button.pack(side=tk.LEFT, padx=(2, 0))
         self.web_add_feed_button = ttk.Button(
             web_entry_row, text="Add feed", command=lambda: self._add_web_source_from_entry(WEB_FEED_TYPE)
         )
-        self.web_add_feed_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_add_feed_button.pack(side=tk.LEFT, padx=(2, 0))
         self.web_remove_button = ttk.Button(
             web_entry_row,
             text="Remove Selected",
             command=self._remove_selected_web_source,
         )
-        self.web_remove_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_remove_button.pack(side=tk.LEFT, padx=(2, 0))
         self.web_refresh_button = ttk.Button(web_entry_row, text="Refresh Now", command=self._refresh_web_sources)
-        self.web_refresh_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_refresh_button.pack(side=tk.LEFT, padx=(2, 0))
         self.web_reveal_button = ttk.Button(
             web_entry_row,
             text="Reveal",
             command=self._reveal_selected_web_source,
         )
-        self.web_reveal_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_reveal_button.pack(side=tk.LEFT, padx=(2, 0))
         self.web_cached_pictures_button = ttk.Button(
             web_entry_row,
             text="Cached Pictures...",
             command=self._open_cached_pictures,
         )
-        self.web_cached_pictures_button.pack(side=tk.LEFT, padx=(4, 0))
+        self.web_cached_pictures_button.pack(side=tk.LEFT, padx=(2, 0))
 
         self.layout_scope_label = ttk.Label(
             self.layout_tab,

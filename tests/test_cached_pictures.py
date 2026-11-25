@@ -455,8 +455,6 @@ def test_cached_pictures_window_open_folder_calls_opener_with_cache_dir(monkeypa
 def test_standalone_cached_pictures_gui_exits_when_window_closed(monkeypatch, tmp_path):
     """The cached-pictures process must terminate once the window is closed."""
 
-    import threading
-
     from mint_background_switcher import cached_pictures as cp
 
     _seed_web_source(monkeypatch, tmp_path, "https://example.com/pic.jpg")
@@ -467,21 +465,14 @@ def test_standalone_cached_pictures_gui_exits_when_window_closed(monkeypatch, tm
         self.after(200, self.destroy)
 
     monkeypatch.setattr(cp.CachedPicturesWindow, "__init__", auto_close)
-    results = []
 
-    def run_in_worker() -> None:
-        # No gc.collect() here: a global collection from this thread sweeps
-        # Tk objects owned by other tests' main-thread interpreters and their
-        # Variable.__del__ then issues Tcl calls cross-thread, which can
-        # deadlock against the main thread's own GC. CPython 3.14 safely
-        # leaks worker-thread Tcl interpreters instead (gh-83274).
-        results.append(cp.run_cached_pictures_gui())
-
-    worker = threading.Thread(target=run_in_worker, daemon=True)
-    worker.start()
-    worker.join(timeout=10)
-    assert worker.is_alive() is False, "run_cached_pictures_gui never returned after the window closed"
-    assert results == [0]
+    # The CLI runs the GUI on the process's main thread, so test that
+    # documented launch path: Tcl 8.6 (Python <= 3.13) cannot host a second
+    # Tk interpreter on a worker thread, and a worker-thread root aborts the
+    # test process on CI.
+    started = time.monotonic()
+    assert cp.run_cached_pictures_gui() == 0
+    assert time.monotonic() - started < 10
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
