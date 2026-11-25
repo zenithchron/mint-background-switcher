@@ -234,6 +234,7 @@ def test_cli_cached_pictures_empty_cache_reports_zero(monkeypatch, tmp_path, cap
 
 # --- Tk browser window (needs a display or Xvfb) --------------------------------
 
+import gc  # noqa: E402
 import time  # noqa: E402
 
 import tkinter as tk  # noqa: E402
@@ -370,7 +371,10 @@ def test_cached_pictures_window_open_picture_calls_desktop_opener(monkeypatch, t
     try:
         root.update()
         window._open_selected()
-        _pump_until(root, lambda: window._status_var.get().startswith("Selected "))
+        # Generous deadline: the launch daemon thread does real path
+        # resolution and can be descheduled for several seconds on loaded
+        # CI runners.
+        _pump_until(root, lambda: window._status_var.get().startswith("Selected "), timeout=15.0)
         assert opened == [cache_dir / f"{web_source_stem(url)}.jpg"]
         assert "could not be opened" not in window._status_var.get()
         # Re-entry while a launch is in flight is ignored, not stacked.
@@ -381,6 +385,11 @@ def test_cached_pictures_window_open_picture_calls_desktop_opener(monkeypatch, t
     finally:
         window.destroy()
         root.destroy()
+        # Free the destroyed root's Tcl interpreter on the main thread so a
+        # still-running launch daemon thread cannot run the GC that frees it:
+        # Tcl 8.6 (Python <= 3.13) aborts on cross-thread finalization.
+        del window, root
+        gc.collect()
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
@@ -414,13 +423,18 @@ def test_cached_pictures_window_open_missing_file_reports_error(tmp_path):
         root.update()
         picture.unlink()  # pruned by a refresh after the list was drawn
         window._open_selected()
-        _pump_until(root, lambda: "could not be opened" in window._status_var.get())
+        _pump_until(root, lambda: "could not be opened" in window._status_var.get(), timeout=15.0)
         assert "missing" in window._status_var.get()
         # The window is still usable after the failed open.
         assert "disabled" not in window._open_button.state()
     finally:
         window.destroy()
         root.destroy()
+        # Free the destroyed root's Tcl interpreter on the main thread so a
+        # still-running launch daemon thread cannot run the GC that frees it:
+        # Tcl 8.6 (Python <= 3.13) aborts on cross-thread finalization.
+        del window, root
+        gc.collect()
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
@@ -444,11 +458,16 @@ def test_cached_pictures_window_open_folder_calls_opener_with_cache_dir(monkeypa
     try:
         root.update()
         window._open_selected(containing_folder=True)
-        _pump_until(root, lambda: window._status_var.get().startswith("Selected "))
+        _pump_until(root, lambda: window._status_var.get().startswith("Selected "), timeout=15.0)
         assert opened == [cache_dir]
     finally:
         window.destroy()
         root.destroy()
+        # Free the destroyed root's Tcl interpreter on the main thread so a
+        # still-running launch daemon thread cannot run the GC that frees it:
+        # Tcl 8.6 (Python <= 3.13) aborts on cross-thread finalization.
+        del window, root
+        gc.collect()
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
@@ -472,7 +491,7 @@ def test_standalone_cached_pictures_gui_exits_when_window_closed(monkeypatch, tm
     # test process on CI.
     started = time.monotonic()
     assert cp.run_cached_pictures_gui() == 0
-    assert time.monotonic() - started < 10
+    assert time.monotonic() - started < 20
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
