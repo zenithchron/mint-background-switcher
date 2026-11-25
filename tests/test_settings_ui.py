@@ -4370,7 +4370,15 @@ def test_working_folder_migration_runs_off_tk_thread_and_retains_source(monkeypa
         assert active.read_bytes() == b"generated wallpaper"
         assert (target / active.name).read_bytes() == b"generated wallpaper"
         assert app.status_var.get().startswith("MBS now uses")
-        assert str(target.resolve()) in app.status_var.get()
+        status = app.status_var.get()
+        full_head = "MBS now uses " + str(target.resolve())
+        if len(full_head) >= settings_ui.STATUS_TEXT_LIMIT:
+            # The status line caps at STATUS_TEXT_LIMIT and elides the tail.
+            # With long host tmp paths the full directory may not fit, so
+            # assert the new directory is reported up to the cap, elided.
+            assert status == full_head[: settings_ui.STATUS_TEXT_LIMIT - 1].rstrip() + "…"
+        else:
+            assert str(target.resolve()) in status
     finally:
         gate.set()
         app.destroy()
