@@ -786,3 +786,26 @@ def test_redraw_on_topology_change_roundtrip_with_backward_compatible_default():
     none_value = Config.from_dict({"active_profile": "P", "profiles": {"P": {"redraw_on_topology_change": None}}})
     assert malformed.get_profile().redraw_on_topology_change is True
     assert none_value.get_profile().redraw_on_topology_change is True
+
+
+def test_fade_transition_roundtrip_with_backward_compatible_default():
+    defaults = Config.from_dict({"active_profile": "P", "profiles": {"P": {}}})
+    assert defaults.get_profile().fade_transition_seconds == 0.0
+    assert defaults.to_dict()["profiles"]["P"]["fade_transition_seconds"] == 0.0
+
+    faded = Config.from_dict({"active_profile": "P", "profiles": {"P": {"fade_transition_seconds": 2.5}}})
+    assert faded.get_profile().fade_transition_seconds == 2.5
+    assert faded.to_dict()["profiles"]["P"]["fade_transition_seconds"] == 2.5
+
+
+def test_fade_transition_clamps_out_of_range_and_falls_back_on_malformed_values():
+    high = Config.from_dict({"active_profile": "P", "profiles": {"P": {"fade_transition_seconds": 15.0}}})
+    negative = Config.from_dict({"active_profile": "P", "profiles": {"P": {"fade_transition_seconds": -3.0}}})
+    malformed = Config.from_dict({"active_profile": "P", "profiles": {"P": {"fade_transition_seconds": "junk"}}})
+    none_value = Config.from_dict({"active_profile": "P", "profiles": {"P": {"fade_transition_seconds": None}}})
+    nan_value = Config.from_dict({"active_profile": "P", "profiles": {"P": {"fade_transition_seconds": float("nan")}}})
+    assert high.get_profile().fade_transition_seconds == 10.0
+    assert negative.get_profile().fade_transition_seconds == 0.0
+    assert malformed.get_profile().fade_transition_seconds == 0.0
+    assert none_value.get_profile().fade_transition_seconds == 0.0
+    assert nan_value.get_profile().fade_transition_seconds == 0.0

@@ -232,3 +232,120 @@ def test_dry_run_gnome_mirror_lockscreen_reports_dry_run_without_writes(monkeypa
 def test_dry_run_mirror_lockscreen_missing_image_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         DesktopSetter(dry_run=True).mirror_lockscreen(tmp_path / "missing.png", "gnome")
+
+
+def _fade_fixtures(tmp_path: Path) -> tuple[Path, Path]:
+    old = tmp_path / "old.png"
+    new = tmp_path / "new.png"
+    Image.new("RGB", (12, 12), (20, 20, 20)).save(old)
+    Image.new("RGB", (12, 12), (230, 230, 230)).save(new)
+    return old, new
+
+
+def _cinnamon_gsettings_harness(monkeypatch) -> list:
+    commands = []
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: "/usr/bin/gsettings" if cmd == "gsettings" else None)
+
+    def fake_check_output(args, **_kwargs):
+        assert args[:2] == ["gsettings", "get"]
+        if args[-1] == "picture-options":
+            return "'spanned'\n"
+        return "'old'\n"
+
+    monkeypatch.setattr(desktop.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(desktop.subprocess, "run", lambda args, **_kwargs: commands.append(args))
+    return commands
+
+
+def _picture_uri_sets(commands: list) -> list[str]:
+    return [
+        args[-1]
+        for args in commands
+        if len(args) >= 4 and args[:2] == ["gsettings", "set"] and args[-2] == "picture-uri"
+    ]
+
+
+def test_apply_with_fade_dry_run_applies_plain_without_frames(monkeypatch, tmp_path: Path):
+    old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+
+    assert DesktopSetter(dry_run=True).apply_with_fade(new, old, 2.0, "cinnamon") == ["dry-run:cinnamon"]
+    assert commands == []
+
+
+def test_apply_with_fade_disabled_applies_plain(monkeypatch, tmp_path: Path):
+    old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+
+    assert DesktopSetter().apply_with_fade(new, old, 0.0, "cinnamon") == ["cinnamon"]
+    assert _picture_uri_sets(commands) == [desktop.file_uri(new)]
+
+
+def test_apply_with_fade_missing_old_picture_applies_plain(monkeypatch, tmp_path: Path):
+    _old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+
+    assert DesktopSetter().apply_with_fade(new, tmp_path / "gone.png", 2.0, "cinnamon") == ["cinnamon"]
+    assert _picture_uri_sets(commands) == [desktop.file_uri(new)]
+
+
+def test_apply_with_fade_same_picture_applies_plain(monkeypatch, tmp_path: Path):
+    _old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+
+    assert DesktopSetter().apply_with_fade(new, new, 2.0, "cinnamon") == ["cinnamon"]
+    assert _picture_uri_sets(commands) == [desktop.file_uri(new)]
+
+
+def test_apply_with_fade_unsupported_backend_keeps_plain_apply_semantics(monkeypatch, tmp_path: Path):
+    old, new = _fade_fixtures(tmp_path)
+    monkeypatch.setattr(desktop.shutil, "which", lambda cmd: None)
+
+    with pytest.raises(RuntimeError):
+        DesktopSetter().apply_with_fade(new, old, 2.0, "unknown")
+
+
+def test_apply_with_fade_cinnamon_applies_frames_then_real_wallpaper(monkeypatch, tmp_path: Path):
+    old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+    monkeypatch.setattr(desktop.time, "sleep", lambda *_args: None)
+
+    assert DesktopSetter().apply_with_fade(new, old, 1.0, "cinnamon") == ["cinnamon"]
+
+    uris = _picture_uri_sets(commands)
+    assert uris[-1] == desktop.file_uri(new)
+    frame_uris = uris[:-1]
+    assert len(frame_uris) == 12
+    frame_paths = [uri.removeprefix("file://") for uri in frame_uris]
+    assert [Path(path).name for path in frame_paths] == [f"fade-{index:02d}.jpg" for index in range(1, 13)]
+    assert all(Path(path).parent.name.startswith("mbs-fade-") for path in frame_paths)
+    # Every frame file was cleaned up after the transition finished.
+    assert all(not Path(path).exists() for path in frame_paths)
+    # The compositor's own crossfade was suppressed for the duration of the fade.
+    assert ["org.cinnamon.muffin", "background-transition", "none"] in [
+        args[2:5] for args in commands if args[:2] == ["gsettings", "set"]
+    ]
+
+
+def test_apply_with_fade_gnome_applies_frames_then_real_wallpaper(monkeypatch, tmp_path: Path):
+    old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+    monkeypatch.setattr(desktop.time, "sleep", lambda *_args: None)
+
+    assert DesktopSetter().apply_with_fade(new, old, 1.0, "gnome") == ["gnome"]
+
+    uris = _picture_uri_sets(commands)
+    assert uris[-1] == desktop.file_uri(new)
+    assert len(uris) == 13  # 12 blend frames, then the real wallpaper file
+    # GNOME has no Cinnamon compositor to suppress.
+    assert [args for args in commands if args[:2] == ["gsettings", "set"] and args[2] == "org.cinnamon.muffin"] == []
+
+
+def test_apply_with_fade_frame_failure_falls_back_to_plain_apply(monkeypatch, tmp_path: Path):
+    old, new = _fade_fixtures(tmp_path)
+    commands = _cinnamon_gsettings_harness(monkeypatch)
+    monkeypatch.setattr(desktop, "build_fade_frames", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
+
+    assert DesktopSetter().apply_with_fade(new, old, 1.0, "cinnamon") == ["cinnamon"]
+    # The plain fallback still applied the real wallpaper exactly once.
+    assert _picture_uri_sets(commands) == [desktop.file_uri(new)]

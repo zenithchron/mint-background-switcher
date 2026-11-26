@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import ast
+import math
 import os
 import shutil
 import subprocess
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from .images import build_fade_frames
 
 LOCKSCREEN_MIRRORED = "mirrored"
 LOCKSCREEN_AUTOMATIC = "automatic"
@@ -259,6 +264,80 @@ class DesktopSetter:
     def _disable_cinnamon_background_transitions(self) -> None:
         _try_set_gsettings("org.cinnamon.muffin", "background-transition", "none", self.dry_run)
         _try_set_gsettings("org.nemo.desktop", "background-fade", False, self.dry_run)
+
+    def _restore_cinnamon_background_transitions(self, saved: tuple[object | None, object | None]) -> None:
+        transition, fade = saved
+        if isinstance(transition, (str, bool)):
+            _try_set_gsettings("org.cinnamon.muffin", "background-transition", str(transition), self.dry_run)
+        if isinstance(fade, (str, bool)):
+            _try_set_gsettings("org.nemo.desktop", "background-fade", fade, self.dry_run)
+
+    def apply_with_fade(
+        self,
+        new_path: str | Path,
+        old_path: str | Path | None,
+        seconds: float,
+        desktop: str = "auto",
+    ) -> list[str]:
+        """Apply ``new_path``, crossfading from ``old_path`` when possible.
+
+        The fade is rendered client-side: a short sequence of blended frames is
+        applied one by one, then the real new file finishes the transition so
+        the bytes on the desktop are exactly the recorded wallpaper. The fade
+        is only used on backends that re-read the background on every change
+        (Cinnamon, GNOME, MATE); anything that cannot fade — a dry run, a
+        disabled or zero-length fade, a missing old file, an unsupported
+        backend, or a failure mid-fade — falls back to a plain immediate
+        apply, so a fade problem can never break the switch. The fade runs to
+        completion within the configured duration and is not interruptible
+        mid-run; a reboot while a frame is active can leave the compositor
+        pointing at a since-cleaned-up frame until the next switch re-applies
+        a real file.
+        """
+        new = Path(new_path).expanduser()
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError, OverflowError):
+            return self.apply(new_path, desktop)
+        if self.dry_run or not math.isfinite(seconds) or seconds <= 0 or old_path is None:
+            return self.apply(new_path, desktop)
+        old = Path(old_path).expanduser()
+        if not old.is_file():
+            return self.apply(new_path, desktop)
+        try:
+            if old.resolve(strict=False) == new.resolve(strict=False):
+                return self.apply(new_path, desktop)
+        except OSError:
+            pass
+        resolved = self._resolve_desktop(desktop)
+        if resolved not in {"cinnamon", "gnome", "mate"}:
+            return self.apply(new_path, desktop)
+        saved_transitions: tuple[object | None, object | None] | None = None
+        if resolved == "cinnamon":
+            # The fade is ours: keep the compositor from crossfading every
+            # frame on top of it. Remember the user's own settings so they
+            # are restored once the fade finishes and the suppression only
+            # lasts for the duration of the fade.
+            saved_transitions = (
+                _get_gsettings("org.cinnamon.muffin", "background-transition"),
+                _get_gsettings("org.nemo.desktop", "background-fade"),
+            )
+            self._disable_cinnamon_background_transitions()
+        try:
+            with tempfile.TemporaryDirectory(prefix="mbs-fade-") as tmp:
+                frames = build_fade_frames(old, new, tmp)
+                interval = max(0.02, seconds / (len(frames) + 1))
+                for frame in frames:
+                    self.apply(frame, resolved)
+                    time.sleep(interval)
+                # Finish inside the temp dir so the frame files stay on disk
+                # until the real wallpaper is active.
+                return self.apply(new_path, resolved)
+        except Exception:
+            return self.apply(new_path, desktop)
+        finally:
+            if saved_transitions is not None:
+                self._restore_cinnamon_background_transitions(saved_transitions)
 
     def _apply_cinnamon_black(self) -> None:
         schema = "org.cinnamon.desktop.background"

@@ -25,6 +25,9 @@ from .paths import xdg_cache_dir
 
 SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff")
 SUPPORTED_TYPE_NAMES = tuple(ext[1:].lower() for ext in SUPPORTED_EXTENSIONS)
+# Number of intermediate blended frames in one wallpaper crossfade. The final
+# apply of the real new wallpaper file is not counted as a frame.
+FADE_INTERMEDIATE_FRAMES = 12
 CALENDAR_HIGHLIGHT_COLOR = (64, 120, 216, 255)
 POLAROID_BACKGROUND_COLOR = (39, 44, 52)
 POLAROID_FRAME_COLOR = (248, 246, 238, 255)
@@ -296,6 +299,52 @@ def is_usable_image(path: str | Path) -> bool:
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
         return False
     return True
+
+
+def build_fade_frames(
+    old_path: str | Path,
+    new_path: str | Path,
+    out_dir: str | Path,
+    *,
+    frames: int = FADE_INTERMEDIATE_FRAMES,
+) -> list[Path]:
+    """Write the intermediate crossfade frames between two wallpaper files.
+
+    The frames are linear blends from the old wallpaper to the new one, saved
+    as JPEGs in ``out_dir`` in apply order. Frame ``i`` uses a blend weight of
+    ``i / (frames + 1)``, so the first frame is mostly the old picture and the
+    last is mostly the new one; the caller finishes the transition by applying
+    the real new file. A size mismatch (for example a topology change between
+    switches) resizes the old picture to the new one's canvas. Both inputs are
+    validated with :func:`open_image`, so an unreadable picture raises
+    :class:`ImageDecodeError` and the caller falls back to a plain apply.
+    """
+    frames = max(1, min(64, int(frames)))
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            old = open_image(old_path)
+            new = open_image(new_path)
+    except (
+        OSError,
+        SyntaxError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as exc:
+        raise ImageDecodeError(Path(new_path)) from exc
+    if old.size != new.size:
+        old = old.resize(new.size, Image.Resampling.LANCZOS)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for index in range(1, frames + 1):
+        alpha = index / (frames + 1)
+        frame = Image.blend(old, new, alpha)
+        path = out / f"fade-{index:02d}.jpg"
+        frame.save(path, "JPEG", quality=92)
+        paths.append(path)
+    return paths
 
 
 def automatic_bar_color(image: Image.Image) -> tuple[int, int, int]:

@@ -24,6 +24,7 @@ from .config import (
     COLLAGE_COUNT_MIN,
     DEFAULT_BLACK_HOTKEY,
     DEFAULT_COLLAGE_COUNT,
+    DEFAULT_FADE_TRANSITION_SECONDS,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
@@ -39,6 +40,7 @@ from .config import (
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
     MAX_IDLE_SECONDS,
+    MAX_FADE_TRANSITION_SECONDS,
     MAX_POST_SWITCH_COMMAND_LENGTH,
     MAX_STARTUP_DELAY_MINUTES,
     MAX_SUPPRESS_PROCESS_LENGTH,
@@ -552,6 +554,7 @@ class SettingsApp(tk.Tk):
         "match_orientation_var",
         "rotate_on_startup_var",
         "startup_delay_var",
+        "fade_transition_var",
         "night_black_screen_var",
         "night_start_var",
         "night_end_var",
@@ -610,6 +613,7 @@ class SettingsApp(tk.Tk):
         self.match_orientation_var = tk.BooleanVar()
         self.rotate_on_startup_var = tk.BooleanVar(value=True)
         self.startup_delay_var = tk.StringVar(value="0")
+        self.fade_transition_var = tk.StringVar(value=str(DEFAULT_FADE_TRANSITION_SECONDS))
         self.night_black_screen_var = tk.BooleanVar(value=False)
         self.night_start_var = tk.StringVar(value=DEFAULT_NIGHT_START)
         self.night_end_var = tk.StringVar(value=DEFAULT_NIGHT_END)
@@ -1437,6 +1441,17 @@ class SettingsApp(tk.Tk):
             justify=tk.LEFT,
             wraplength=480,
         ).grid(row=5, column=2, sticky="w", padx=(16, 0), pady=(2, 0))
+        ttk.Label(rotation_schedule, text="Fade transition (seconds):").grid(row=6, column=0, sticky="w", pady=(2, 0))
+        self.fade_transition_entry = ttk.Entry(
+            rotation_schedule, textvariable=self.fade_transition_var, width=10
+        )
+        self.fade_transition_entry.grid(row=6, column=1, sticky="w", padx=5, pady=(2, 0))
+        ttk.Label(
+            rotation_schedule,
+            text="Crossfade the new wallpaper over the old one (0 = switch instantly).",
+            justify=tk.LEFT,
+            wraplength=480,
+        ).grid(row=6, column=2, sticky="w", padx=(16, 0), pady=(2, 0))
 
         shortcuts = ttk.LabelFrame(self.rotation_tab, text="Shortcuts", padding=4)
         shortcuts.pack(fill=tk.X, pady=(0, 3))
@@ -2024,6 +2039,7 @@ class SettingsApp(tk.Tk):
         self.match_orientation_var.set(profile.match_orientation)
         self.rotate_on_startup_var.set(profile.rotate_on_startup)
         self.startup_delay_var.set(f"{profile.startup_delay_minutes:g}")
+        self.fade_transition_var.set(f"{profile.fade_transition_seconds:g}")
         self.night_black_screen_var.set(profile.night_black_screen)
         self.night_start_var.set(profile.night_start)
         self.night_end_var.set(profile.night_end)
@@ -2518,6 +2534,19 @@ class SettingsApp(tk.Tk):
                     "Startup delay must be a number of minutes between "
                     f"0 and {MAX_STARTUP_DELAY_MINUTES:g}."
                 ) from None
+        fade_transition_var = vars(self).get("fade_transition_var")
+        fade_transition_seconds = DEFAULT_FADE_TRANSITION_SECONDS
+        if fade_transition_var is not None:
+            try:
+                candidate = float(fade_transition_var.get())
+                if not math.isfinite(candidate):
+                    raise ValueError
+                fade_transition_seconds = max(0.0, min(MAX_FADE_TRANSITION_SECONDS, candidate))
+            except (ValueError, tk.TclError):
+                raise ValueError(
+                    "Fade transition must be a number of seconds between "
+                    f"0 and {MAX_FADE_TRANSITION_SECONDS:g} (0 = no fade)."
+                ) from None
         fit_mode = FIT_MODE_LABEL_TO_VALUE.get(str(self.fit_mode_var.get()).strip(), "fit_bars")
         # Exclusions are managed on the Never Show Again page, not in these fields; carry the
         # current profile's list forward so saving or renaming never silently wipes it.
@@ -2623,6 +2652,7 @@ class SettingsApp(tk.Tk):
             polaroid_tilt=polaroid_tilt,
             collage_count=collage_count,
             startup_delay_minutes=startup_delay_minutes,
+            fade_transition_seconds=fade_transition_seconds,
             redraw_on_topology_change=redraw_on_topology_change,
             excluded_images=excluded_images,
             web_sources=web_sources,

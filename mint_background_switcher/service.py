@@ -834,12 +834,18 @@ def _apply_composed_wallpaper(
     cancelled: Callable[[], bool] | None,
     monitors: Sequence[Monitor],
     overlay_panels: list[OverlayPanel] | None = None,
+    fade_source: str | None = None,
 ) -> tuple[str, str]:
     """Finalize a composed wallpaper: effect, overlays, then activate it.
 
     Returns the (lockscreen_note, overlay_note) pair for the result.
     Overlay failures are fail-open: rotation continues without the
     picture-info panel instead of failing the switch.
+
+    When ``fade_source`` names the picture currently on screen and the
+    profile has a fade transition configured, the activation is a
+    crossfade from that picture (see ``DesktopSetter.apply_with_fade``);
+    otherwise the wallpaper is applied immediately as before.
     """
     _cancel_if_requested(cancelled)
     apply_effect(wallpaper, profile.effect, rng=rng)
@@ -850,7 +856,16 @@ def _apply_composed_wallpaper(
             overlay_note = apply_overlays(wallpaper, overlay_panels, profile, monitors).note
         except Exception:
             overlay_note = "Overlay skipped: the wallpaper could not be re-read for overlay rendering."
-    DesktopSetter(dry_run=dry_run).apply(wallpaper, profile.desktop)
+    setter = DesktopSetter(dry_run=dry_run)
+    if not dry_run and profile.fade_transition_seconds > 0 and fade_source:
+        setter.apply_with_fade(
+            wallpaper,
+            fade_source,
+            profile.fade_transition_seconds,
+            profile.desktop,
+        )
+    else:
+        setter.apply(wallpaper, profile.desktop)
     return _mirror_lockscreen(profile, wallpaper, dry_run=dry_run), overlay_note
 
 
@@ -1019,6 +1034,10 @@ def _switch_once_with_state(
         selection.exclude(excluded_paths)
     monitors = detect_monitors()
     state.active_profile = profile.name
+    # A fade transition blends from the picture currently on screen. A black
+    # screen is a solid color, not a picture, so it never acts as a fade
+    # source; the first switch has no previous picture at all.
+    fade_source = None if state.black_screen else state.last_wallpaper
     orientation_requirements = _orientation_requirements(profile, monitors, profile.mode)
     single_orientation = orientation_requirements[0] if orientation_requirements else None
     wallpaper_path, next_slot = _next_wallpaper_path(
@@ -1077,6 +1096,7 @@ def _switch_once_with_state(
                 cancelled=cancelled,
                 monitors=monitors,
                 overlay_panels=overlay_panels,
+                fade_source=fade_source,
             )
     elif profile.mode == "montage":
         pool = _load_image_pool(
@@ -1132,6 +1152,7 @@ def _switch_once_with_state(
                 rng=rng,
                 cancelled=cancelled,
                 monitors=monitors,
+                fade_source=fade_source,
             )
     elif profile.mode == "collage":
         pool = _load_image_pool(
@@ -1218,6 +1239,7 @@ def _switch_once_with_state(
                     rng=rng,
                     cancelled=cancelled,
                     monitors=monitors,
+                    fade_source=fade_source,
                 )
                 break
     elif profile.mode == "postcard":
@@ -1301,6 +1323,7 @@ def _switch_once_with_state(
                     rng=rng,
                     cancelled=cancelled,
                     monitors=monitors,
+                    fade_source=fade_source,
                 )
                 break
     elif profile.mode == "polaroid":
@@ -1383,6 +1406,7 @@ def _switch_once_with_state(
                     rng=rng,
                     cancelled=cancelled,
                     monitors=monitors,
+                    fade_source=fade_source,
                 )
                 break
     elif profile.mode == "same":
@@ -1436,6 +1460,7 @@ def _switch_once_with_state(
                 cancelled=cancelled,
                 monitors=monitors,
                 overlay_panels=overlay_panels,
+                fade_source=fade_source,
             )
     elif profile.mode == "shared":
         pool = _load_image_pool(
@@ -1490,6 +1515,7 @@ def _switch_once_with_state(
                 cancelled=cancelled,
                 monitors=monitors,
                 overlay_panels=overlay_panels,
+                fade_source=fade_source,
             )
     else:
         pools_by_monitor: dict[str, _ImagePool] = {}
@@ -1551,6 +1577,7 @@ def _switch_once_with_state(
                 cancelled=cancelled,
                 monitors=monitors,
                 overlay_panels=overlay_panels,
+                fade_source=fade_source,
             )
 
     if next_slot is not None:

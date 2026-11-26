@@ -127,6 +127,8 @@ COLLAGE_COUNT_MAX = 6
 # more than half a day.
 DEFAULT_STARTUP_DELAY_MINUTES = 0.0
 MAX_STARTUP_DELAY_MINUTES = 720.0
+DEFAULT_FADE_TRANSITION_SECONDS = 0.0
+MAX_FADE_TRANSITION_SECONDS = 10.0
 # Topology-change refresh (JBS monitor-change parity): when the connected
 # monitor layout changes, re-apply the current wallpaper for the new layout.
 # On by default so a plugged-in or unplugged monitor gets the wallpaper
@@ -226,6 +228,21 @@ def _coerce_photo_size(value: Any, default: float = 0.5) -> float:
     if not math.isfinite(size):
         return default
     return max(0.0, min(1.0, size))
+
+
+def _coerce_fade_transition(value: Any, default: float = DEFAULT_FADE_TRANSITION_SECONDS) -> float:
+    """Clamp a saved fade transition (seconds) into the supported 0-10 range.
+
+    Non-numeric or non-finite values fall back to the default so a malformed
+    saved value can never wedge a switch in a bogus fade.
+    """
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not math.isfinite(seconds):
+        return default
+    return max(0.0, min(seconds, MAX_FADE_TRANSITION_SECONDS))
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -467,6 +484,11 @@ class Profile:
     # legacy positional-argument order stays stable (see
     # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
     redraw_on_topology_change: bool = DEFAULT_REDRAW_ON_TOPOLOGY_CHANGE
+    # Seconds to crossfade when applying a new wallpaper (JBS fade-transition
+    # parity). 0 = apply instantly (historic behavior). Appended last so the
+    # legacy positional-argument order stays stable (see
+    # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
+    fade_transition_seconds: float = DEFAULT_FADE_TRANSITION_SECONDS
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -534,6 +556,9 @@ class Profile:
             redraw_on_topology_change=_coerce_bool(
                 data.get("redraw_on_topology_change"), default=DEFAULT_REDRAW_ON_TOPOLOGY_CHANGE
             ),
+            fade_transition_seconds=_coerce_fade_transition(
+                data.get("fade_transition_seconds", DEFAULT_FADE_TRANSITION_SECONDS)
+            ),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -585,6 +610,7 @@ class Profile:
             "collage_count": self.collage_count,
             "startup_delay_minutes": self.startup_delay_minutes,
             "redraw_on_topology_change": self.redraw_on_topology_change,
+            "fade_transition_seconds": self.fade_transition_seconds,
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,

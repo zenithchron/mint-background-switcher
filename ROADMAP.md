@@ -72,7 +72,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 - Configurable collage image count. Shipped in `0.2.34` as the **Pictures per collage** spinbox (2–6, default 5) on the Layout & Appearance collage section, saved per profile; the default 5 keeps the classic asymmetric mosaic exactly while 2, 3, 4, and 6 use deterministic grids that tile the whole panel.
 - Richer pile size, spacing, overlap, rotation, and backdrop controls.
 - Optional title, photographer, and date overlays.
-- No-draw zones, one- and three-month calendar choices, and fade transitions.
+- No-draw zones, one- and three-month calendar choices, and fade transitions. Fade transitions shipped in `0.2.39` as a per-profile **Fade transition (seconds)** field (0–10, default 0 = instant) under Settings → Rotation & Shortcuts → Rotation: each switch crossfades the new wallpaper over the previous one using switcher-rendered blend frames on Cinnamon/GNOME/MATE, falling back to an instant apply whenever a fade is impossible — a black screen is never a fade source.
 - Selected-monitor-only rendering, monitor assignment shuffle, and orientation matching.
 
 ### 7. Administration and optional parity

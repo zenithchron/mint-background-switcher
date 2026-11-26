@@ -4,6 +4,19 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.39] - 2026-11-26
+
+### Added
+
+- **Fade transition** (JBS fade-transition parity; roadmap section 6 "fade transitions"):
+  - **Settings → Rotation & Shortcuts → Rotation** gains a **Fade transition (seconds)** field (0–10, default 0 = switch instantly, the historic behavior), saved with the profile.
+  - When a value above 0 is saved, each wallpaper switch **crossfades the new picture over the previous one**: the switcher renders a short sequence of blended frames (12 intermediate steps plus the real file), applies them one by one across the configured duration, then applies the real new wallpaper file so the desktop ends with exactly the recorded picture's bytes.
+  - The fade source is the previously applied wallpaper. A black screen (night window or manual) is a solid color, not a picture, so a switch that clears a black screen applies instantly, as does the very first switch.
+  - The fade runs only on backends that re-read the background on every change (Cinnamon, GNOME, MATE). On Cinnamon the compositor's own background transition is disabled for the duration of the fade so only one crossfade is visible. On any other desktop, in a dry run, or whenever the fade cannot be rendered (the previous file is gone, a frame fails, an unsupported backend), the switch falls back to a plain instant apply — a fade problem can never break the switch, and the recorded wallpaper is always the real new file, never a blend frame.
+  - A size mismatch between the old and new wallpaper (for example a monitor layout change between switches) resizes the old picture to the new one's canvas before blending.
+  - Values are clamped to 0–10 seconds, and non-numeric input fails the save with a one-line message without touching the saved profile.
+- Bumped the package version to `0.2.39`.
+
 ## [0.2.38] - 2026-11-25
 
 ### Added

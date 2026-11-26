@@ -1913,3 +1913,67 @@ def test_compose_scattered_photos_with_captions_is_reproducible(tmp_path: Path, 
     second = compose(monitors, {"A": paths}, tmp_path / "captions-2.png", span=span, captions=True, rng=random.Random(5))
 
     assert first.read_bytes() == second.read_bytes()
+
+
+def _mean_brightness(path: Path) -> float:
+    with Image.open(path) as image:
+        image = image.convert("L")
+        stat = ImageStat.Stat(image)
+        return stat.mean[0]
+
+
+def test_build_fade_frames_writes_blends_toward_new(tmp_path: Path):
+    old = tmp_path / "old.png"
+    new = tmp_path / "new.png"
+    Image.new("RGB", (60, 40), (10, 10, 10)).save(old)   # near-black
+    Image.new("RGB", (60, 40), (245, 245, 245)).save(new)  # near-white
+    out_dir = tmp_path / "frames"
+
+    frames = images_module.build_fade_frames(old, new, out_dir)
+
+    assert len(frames) == images_module.FADE_INTERMEDIATE_FRAMES
+    assert [path.name for path in frames] == [
+        f"fade-{index:02d}.jpg" for index in range(1, images_module.FADE_INTERMEDIATE_FRAMES + 1)
+    ]
+    assert all(path.is_file() for path in frames)
+    # Each frame decodes and its brightness strictly increases toward the new picture.
+    brightness = [_mean_brightness(path) for path in frames]
+    assert brightness[0] > 10 and brightness[-1] < 245
+    assert all(later > earlier for earlier, later in zip(brightness, brightness[1:]))
+    # The first frame is closer to the old picture, the last to the new one.
+    assert abs(brightness[0] - 10) < abs(brightness[0] - 245)
+    assert abs(brightness[-1] - 245) < abs(brightness[-1] - 10)
+
+
+def test_build_fade_frames_resizes_mismatched_old_picture(tmp_path: Path):
+    old = tmp_path / "old.png"
+    new = tmp_path / "new.png"
+    Image.new("RGB", (120, 80), (30, 30, 30)).save(old)
+    Image.new("RGB", (90, 60), (200, 200, 200)).save(new)
+
+    frames = images_module.build_fade_frames(old, new, tmp_path / "frames")
+
+    assert len(frames) == images_module.FADE_INTERMEDIATE_FRAMES
+    with Image.open(frames[0]) as frame:
+        assert frame.size == (90, 60)
+
+
+def test_build_fade_frames_rejects_unreadable_input(tmp_path: Path):
+    old = tmp_path / "old.png"
+    Image.new("RGB", (40, 30), (0, 0, 0)).save(old)
+    broken = tmp_path / "broken.jpg"
+    broken.write_bytes(b"this is not an image")
+
+    with pytest.raises(images_module.ImageDecodeError):
+        images_module.build_fade_frames(old, broken, tmp_path / "frames")
+
+
+def test_build_fade_frames_bounds_frame_count(tmp_path: Path):
+    old = tmp_path / "old.png"
+    new = tmp_path / "new.png"
+    Image.new("RGB", (20, 10), (0, 0, 0)).save(old)
+    Image.new("RGB", (20, 10), (255, 255, 255)).save(new)
+
+    assert len(images_module.build_fade_frames(old, new, tmp_path / "a", frames=3)) == 3
+    assert len(images_module.build_fade_frames(old, new, tmp_path / "b", frames=0)) == 1
+    assert len(images_module.build_fade_frames(old, new, tmp_path / "c", frames=999)) == 64

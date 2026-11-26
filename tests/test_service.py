@@ -3650,3 +3650,82 @@ def test_run_loop_skips_topology_watch_when_profile_disables_it(monkeypatch, tmp
 
     assert sleeps == [pytest.approx(600.0)]
     assert "Monitor layout changed" not in capsys.readouterr().out
+
+
+def _fade_recording_setter(monkeypatch, calls: dict) -> None:
+    class _FadeRecordingSetter:
+        def __init__(self, dry_run: bool = False):
+            self.dry_run = dry_run
+
+        def apply(self, path, *_args, **_kwargs):
+            calls["plain"].append(str(path))
+            return ["fake"]
+
+        def apply_with_fade(self, new_path, old_path, seconds, *_args, **_kwargs):
+            calls["fade"].append((str(old_path), str(new_path), float(seconds)))
+            calls["plain"].append(str(new_path))
+            return ["fake-fade"]
+
+        def apply_black(self, *_args, **_kwargs):
+            calls["black"] = True
+            return ["fake-black"]
+
+        def supports_solid_black(self, *_args, **_kwargs):
+            return False
+
+    monkeypatch.setattr(service, "DesktopSetter", _FadeRecordingSetter)
+
+
+def test_switch_crossfades_from_previous_wallpaper_when_fade_enabled(monkeypatch, tmp_path: Path):
+    calls = {"plain": [], "fade": []}
+    _setup_profile(monkeypatch, tmp_path)
+    _fade_recording_setter(monkeypatch, calls)
+
+    # First switch: no previous picture yet, so the wallpaper is applied plainly.
+    first = switch_once("P")
+    assert calls["fade"] == []
+    assert calls["plain"] == [str(first.wallpaper)]
+
+    # With a fade configured, the next switch crossfades from the previous one.
+    cfg = load_config()
+    cfg.get_profile("P").fade_transition_seconds = 2.5
+    save_config(cfg)
+    second = switch_once("P")
+    assert calls["fade"] == [(str(first.wallpaper), str(second.wallpaper), 2.5)]
+    # The recorded wallpaper is still the real new file, not a blend frame.
+    assert load_state().last_wallpaper == str(second.wallpaper)
+
+
+def test_switch_does_not_crossfade_from_a_black_screen(monkeypatch, tmp_path: Path):
+    calls = {"plain": [], "fade": [], "black": False}
+    _setup_profile(monkeypatch, tmp_path)
+    _fade_recording_setter(monkeypatch, calls)
+
+    first = switch_once("P")
+    assert calls["plain"] == [str(first.wallpaper)]
+    cfg = load_config()
+    cfg.get_profile("P").fade_transition_seconds = 2.5
+    save_config(cfg)
+
+    black_screen("P")
+    assert calls["black"] is True
+    assert load_state().black_screen is True
+
+    calls["plain"].clear()
+    calls["fade"].clear()
+    resumed = switch_once("P")
+    # The black screen is a solid color, not a picture: no crossfade from it.
+    assert calls["fade"] == []
+    assert calls["plain"] == [str(resumed.wallpaper)]
+    assert load_state().black_screen is False
+
+
+def test_switch_with_fade_disabled_stays_plain(monkeypatch, tmp_path: Path):
+    calls = {"plain": [], "fade": []}
+    _setup_profile(monkeypatch, tmp_path)
+    _fade_recording_setter(monkeypatch, calls)
+
+    first = switch_once("P")
+    second = switch_once("P")
+    assert calls["fade"] == []
+    assert calls["plain"] == [str(first.wallpaper), str(second.wallpaper)]

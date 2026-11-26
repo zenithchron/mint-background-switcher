@@ -310,6 +310,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
         assert is_descendant(app.previous_hotkey_entry, app.rotation_tab)
         assert is_descendant(app.register_hotkeys_button, app.rotation_tab)
         assert is_descendant(app.post_switch_command_entry, app.rotation_tab)
+        assert is_descendant(app.fade_transition_entry, app.rotation_tab)
         assert is_descendant(app.desktop_menu, app.rotation_tab)
         assert is_descendant(app.suppress_process_checkbutton, app.conditions_tab)
         assert is_descendant(app.suppress_battery_checkbutton, app.conditions_tab)
@@ -380,6 +381,7 @@ def test_profile_context_stays_visible_on_every_settings_page(monkeypatch, tmp_p
                 app.previous_hotkey_entry,
                 app.register_hotkeys_button,
                 app.post_switch_command_entry,
+                app.fade_transition_entry,
                 app.desktop_menu,
                 app.mirror_lockscreen_checkbutton,
             ),
@@ -3227,6 +3229,79 @@ def test_settings_startup_delay_entry_is_visible_and_persists(monkeypatch, tmp_p
         assert settings_ui.load_config().get_profile("Default").startup_delay_minutes == 0.0
         app._load_profile("Default")
         assert app.startup_delay_var.get() == "0"
+    finally:
+        app.destroy()
+
+
+def test_settings_fade_transition_entry_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        settings_ui.messagebox, "showerror", lambda title, message, **_kw: errors.append((title, message))
+    )
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.rotation_tab)
+        app.update()
+        assert app.fade_transition_var.get() == "0"
+        assert is_descendant(app.fade_transition_entry, app.rotation_tab)
+        assert app.fade_transition_entry.winfo_ismapped()
+        assert app.fade_transition_entry.winfo_width() >= app.fade_transition_entry.winfo_reqwidth()
+        assert app.fade_transition_entry.winfo_height() >= app.fade_transition_entry.winfo_reqheight()
+
+        # A valid fade duration persists and reloads.
+        app.fade_transition_var.set("3.5")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").fade_transition_seconds == 3.5
+        app._load_profile("Default")
+        assert app.fade_transition_var.get() == "3.5"
+
+        # Durations above the cap are clamped rather than rejected.
+        app.fade_transition_var.set("99")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").fade_transition_seconds == 10.0
+        app._load_profile("Default")
+        assert app.fade_transition_var.get() == "10"
+
+        # Negative values clamp to 0 (the instant-switch default).
+        app.fade_transition_var.set("-4")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").fade_transition_seconds == 0.0
+        app._load_profile("Default")
+        assert app.fade_transition_var.get() == "0"
+
+        # Non-numeric input is rejected without saving.
+        app.fade_transition_var.set("slowly")
+        assert app._save_current() is False
+        assert errors and "Fade transition must be a number of seconds" in errors[-1][1]
+        assert settings_ui.load_config().get_profile("Default").fade_transition_seconds == 0.0
+
+        # Non-finite input ("nan"/"inf") is rejected the same way.
+        app.fade_transition_var.set("nan")
+        assert app._save_current() is False
+        assert errors and "Fade transition must be a number of seconds" in errors[-1][1]
+        assert settings_ui.load_config().get_profile("Default").fade_transition_seconds == 0.0
+        app.fade_transition_var.set("inf")
+        assert app._save_current() is False
+        assert settings_ui.load_config().get_profile("Default").fade_transition_seconds == 0.0
     finally:
         app.destroy()
 
