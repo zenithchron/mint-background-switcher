@@ -7,6 +7,7 @@ from pathlib import Path
 import copy
 import dataclasses
 import math
+import os
 import queue
 import random
 import shlex
@@ -44,6 +45,8 @@ from .config import (
     MAX_POST_SWITCH_COMMAND_LENGTH,
     MAX_STARTUP_DELAY_MINUTES,
     MAX_SUPPRESS_PROCESS_LENGTH,
+    MAX_EXCLUDED_SOURCE_PATHS,
+    MAX_EXCLUDED_SOURCE_PATH_LENGTH,
     POSTCARD_BACKGROUND_CHOICES,
     Config,
     Profile,
@@ -608,6 +611,7 @@ class SettingsApp(tk.Tk):
         self.min_image_size_var = tk.StringVar()
         self.ignore_hidden_var = tk.BooleanVar()
         self.ignore_patterns_var = tk.StringVar()
+        self.excluded_source_paths_var = tk.StringVar()
         self.image_types_var = tk.StringVar()
         self.sequential_var = tk.BooleanVar()
         self.match_orientation_var = tk.BooleanVar()
@@ -890,6 +894,17 @@ class SettingsApp(tk.Tk):
             source_options,
             text="comma-separated; for example jpg, png; empty means all supported types",
         ).grid(row=4, column=2, sticky="w", pady=(2, 0))
+        ttk.Label(source_options, text="Excluded paths:").grid(row=5, column=0, sticky="w", pady=(2, 0))
+        self.excluded_source_paths_entry = ttk.Entry(
+            source_options,
+            textvariable=self.excluded_source_paths_var,
+            width=26,
+        )
+        self.excluded_source_paths_entry.grid(row=5, column=1, sticky="w", padx=5, pady=(2, 0))
+        ttk.Label(
+            source_options,
+            text="comma-separated absolute folder or file paths; never chosen in rotation",
+        ).grid(row=5, column=2, sticky="w", pady=(2, 0))
         source_options.columnconfigure(2, weight=1)
 
         shared_frame = ttk.LabelFrame(self.sources_tab, text="Shared picture sources", padding=2)
@@ -898,8 +913,7 @@ class SettingsApp(tk.Tk):
             shared_frame,
             text=(
                 "Folders and individual pictures used by Shared, Same, Montage, Collage, "
-                "Postcard, Polaroid, and Span modes. Use the buttons below to add, "
-                "remove, or reveal a source."
+                "Postcard, Polaroid, and Span modes."
             ),
             justify=tk.LEFT,
             wraplength=860,
@@ -2034,6 +2048,7 @@ class SettingsApp(tk.Tk):
         self.min_image_size_var.set(str(profile.min_image_size))
         self.ignore_hidden_var.set(profile.ignore_hidden)
         self.ignore_patterns_var.set(", ".join(profile.ignore_patterns))
+        self.excluded_source_paths_var.set(", ".join(profile.excluded_paths))
         self.image_types_var.set(", ".join(profile.image_types))
         self.sequential_var.set(profile.sequential)
         self.match_orientation_var.set(profile.match_orientation)
@@ -2381,6 +2396,32 @@ class SettingsApp(tk.Tk):
             ignore_patterns.append(pattern)
         if len(ignore_patterns) > MAX_IGNORE_PATTERNS:
             raise ValueError(f"At most {MAX_IGNORE_PATTERNS} ignore patterns can be saved.")
+        excluded_paths_var = vars(self).get("excluded_source_paths_var")
+        raw_excluded = (
+            str(excluded_paths_var.get()).strip() if excluded_paths_var is not None else ""
+        )
+        excluded_paths: list[str] = []
+        seen_excluded: set[str] = set()
+        for raw in raw_excluded.split(","):
+            candidate = raw.strip()
+            if not candidate:
+                continue
+            expanded = os.path.expanduser(candidate)
+            if not os.path.isabs(expanded):
+                raise ValueError(
+                    f"Excluded paths must be absolute (start with / or ~): {candidate}"
+                )
+            normalized = os.path.normpath(expanded)
+            if len(normalized) > MAX_EXCLUDED_SOURCE_PATH_LENGTH:
+                raise ValueError(
+                    f"Each excluded path can be at most {MAX_EXCLUDED_SOURCE_PATH_LENGTH} characters: {normalized}"
+                )
+            if normalized in seen_excluded:
+                continue
+            seen_excluded.add(normalized)
+            excluded_paths.append(normalized)
+        if len(excluded_paths) > MAX_EXCLUDED_SOURCE_PATHS:
+            raise ValueError(f"At most {MAX_EXCLUDED_SOURCE_PATHS} excluded paths can be saved.")
         image_types_var = vars(self).get("image_types_var")
         raw_types = str(image_types_var.get()).strip() if image_types_var is not None else ""
         image_types: list[str] = []
@@ -2655,6 +2696,7 @@ class SettingsApp(tk.Tk):
             fade_transition_seconds=fade_transition_seconds,
             redraw_on_topology_change=redraw_on_topology_change,
             excluded_images=excluded_images,
+            excluded_paths=excluded_paths,
             web_sources=web_sources,
             overlay_title=overlay_title,
             overlay_artist=overlay_artist,

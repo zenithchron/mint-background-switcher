@@ -4,6 +4,17 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.40] - 2026-11-27
+
+### Added
+
+- **Excluded source paths** (JBS ignore-folder / path-exclusions parity; roadmap section 4 "ignored folders, path exclusions"):
+  - **Settings → Sources → Folder scanning** gains an **Excluded paths** field: comma-separated absolute folder or file paths (up to 20 paths, each at most 4096 characters), saved with the profile. A folder entry excludes the folder and everything under it; a file entry excludes exactly that file. Relative paths are rejected at save time with a one-line error, duplicates and trailing slashes are normalized, and malformed saved entries are dropped rather than truncated.
+  - Exclusions apply on every rotation path (dry-run previews and live switching) and win over explicitly configured sources: a picture inside an excluded folder — or an explicitly added individual picture that is itself excluded — is never chosen. Excluded folders are pruned during the library scan so they cost nothing at selection time, and the image-library index invalidates exactly once when the exclusion list changes.
+  - Symlinks pointing into an excluded folder are excluded as well (both the literal and the resolved path are checked).
+  - CLI: `mint-background-switcher exclude-path add <path> | remove <path>... | list [--profile NAME]` (JSON output; adding a duplicate is a no-op, removing a path that is not excluded is a no-op, and relative paths are rejected without mutating the profile).
+- Bumped the package version to `0.2.40`.
+
 ## [0.2.39] - 2026-11-26
 
 ### Added

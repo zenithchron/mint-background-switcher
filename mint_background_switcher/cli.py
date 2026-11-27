@@ -30,13 +30,16 @@ from .service import (
     NoPreviousWallpaperError,
     NoShufflableMonitorsError,
     ShuffleNotApplicableError,
+    add_excluded_source_paths,
     add_web_source,
     black_screen,
+    list_excluded_source_paths,
     list_web_sources,
     pause,
     previous_wallpaper,
     redraw_current,
     refresh_web_sources_now,
+    remove_excluded_source_paths,
     remove_web_source,
     resume,
     run_loop,
@@ -237,6 +240,26 @@ def build_parser() -> argparse.ArgumentParser:
     ws_refresh = web_source_sub.add_parser("refresh", help="Download/update the profile's web sources now")
     ws_refresh.add_argument("--profile")
     ws_refresh.add_argument("--dry-run", action="store_true", help="Report cache state without downloading")
+
+    exclude_path = sub.add_parser(
+        "exclude-path",
+        help="Manage the profile's excluded source folders/files (path exclusions)",
+    )
+    exclude_path_sub = exclude_path.add_subparsers(dest="exclude_path_command", required=True)
+    ep_add = exclude_path_sub.add_parser(
+        "add",
+        help="Exclude an absolute folder (and everything under it) or file from rotation",
+    )
+    ep_add.add_argument("path")
+    ep_add.add_argument("--profile")
+    ep_remove = exclude_path_sub.add_parser(
+        "remove",
+        help="Remove excluded path(s) from the profile (names that are not excluded are ignored)",
+    )
+    ep_remove.add_argument("path", nargs="+")
+    ep_remove.add_argument("--profile")
+    ep_list = exclude_path_sub.add_parser("list", help="List the profile's excluded source paths")
+    ep_list.add_argument("--profile")
 
     cached_pictures = sub.add_parser(
         "cached-pictures",
@@ -496,6 +519,24 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         except (ValueError, WorkingDirectoryError) as exc:
             print(f"web-source failed: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "exclude-path":
+        try:
+            profile_name = load_config(create=False).get_profile(args.profile).name
+            payload: dict[str, object] = {
+                "profile": profile_name,
+                "excluded_paths": list_excluded_source_paths(args.profile),
+            }
+            if args.exclude_path_command == "add":
+                payload["added"] = add_excluded_source_paths(args.profile, [args.path])
+                payload["excluded_paths"] = list_excluded_source_paths(args.profile)
+            elif args.exclude_path_command == "remove":
+                payload["removed"] = remove_excluded_source_paths(args.profile, args.path)
+                payload["excluded_paths"] = list_excluded_source_paths(args.profile)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        except (ValueError, KeyError) as exc:
+            print(f"exclude-path failed: {exc}", file=sys.stderr)
             return 1
     if args.command == "cached-pictures":
         try:

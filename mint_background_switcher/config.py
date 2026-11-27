@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -116,6 +117,11 @@ DEFAULT_REDRAW_HOTKEY = "<Primary><Alt>r"
 # truncated so a config can never hold a silently altered entry.
 MAX_EXCLUDED_IMAGES = 1000
 MAX_EXCLUDED_PATH_LENGTH = 4096
+# Excluded source paths (JBS ignore-folder / path exclusions): bound the list
+# so a malformed saved value can never balloon the config or the scan-time
+# matching work; relative entries are dropped rather than altered.
+MAX_EXCLUDED_SOURCE_PATHS = 20
+MAX_EXCLUDED_SOURCE_PATH_LENGTH = 4096
 # Collage image count bounds: 5 is the classic asymmetric mosaic; fewer or
 # more pictures use a deterministic grid layout. Out-of-range saved values
 # are clamped so a malformed config can never request an unsupported mosaic.
@@ -412,6 +418,39 @@ def _coerce_excluded_images(value: Any) -> list[str]:
     return images
 
 
+def _coerce_excluded_source_paths(value: Any) -> list[str]:
+    """Normalize the excluded source paths (absolute, expanded, de-duplicated).
+
+    Entries are kept only when they are absolute after ``~`` expansion and fit
+    the length bound; everything else is dropped rather than truncated so a
+    malformed saved config can never hold a silently altered path.
+    """
+    if not isinstance(value, list):
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if not text or len(text) > MAX_EXCLUDED_SOURCE_PATH_LENGTH:
+            continue
+        try:
+            expanded = os.path.expanduser(text)
+        except (RuntimeError, ValueError):
+            continue
+        if not os.path.isabs(expanded):
+            continue
+        normalized = os.path.normpath(expanded)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        paths.append(normalized)
+        if len(paths) >= MAX_EXCLUDED_SOURCE_PATHS:
+            break
+    return paths
+
+
 @dataclass(slots=True)
 class Profile:
     name: str
@@ -489,6 +528,12 @@ class Profile:
     # legacy positional-argument order stays stable (see
     # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
     fade_transition_seconds: float = DEFAULT_FADE_TRANSITION_SECONDS
+    # Source folders/files excluded from rotation entirely (JBS ignore-folder /
+    # path exclusions). Each entry is an absolute path: a folder entry excludes
+    # the folder and everything under it, a file entry excludes that file.
+    # Appended last so the legacy positional-argument order stays stable (see
+    # tests/test_config.py::test_postcard_background_preserves_legacy_profile_positional_arguments).
+    excluded_paths: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Profile":
@@ -559,6 +604,7 @@ class Profile:
             fade_transition_seconds=_coerce_fade_transition(
                 data.get("fade_transition_seconds", DEFAULT_FADE_TRANSITION_SECONDS)
             ),
+            excluded_paths=_coerce_excluded_source_paths(data.get("excluded_paths", [])),
             desktop=str(data.get("desktop", "auto")),
             effect=effect,
             bar_color=bar_color,
@@ -611,6 +657,7 @@ class Profile:
             "startup_delay_minutes": self.startup_delay_minutes,
             "redraw_on_topology_change": self.redraw_on_topology_change,
             "fade_transition_seconds": self.fade_transition_seconds,
+            "excluded_paths": list(self.excluded_paths),
             "web_sources": [dict(entry) for entry in self.web_sources],
             "overlay_title": self.overlay_title,
             "overlay_artist": self.overlay_artist,

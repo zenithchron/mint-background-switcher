@@ -2599,6 +2599,78 @@ def test_settings_ignore_patterns_entry_is_visible_and_persists(monkeypatch, tmp
 
 
 @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_excluded_paths_entry_is_visible_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    def is_descendant(widget, ancestor):
+        parent = widget.master
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = getattr(parent, "master", None)
+        return False
+
+    try:
+        app.update_idletasks()
+        app.update()
+        app.minsize(944, 668)
+        app.geometry("944x668+40+33")
+        app.update_idletasks()
+        app.update()
+        app.notebook.select(app.sources_tab)
+        app.update()
+        assert app.excluded_source_paths_var.get() == ""
+        assert is_descendant(app.excluded_source_paths_entry, app.sources_tab)
+        assert app.excluded_source_paths_entry.winfo_ismapped()
+        assert app.excluded_source_paths_entry.winfo_width() >= app.excluded_source_paths_entry.winfo_reqwidth()
+
+        # Saved entries load back into the field, joined by commas.
+        app.excluded_source_paths_var.set(f"{tmp_path / 'scratch'}, /photos/keep-out")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").excluded_paths == [
+            str(tmp_path / "scratch"),
+            "/photos/keep-out",
+        ]
+        app._load_profile("Default")
+        assert app.excluded_source_paths_var.get() == f"{tmp_path / 'scratch'}, /photos/keep-out"
+
+        # Saving normalizes trailing slashes and collapses duplicates.
+        app.excluded_source_paths_var.set(f"{tmp_path / 'scratch'}/, {tmp_path / 'scratch'}, /photos/keep-out")
+        assert app._save_current() is True
+        assert settings_ui.load_config().get_profile("Default").excluded_paths == [
+            str(tmp_path / "scratch"),
+            "/photos/keep-out",
+        ]
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
+def test_settings_excluded_paths_rejects_relative_entries(monkeypatch, tmp_path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings_ui, "detect_monitors", lambda: [])
+    errors = []
+    monkeypatch.setattr(settings_ui.messagebox, "showerror", lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(settings_ui.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    app = settings_ui.SettingsApp()
+
+    try:
+        app.update_idletasks()
+        app.excluded_source_paths_var.set("photos/sunsets")
+        assert app._save_current(show_success=False) is False
+        assert errors and errors[0][0] == "Save failed"
+        assert "absolute" in errors[0][1]
+        assert settings_ui.load_config().get_profile("Default").excluded_paths == []
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="requires a graphical display or Xvfb")
 def test_settings_image_types_entry_is_visible_and_persists(monkeypatch, tmp_path):
     monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("MBS_CACHE_DIR", str(tmp_path / "cache"))

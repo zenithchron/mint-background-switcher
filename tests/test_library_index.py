@@ -274,6 +274,26 @@ def test_scan_signature_changes_with_image_types(tmp_path):
     )
 
 
+def test_scan_signature_changes_with_excluded_paths(tmp_path):
+    root = tmp_path / "photos"
+    root.mkdir()
+    roots = normalized_scan_roots([str(root)])
+    excluded = str(root / "scratch")
+
+    assert scan_signature(roots, recursive=True) == scan_signature(roots, recursive=True, excluded_paths=())
+    assert scan_signature(roots, recursive=True) != scan_signature(
+        roots, recursive=True, excluded_paths=[excluded]
+    )
+    # Equivalent inputs (duplicates, trailing slashes, order) share one signature.
+    assert scan_signature(roots, recursive=True, excluded_paths=[excluded, excluded]) == scan_signature(
+        roots, recursive=True, excluded_paths=[f"{excluded}/"]
+    )
+    # Invalid entries are dropped, matching what the live scan does.
+    assert scan_signature(roots, recursive=True, excluded_paths=["relative", "", excluded]) == scan_signature(
+        roots, recursive=True, excluded_paths=[excluded]
+    )
+
+
 def test_refresh_filters_image_types_and_reuses_equivalent_signature(tmp_path):
     root = tmp_path / "photos"
     root.mkdir()
@@ -361,6 +381,61 @@ def test_ensure_reuses_index_for_same_patterns_and_refreshes_on_change(monkeypat
     )
     assert changed.image_count == 1
     assert len(walk_calls) == 1
+
+
+def test_refresh_and_ensure_skip_excluded_source_paths(monkeypatch, tmp_path):
+    root = tmp_path / "photos"
+    (root / "nested").mkdir(parents=True)
+    kept = root / "a.jpg"
+    kept.write_bytes(b"image")
+    hidden = root / "nested" / "b.jpg"
+    hidden.write_bytes(b"image")
+    excluded_folder = root / "scratch"
+    excluded_folder.mkdir()
+    (excluded_folder / "c.png").write_bytes(b"image")
+    index = LibraryIndex(tmp_path / "working")
+
+    default = index.refresh([str(root)], recursive=True)
+    assert default.image_count == 3
+
+    excluded = index.refresh(
+        [str(root)], recursive=True, excluded_paths=[str(excluded_folder)], now_ns=1_000_000_000
+    )
+    assert excluded.image_count == 2
+    assert index.paths(excluded.signature) == sorted([str(kept.resolve()), str(hidden.resolve())])
+
+    # A changed exclusion list invalidates the cached index; equivalent input reuses it.
+    real_walk = os.walk
+    walk_calls = []
+
+    def spy_walk(*args, **kwargs):
+        walk_calls.append(args)
+        return real_walk(*args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", spy_walk)
+    reused = index.ensure(
+        [str(root)], recursive=True, excluded_paths=[f"{excluded_folder}/", str(excluded_folder)],
+        now_ns=1_000_000_000,
+    )
+    assert reused.signature == excluded.signature
+    assert walk_calls == []
+
+    changed = index.ensure([str(root)], recursive=True, excluded_paths=[str(hidden)], now_ns=1_000_000_001)
+    assert changed.image_count == 2
+    assert index.paths(changed.signature) == sorted(
+        [str(kept.resolve()), str((excluded_folder / "c.png").resolve())]
+    )
+    assert len(walk_calls) == 1
+
+
+def test_refresh_excludes_an_individually_configured_picture(monkeypatch, tmp_path):
+    picture = tmp_path / "individual.png"
+    picture.write_bytes(b"extension is sufficient for indexing")
+    index = LibraryIndex(tmp_path / "working")
+
+    snapshot = index.refresh([str(picture)], recursive=True, excluded_paths=[str(picture)])
+
+    assert snapshot.image_count == 0
 
 
 def test_refresh_excludes_images_below_min_size(tmp_path):

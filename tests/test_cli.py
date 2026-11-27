@@ -124,3 +124,49 @@ def test_web_source_add_feed_flag_stores_feed_type(monkeypatch, tmp_path, capsys
     assert cli.main(["web-source", "add", "https://example.com/feed.rss"]) == 1
     assert cli.main(["web-source", "add", "ftp://example.com/feed.rss", "--feed"]) == 1
     assert cli.main(["web-source", "remove", "https://example.com/feed.rss"]) == 0
+
+
+def test_exclude_path_add_list_remove_round_trip(monkeypatch, tmp_path, capsys):
+    from mint_background_switcher.config import Config, Profile, save_config
+
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    folder = str(tmp_path / "wallpapers")
+    single = str(tmp_path / "skip.png")
+
+    # add normalizes trailing slashes and reports the profile's current list
+    assert cli.main(["exclude-path", "add", f"{folder}/"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"profile": "P", "added": [folder], "excluded_paths": [folder]}
+
+    # duplicates are a no-op (not an error)
+    assert cli.main(["exclude-path", "add", folder]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["added"] == []
+    assert out["excluded_paths"] == [folder]
+
+    assert cli.main(["exclude-path", "add", single]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["excluded_paths"] == [folder, single]
+    assert cli.main(["exclude-path", "list"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"profile": "P", "excluded_paths": [folder, single]}
+
+    # relative paths are rejected without mutating the profile
+    assert cli.main(["exclude-path", "add", "relative/path"]) == 1
+    err = capsys.readouterr().err
+    assert "absolute" in err
+    assert cli.main(["exclude-path", "list"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"profile": "P", "excluded_paths": [folder, single]}
+
+    assert cli.main(["exclude-path", "remove", folder, single]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["removed"] == [folder, single]
+    assert out["excluded_paths"] == []
+
+    # removing something not excluded is a no-op, not an error
+    assert cli.main(["exclude-path", "remove", "/never/added"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["removed"] == []

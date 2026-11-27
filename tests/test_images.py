@@ -38,6 +38,9 @@ from mint_background_switcher.images import (
     compose_polaroid,
     compose_postcard,
     compose_span,
+    normalize_excluded_path,
+    normalized_excluded_paths,
+    path_is_excluded,
     fit_image,
     fit_with_black_bars,
     image_min_dimension,
@@ -576,6 +579,75 @@ def test_scan_images_nonrecursive_ignores_name_patterns(tmp_path: Path):
     assert scan_images([str(tmp_path)], recursive=False, ignore_patterns=["thumb*"]) == [
         str(visible.resolve())
     ]
+
+
+def test_normalize_excluded_path_requires_absolute_after_expansion():
+    assert normalize_excluded_path("/a/b") == "/a/b"
+    assert normalize_excluded_path("/a/./b/../c") == "/a/c"
+    assert normalize_excluded_path("/a/b/") == "/a/b"
+    home = os.path.expanduser("~")
+    assert normalize_excluded_path("~/Pictures") == os.path.join(home, "Pictures")
+    # Empty, whitespace, control characters, and relative entries are unusable.
+    assert normalize_excluded_path("") == ""
+    assert normalize_excluded_path("   ") == ""
+    assert normalize_excluded_path("photos/sunsets") == ""
+    assert normalize_excluded_path("/a\nb") == ""
+    assert normalize_excluded_path("/a\tb") == ""
+
+
+def test_normalized_excluded_paths_drops_invalid_and_dedupes():
+    home = os.path.expanduser("~")
+    result = normalized_excluded_paths(
+        ["/a/b", "/a/b", "/a", "relative", "", "~/Pictures", None, "/a/"]
+    )
+    assert result == tuple(sorted({"/a/b", "/a", os.path.join(home, "Pictures")}))
+    assert normalized_excluded_paths(()) == ()
+    assert normalized_excluded_paths(None) == ()
+
+
+def test_path_is_excluded_matches_folder_trees_and_exact_files():
+    # A folder entry covers the folder itself and everything under it.
+    assert path_is_excluded("/photos/sunsets", ("/photos/sunsets",))
+    assert path_is_excluded("/photos/sunsets/a.jpg", ("/photos/sunsets",))
+    assert path_is_excluded("/photos/sunsets/deep/a.jpg", ("/photos/sunsets",))
+    # Sibling paths with the same prefix are not excluded.
+    assert not path_is_excluded("/photos/sunsetsX/a.jpg", ("/photos/sunsets",))
+    # A file entry covers exactly that file.
+    assert path_is_excluded("/photos/a.jpg", ("/photos/a.jpg",))
+    assert not path_is_excluded("/photos/a.jpg.png", ("/photos/a.jpg",))
+    assert not path_is_excluded("/photos/a.jpg", ())
+
+
+def test_scan_images_excludes_folders_and_files(tmp_path: Path):
+    kept = tmp_path / "kept.jpg"
+    Image.new("RGB", (40, 30), (1, 2, 3)).save(kept)
+    excluded_folder = tmp_path / "excluded"
+    excluded_folder.mkdir()
+    hidden_inside = excluded_folder / "secret.png"
+    Image.new("RGB", (40, 30), (2, 1, 3)).save(hidden_inside)
+    single = tmp_path / "single.png"
+    Image.new("RGB", (40, 30), (3, 2, 1)).save(single)
+
+    default = scan_images([str(tmp_path)], recursive=True)
+    assert len(default) == 3
+
+    # Excluding a folder removes the folder and everything under it.
+    assert scan_images([str(tmp_path)], recursive=True, excluded_paths=[str(excluded_folder)]) == [
+        str(kept.resolve()),
+        str(single.resolve()),
+    ]
+    # Excluding a file removes only that file.
+    assert scan_images([str(tmp_path)], recursive=True, excluded_paths=[str(single)]) == sorted(
+        [str(kept.resolve()), str(hidden_inside.resolve())]
+    )
+    # An exclusion matching a non-existent path changes nothing.
+    assert scan_images([str(tmp_path)], recursive=True, excluded_paths=[str(tmp_path / "nope")]) == default
+    # Excluding the scan root itself empties the scan.
+    assert scan_images([str(tmp_path)], recursive=True, excluded_paths=[str(tmp_path)]) == []
+    # Exclusion wins even for an explicitly configured individual picture source.
+    assert scan_images([str(single)], recursive=True, excluded_paths=[str(single)]) == []
+    # Non-matching entries and invalid entries are dropped rather than raised on.
+    assert scan_images([str(tmp_path)], recursive=True, excluded_paths=["relative", ""]) == default
 
 
 def test_normalize_image_types_canonicalize_and_drop_unsupported():

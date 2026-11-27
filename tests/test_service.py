@@ -10,6 +10,7 @@ from PIL import Image, ImageEnhance, ImageOps
 
 from mint_background_switcher import service
 from mint_background_switcher.config import (
+    MAX_EXCLUDED_SOURCE_PATHS,
     RANDOM_EFFECT_CHOICES,
     Config,
     Profile,
@@ -22,12 +23,15 @@ from mint_background_switcher.monitor import Monitor
 from mint_background_switcher.service import (
     MAX_EXCLUDED_IMAGES,
     add_excluded_images,
+    add_excluded_source_paths,
     black_screen,
     clear_excluded_images,
     current_source_images,
     exclude_current_images,
     get_excluded_images,
+    list_excluded_source_paths,
     remove_excluded_images,
+    remove_excluded_source_paths,
     night_schedule_action,
     resume,
     save_current_wallpaper,
@@ -2964,6 +2968,67 @@ def test_add_excluded_images_stops_at_config_limit(monkeypatch, tmp_path: Path):
 
     assert len(added) == MAX_EXCLUDED_IMAGES
     assert get_excluded_images("P") == added
+
+
+def test_excluded_source_paths_persist_add_remove_and_list(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    folder = str(tmp_path / "wallpapers")
+    single = str(tmp_path / "skip.png")
+    assert list_excluded_source_paths("P") == []
+    # Trailing slashes normalize to the same entry; order is preserved.
+    added = add_excluded_source_paths("P", [f"{folder}/", folder, single])
+    assert added == [folder, single]
+    assert list_excluded_source_paths("P") == [folder, single]
+
+    removed = remove_excluded_source_paths("P", [folder, str(tmp_path / "missing")])
+    assert removed == [folder]
+    assert list_excluded_source_paths("P") == [single]
+
+    # Relative paths are rejected rather than reinterpreted against a cwd.
+    with pytest.raises(ValueError, match="absolute"):
+        add_excluded_source_paths("P", ["relative/path"])
+
+
+def test_add_excluded_source_paths_stops_at_config_limit(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("MBS_CONFIG_DIR", str(tmp_path / "config"))
+    save_config(Config(active_profile="P", profiles={"P": Profile(name="P")}))
+
+    added = add_excluded_source_paths(
+        "P", [f"/library/{idx:04d}" for idx in range(MAX_EXCLUDED_SOURCE_PATHS + 5)]
+    )
+
+    assert len(added) == MAX_EXCLUDED_SOURCE_PATHS
+    assert list_excluded_source_paths("P") == added
+
+
+def test_excluded_source_paths_never_rotate_in_dry_run_or_live(monkeypatch, tmp_path: Path):
+    _setup_profile(monkeypatch, tmp_path)
+    excluded_folder = tmp_path / "excluded-folder"
+    excluded_folder.mkdir()
+    Image.new("RGB", (60, 40), (9, 9, 9)).save(excluded_folder / "nope.png")
+    cfg = load_config()
+    profile = cfg.get_profile("P")
+    profile.shared_folders = [str(tmp_path / "images"), str(excluded_folder)]
+    profile.sequential = True
+    profile.excluded_paths = [str(excluded_folder)]
+    save_config(cfg)
+    image_dir = tmp_path / "images"
+    expected = {str(path.resolve()) for path in image_dir.glob("*.png")}
+
+    # Dry-run previews are deterministic: the pool head must never come from the excluded folder.
+    for seed in range(6):
+        preview = switch_once("P", dry_run=True, rng=random.Random(seed))
+        assert preview.action == "next"
+        assert all(not str(image).startswith(str(excluded_folder)) for image in preview.images)
+
+    seen: set[str] = set()
+    for seed in range(6):
+        live = switch_once("P", dry_run=False, rng=random.Random(seed))
+        assert live.action == "next"
+        seen.update(live.images)
+    assert seen == expected
 
 
 def test_excluded_pictures_never_rotate_and_all_excluded_falls_back_to_black(monkeypatch, tmp_path: Path):

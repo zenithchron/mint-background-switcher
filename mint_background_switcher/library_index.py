@@ -19,6 +19,8 @@ from .images import (
     meets_min_image_size,
     name_matches_ignore_patterns,
     normalize_image_types,
+    normalized_excluded_paths,
+    path_is_excluded,
 )
 
 INDEX_FILENAME = "library-index.sqlite3"
@@ -137,6 +139,7 @@ def scan_signature(
     ignore_hidden: bool = False,
     ignore_patterns: Iterable[str] = (),
     image_types: Iterable[str] = (),
+    excluded_paths: Iterable[str] = (),
 ) -> str:
     try:
         size = int(min_image_size)
@@ -149,6 +152,7 @@ def scan_signature(
             "ignore_hidden": bool(ignore_hidden),
             "ignore_patterns": list(normalized_ignore_patterns(ignore_patterns)),
             "image_types": list(normalized_image_types(image_types)),
+            "excluded_paths": list(normalized_excluded_paths(excluded_paths)),
             "roots": list(roots),
         },
         ensure_ascii=True,
@@ -163,6 +167,18 @@ def _cancel_if_requested(cancelled: Callable[[], bool] | None) -> None:
         raise LibraryScanCancelled("image-library scan was cancelled")
 
 
+def _root_is_excluded(root: Path, excluded_paths: tuple[str, ...]) -> bool:
+    """Return whether ``root`` is excluded, checking the literal and resolved
+    path so a symlink pointing into an excluded folder is also excluded."""
+    if path_is_excluded(root, excluded_paths):
+        return True
+    try:
+        resolved = root.resolve()
+    except OSError:
+        return False
+    return path_is_excluded(resolved, excluded_paths)
+
+
 def _iter_image_paths(
     roots: tuple[str, ...],
     *,
@@ -174,6 +190,7 @@ def _iter_image_paths(
     ignore_hidden: bool = False,
     ignore_patterns: tuple[str, ...] = (),
     image_types: frozenset[str] = frozenset(),
+    excluded_paths: tuple[str, ...] = (),
 ):
     count = 0
     for raw_root in roots:
@@ -185,6 +202,8 @@ def _iter_image_paths(
             if root.is_file():
                 suffix = root.suffix.lower()
                 if suffix in SUPPORTED_EXTENSIONS:
+                    if excluded_paths and _root_is_excluded(root, excluded_paths):
+                        continue
                     if root_counts is not None:
                         root_counts[raw_root] += 1
                     if image_types and suffix not in image_types:
@@ -201,12 +220,20 @@ def _iter_image_paths(
                 continue
         except OSError:
             continue
+        if excluded_paths and _root_is_excluded(root, excluded_paths):
+            continue
 
         if recursive:
             for directory, directories, filenames in os.walk(root, onerror=lambda _error: None):
                 _cancel_if_requested(cancelled)
                 if ignore_hidden:
                     directories[:] = [name for name in directories if not name.startswith(".")]
+                if excluded_paths:
+                    directories[:] = [
+                        name
+                        for name in directories
+                        if not path_is_excluded(os.path.join(directory, name), excluded_paths)
+                    ]
                 directories.sort()
                 filenames.sort()
                 for filename in filenames:
@@ -218,14 +245,17 @@ def _iter_image_paths(
                     suffix = Path(filename).suffix.lower()
                     if suffix not in SUPPORTED_EXTENSIONS:
                         continue
+                    candidate = os.path.join(directory, filename)
+                    if excluded_paths and _root_is_excluded(Path(candidate), excluded_paths):
+                        continue
                     if root_counts is not None:
                         root_counts[raw_root] += 1
                     if image_types and suffix not in image_types:
                         continue
-                    if not meets_min_image_size(os.path.join(directory, filename), min_image_size):
+                    if not meets_min_image_size(candidate, min_image_size):
                         continue
-                    path = os.path.abspath(os.path.join(directory, filename))
                     count += 1
+                    path = os.path.abspath(candidate)
                     if progress is not None and (count == 1 or count % 500 == 0):
                         progress(count, path)
                     yield path
@@ -246,6 +276,8 @@ def _iter_image_paths(
                 except OSError:
                     continue
                 if not is_image:
+                    continue
+                if excluded_paths and _root_is_excluded(entry, excluded_paths):
                     continue
                 if root_counts is not None:
                     root_counts[raw_root] += 1
@@ -361,6 +393,7 @@ class LibraryIndex:
         ignore_hidden: bool = False,
         ignore_patterns: Iterable[str] = (),
         image_types: Iterable[str] = (),
+        excluded_paths: Iterable[str] = (),
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
         now_ns: int | None = None,
@@ -368,6 +401,7 @@ class LibraryIndex:
         roots = normalized_scan_roots(folders)
         patterns = normalized_ignore_patterns(ignore_patterns)
         types = normalize_image_types(image_types)
+        excluded = normalized_excluded_paths(excluded_paths)
         signature = scan_signature(
             roots,
             recursive=recursive,
@@ -375,6 +409,7 @@ class LibraryIndex:
             ignore_hidden=ignore_hidden,
             ignore_patterns=patterns,
             image_types=types,
+            excluded_paths=excluded,
         )
         refreshed_ns = time.time_ns() if now_ns is None else int(now_ns)
         connection = self._open()
@@ -394,6 +429,7 @@ class LibraryIndex:
                 ignore_hidden=ignore_hidden,
                 ignore_patterns=patterns,
                 image_types=types,
+                excluded_paths=excluded,
             ):
                 batch.append((path,))
                 if len(batch) >= 1000:
@@ -457,6 +493,7 @@ class LibraryIndex:
         ignore_hidden: bool = False,
         ignore_patterns: Iterable[str] = (),
         image_types: Iterable[str] = (),
+        excluded_paths: Iterable[str] = (),
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         cancelled: Callable[[], bool] | None = None,
         progress: Callable[[int, str], None] | None = None,
@@ -470,6 +507,7 @@ class LibraryIndex:
             ignore_hidden=ignore_hidden,
             ignore_patterns=ignore_patterns,
             image_types=image_types,
+            excluded_paths=excluded_paths,
         )
         current = self.snapshot(signature)
         current_time = time.time_ns() if now_ns is None else int(now_ns)
@@ -487,6 +525,7 @@ class LibraryIndex:
             ignore_hidden=ignore_hidden,
             ignore_patterns=ignore_patterns,
             image_types=image_types,
+            excluded_paths=excluded_paths,
             cancelled=cancelled,
             progress=progress,
             now_ns=current_time,

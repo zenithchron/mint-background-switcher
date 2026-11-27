@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import random
 import tempfile
-from typing import Iterable
+from typing import Any, Iterable
 import warnings
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageStat
@@ -189,6 +189,51 @@ def name_matches_ignore_patterns(filename: str | Path, patterns: Iterable[str]) 
     return False
 
 
+def normalize_excluded_path(raw: Any) -> str:
+    """Normalize one excluded source path to absolute, slash-normalized form.
+
+    Returns an empty string when the entry is empty, not absolute after
+    ``~`` expansion, or otherwise unusable; callers drop such entries rather
+    than altering them.
+    """
+    text = str(raw or "").strip()
+    if not text or any(ch in text for ch in "\r\n\t"):
+        return ""
+    try:
+        expanded = os.path.expanduser(text)
+    except (RuntimeError, ValueError):
+        return ""
+    if not os.path.isabs(expanded):
+        return ""
+    return os.path.normpath(expanded)
+
+
+def normalized_excluded_paths(paths: Iterable[str] | None = ()) -> tuple[str, ...]:
+    """Canonicalize excluded source paths so equivalent inputs share one form.
+
+    The result is a sorted, de-duplicated tuple of absolute normalized paths;
+    invalid entries are dropped so a scan signature and a live scan can never
+    disagree about the same input.
+    """
+    return tuple(sorted({normalize_excluded_path(raw) for raw in (paths or ())} - {""}))
+
+
+def path_is_excluded(path: str | Path, excluded: tuple[str, ...] | frozenset[str]) -> bool:
+    """Return whether ``path`` is excluded by any normalized excluded path.
+
+    A folder entry excludes the folder itself and everything under it; a file
+    entry excludes exactly that file. ``path`` may be a plain path (it is
+    normalized via ``abspath``) or an already-resolved path (idempotent).
+    """
+    if not excluded:
+        return False
+    candidate = os.path.normpath(os.path.abspath(str(path)))
+    for entry in excluded:
+        if candidate == entry or candidate.startswith(entry + os.sep):
+            return True
+    return False
+
+
 def normalize_image_types(value: Iterable[str] | None) -> frozenset[str]:
     """Return the canonical set of supported extensions named by ``value``.
 
@@ -216,8 +261,10 @@ def scan_images(
     ignore_hidden: bool = False,
     ignore_patterns: Iterable[str] = (),
     image_types: Iterable[str] = (),
+    excluded_paths: Iterable[str] = (),
 ) -> list[str]:
     allowed_types = normalize_image_types(image_types)
+    excluded = normalized_excluded_paths(excluded_paths)
     images: list[str] = []
     for raw_folder in folders:
         if not raw_folder:
@@ -227,6 +274,14 @@ def scan_images(
             if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 if allowed_types and path.suffix.lower() not in allowed_types:
                     continue
+                if path_is_excluded(path, excluded):
+                    continue
+                try:
+                    resolved = path.resolve()
+                except OSError:
+                    resolved = path
+                if path_is_excluded(resolved, excluded):
+                    continue
                 if meets_min_image_size(path, min_image_size):
                     images.append(str(path.resolve()))
                 continue
@@ -235,10 +290,22 @@ def scan_images(
             continue
         if not is_dir:
             continue
+        try:
+            resolved_root = path.resolve()
+        except OSError:
+            resolved_root = path
+        if path_is_excluded(path, excluded) or path_is_excluded(resolved_root, excluded):
+            continue
         if recursive:
             for root, dirs, files in os.walk(path, onerror=lambda _err: None):
                 if ignore_hidden:
                     dirs[:] = [name for name in dirs if not name.startswith(".")]
+                if excluded:
+                    dirs[:] = [
+                        name
+                        for name in dirs
+                        if not path_is_excluded(os.path.join(root, name), excluded)
+                    ]
                 for filename in files:
                     if ignore_hidden and filename.startswith("."):
                         continue
@@ -250,10 +317,18 @@ def scan_images(
                         continue
                     if allowed_types and suffix not in allowed_types:
                         continue
+                    if path_is_excluded(item, excluded):
+                        continue
+                    try:
+                        resolved_item = item.resolve()
+                    except OSError:
+                        continue
+                    if path_is_excluded(resolved_item, excluded):
+                        continue
                     if not meets_min_image_size(item, min_image_size):
                         continue
                     try:
-                        images.append(str(item.resolve()))
+                        images.append(str(resolved_item))
                     except OSError:
                         continue
         else:
@@ -271,8 +346,16 @@ def scan_images(
                     if item.is_file() and suffix in SUPPORTED_EXTENSIONS:
                         if allowed_types and suffix not in allowed_types:
                             continue
+                        if path_is_excluded(item, excluded):
+                            continue
+                        try:
+                            resolved_item = item.resolve()
+                        except OSError:
+                            continue
+                        if path_is_excluded(resolved_item, excluded):
+                            continue
                         if meets_min_image_size(item, min_image_size):
-                            images.append(str(item.resolve()))
+                            images.append(str(resolved_item))
                 except OSError:
                     continue
     return sorted(set(images))

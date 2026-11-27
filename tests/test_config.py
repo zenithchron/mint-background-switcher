@@ -1,9 +1,12 @@
 import json
+import os
 from datetime import datetime
 
 from mint_background_switcher.config import (
     MAX_EXCLUDED_IMAGES,
     MAX_EXCLUDED_PATH_LENGTH,
+    MAX_EXCLUDED_SOURCE_PATHS,
+    MAX_EXCLUDED_SOURCE_PATH_LENGTH,
     MAX_IGNORE_PATTERN_LENGTH,
     MAX_IGNORE_PATTERNS,
     MAX_IMAGE_TYPES,
@@ -110,6 +113,33 @@ def test_ignore_patterns_roundtrip_and_coercion():
     at_limit = "x" * MAX_IGNORE_PATTERN_LENGTH
     assert Profile.from_dict("P", {"ignore_patterns": [at_limit]}).ignore_patterns == [at_limit]
     assert Profile.from_dict("P", {"ignore_patterns": ["x" * (MAX_IGNORE_PATTERN_LENGTH + 1)]}).ignore_patterns == []
+
+
+def test_excluded_paths_roundtrip_and_coercion():
+    assert Profile(name="P").excluded_paths == []
+
+    loaded = Profile.from_dict("P", {"excluded_paths": ["/photos/sunsets", "~/Pictures/wallpapers"]})
+    assert loaded.excluded_paths == ["/photos/sunsets", os.path.expanduser("~/Pictures/wallpapers")]
+    assert all(os.path.isabs(path) for path in loaded.excluded_paths)
+    assert loaded.to_dict()["excluded_paths"] == loaded.excluded_paths
+
+    # Missing and non-list values fall back to an empty list.
+    assert Profile.from_dict("P", {}).excluded_paths == []
+    assert Profile.from_dict("P", {"excluded_paths": "/photos/sunsets"}).excluded_paths == []
+    assert Profile.from_dict("P", {"excluded_paths": None}).excluded_paths == []
+
+    # Relative entries are dropped (never reinterpreted against a working directory).
+    assert Profile.from_dict("P", {"excluded_paths": ["photos/sunsets"]}).excluded_paths == []
+    # Whitespace is trimmed, duplicates collapse, order is preserved.
+    assert Profile.from_dict("P", {"excluded_paths": [" /a ", "/a", "/a/", "/b"]}).excluded_paths == ["/a", "/b"]
+    # Blank entries are dropped; oversized lists are capped; over-long entries are dropped.
+    assert Profile.from_dict("P", {"excluded_paths": ["", "   "]}).excluded_paths == []
+    many = [f"/pics/{i}" for i in range(MAX_EXCLUDED_SOURCE_PATHS + 10)]
+    assert len(Profile.from_dict("P", {"excluded_paths": many}).excluded_paths) == MAX_EXCLUDED_SOURCE_PATHS
+    at_limit = "/" + "x" * (MAX_EXCLUDED_SOURCE_PATH_LENGTH - 1)
+    assert Profile.from_dict("P", {"excluded_paths": [at_limit]}).excluded_paths == [at_limit]
+    over = "/" + "x" * (MAX_EXCLUDED_SOURCE_PATH_LENGTH - 1 + 1)
+    assert Profile.from_dict("P", {"excluded_paths": [over]}).excluded_paths == []
 
 
 def test_image_types_roundtrip_and_coercion():

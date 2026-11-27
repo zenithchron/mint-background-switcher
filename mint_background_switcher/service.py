@@ -20,6 +20,8 @@ from typing import Any
 from .availability import CollectionUnavailableError, probe_folders
 from .config import (
     MAX_EXCLUDED_IMAGES,
+    MAX_EXCLUDED_SOURCE_PATHS,
+    MAX_EXCLUDED_SOURCE_PATH_LENGTH,
     Config,
     Profile,
     config_file,
@@ -245,6 +247,69 @@ def clear_excluded_images(profile_name: str | None) -> int:
     return len(_mutate_excluded_images(profile_name, _clear))
 
 
+def _normalized_source_path(raw: object) -> str:
+    """Absolute normalized form of an excluded source path, or raise when unusable.
+
+    Relative entries are rejected rather than reinterpreted against the caller's
+    working directory: an exclusion must mean the same thing in the CLI, the
+    Settings window, and the saved config.
+    """
+    candidate = str(raw or "").strip()
+    if not candidate or any(ch in candidate for ch in "\r\n\t"):
+        raise ValueError("excluded path is empty or contains a line break")
+    expanded = os.path.expanduser(candidate)
+    if not os.path.isabs(expanded):
+        raise ValueError(f"excluded paths must be absolute (start with / or ~): {candidate}")
+    return os.path.normpath(expanded)
+
+
+def list_excluded_source_paths(profile_name: str | None = None) -> list[str]:
+    """Return the profile's excluded source paths (read-only)."""
+    return list(load_config(create=False).get_profile(profile_name).excluded_paths)
+
+
+def add_excluded_source_paths(profile_name: str | None, raw_paths: Iterable[str]) -> list[str]:
+    """Add folders/files to the profile's excluded source paths.
+
+    Returns the entries actually added. Paths are normalized to absolute form;
+    duplicates are dropped and the list is capped at the config limit.
+    """
+
+    def _add(profile: Profile) -> list[str]:
+        added: list[str] = []
+        for raw in raw_paths:
+            if len(profile.excluded_paths) >= MAX_EXCLUDED_SOURCE_PATHS:
+                break
+            normalized = _normalized_source_path(raw)
+            if len(normalized) > MAX_EXCLUDED_SOURCE_PATH_LENGTH:
+                raise ValueError(
+                    f"Each excluded path can be at most {MAX_EXCLUDED_SOURCE_PATH_LENGTH} characters: {normalized}"
+                )
+            if normalized in profile.excluded_paths:
+                continue
+            profile.excluded_paths.append(normalized)
+            added.append(normalized)
+        return added
+
+    return _mutate_profile(profile_name, _add)
+
+
+def remove_excluded_source_paths(profile_name: str | None, raw_paths: Iterable[str]) -> list[str]:
+    """Remove folders/files from the profile's excluded source paths.
+
+    Returns the entries actually removed; names that are not excluded are
+    ignored (an idempotent remove is not an error).
+    """
+
+    def _remove(profile: Profile) -> list[str]:
+        targets = {_normalized_source_path(raw) for raw in raw_paths}
+        removed = [path for path in profile.excluded_paths if path in targets]
+        profile.excluded_paths = [path for path in profile.excluded_paths if path not in targets]
+        return removed
+
+    return _mutate_profile(profile_name, _remove)
+
+
 def _web_sources_pool_folders(
     profile: Profile,
     working_directory: Path,
@@ -451,9 +516,18 @@ def _load_image_pool(
     ignore_patterns: Iterable[str] = (),
     image_types: Iterable[str] = (),
     excluded: frozenset[str] = frozenset(),
+    excluded_source_paths: Iterable[str] = (),
 ) -> _ImagePool:
     if dry_run:
-        paths = scan_images(folders, recursive, min_image_size, ignore_hidden, ignore_patterns, image_types)
+        paths = scan_images(
+            folders,
+            recursive,
+            min_image_size,
+            ignore_hidden,
+            ignore_patterns,
+            image_types,
+            excluded_source_paths,
+        )
         if excluded:
             paths = [path for path in paths if path not in excluded]
         return _ImagePool(paths=paths, excluded=excluded)
@@ -466,6 +540,7 @@ def _load_image_pool(
         ignore_hidden=ignore_hidden,
         ignore_patterns=ignore_patterns,
         image_types=image_types,
+        excluded_paths=excluded_source_paths,
         cancelled=cancelled,
         progress=progress,
     )
@@ -1066,6 +1141,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1112,6 +1188,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1168,6 +1245,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1256,6 +1334,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1340,6 +1419,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1423,6 +1503,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1476,6 +1557,7 @@ def _switch_once_with_state(
             ignore_patterns=profile.ignore_patterns,
             image_types=profile.image_types,
             excluded=excluded_paths,
+            excluded_source_paths=profile.excluded_paths,
         )
         if pool.empty:
             wallpaper, lockscreen_note = _apply_black_fallback(
@@ -1535,6 +1617,7 @@ def _switch_once_with_state(
                 ignore_patterns=profile.ignore_patterns,
                 image_types=profile.image_types,
                 excluded=excluded_paths,
+                excluded_source_paths=profile.excluded_paths,
             )
             if not pool.empty:
                 pools_by_monitor[monitor.name] = pool
