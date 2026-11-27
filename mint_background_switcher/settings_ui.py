@@ -898,7 +898,7 @@ class SettingsApp(tk.Tk):
         self.excluded_source_paths_entry = ttk.Entry(
             source_options,
             textvariable=self.excluded_source_paths_var,
-            width=26,
+            width=12,
         )
         self.excluded_source_paths_entry.grid(row=5, column=1, sticky="w", padx=5, pady=(2, 0))
         ttk.Label(
