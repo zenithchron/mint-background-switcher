@@ -4,8 +4,11 @@ The shared web source cache (``<working folder>/web_sources``) accumulates one
 file per downloaded image URL. This module lists those pictures newest-first
 with the configured source each one belongs to — a direct image URL, an
 RSS/Atom feed, or an orphan when its source was removed from the settings.
-The browser is read-only: it lists, opens, and reveals cache files; pruning
-stays the refresh path's job.
+The browser opens and reveals cache files without pruning them (pruning stays
+the refresh path's job); the one deliberate cache mutation it offers is
+**Clear Cache...**, which after a confirmation deletes every MBS-owned file in
+the cache (cache images, feed sidecars, interrupted-download temp files) and
+nothing else.
 """
 
 from __future__ import annotations
@@ -16,16 +19,19 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Callable
 
 from .config import load_config
 from .desktop import open_desktop_target
 from .sources import (
+    CacheStats,
     CachedPicture,
     all_web_source_entries,
+    clear_web_source_cache,
     list_cached_pictures,
     web_source_cache_dir,
+    web_source_cache_stats,
 )
 from .working_storage import configured_working_directory
 
@@ -91,6 +97,7 @@ class CachedPicturesWindow(tk.Toplevel):
         self._cache_dir = Path(cache_dir)
         self._pictures: list[CachedPicture] = []
         self._opening = False
+        self._clearing = False
         self._first_paint = True
         self.title(BROWSER_TITLE)
         self.transient(parent)
@@ -125,6 +132,10 @@ class CachedPicturesWindow(tk.Toplevel):
         self._open_folder_button.pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(buttons, text="Refresh", command=self.refresh).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(buttons, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        cache_buttons = ttk.Frame(content)
+        cache_buttons.pack(fill=tk.X, pady=(8, 0))
+        self._clear_button = ttk.Button(cache_buttons, text="Clear Cache...", command=self._clear_cache)
+        self._clear_button.pack(side=tk.LEFT)
 
         self.refresh()
         self._first_paint = False
@@ -136,12 +147,24 @@ class CachedPicturesWindow(tk.Toplevel):
     def _header_text(self) -> str:
         count = len(self._pictures)
         noun = "picture" if count == 1 else "pictures"
-        return f"{count} cached web source {noun} in {_shorten(str(self._cache_dir), 120)}"
+        usage = ""
+        try:
+            stats = web_source_cache_stats(self._cache_dir)
+            usage = f" — {_size_label(stats.total_bytes)} used"
+        except Exception:
+            pass  # a stats failure must never break the header
+        return f"{count} cached web source {noun} in {_shorten(str(self._cache_dir), 120)}{usage}"
 
     def _set_open_controls_enabled(self, enabled: bool) -> None:
         state = ["!disabled"] if enabled else ["disabled"]
         self._open_button.state(state)
         self._open_folder_button.state(state)
+
+    def _set_clear_enabled(self, enabled: bool) -> None:
+        # The clear button is never tied to the list state: the cache can
+        # still hold feed sidecars or interrupted-download temp files when
+        # the picture list is empty.
+        self._clear_button.state(["!disabled"] if enabled else ["disabled"])
 
     def _repaint(self, pictures: list[CachedPicture], previously_selected: str | None) -> bool:
         """Replace the list content; returns True when the set changed."""
@@ -245,6 +268,74 @@ class CachedPicturesWindow(tk.Toplevel):
                 self._status_var.set(f"The selected {subject} could not be opened: {error}")
             else:
                 self._note_selection()
+
+        threading.Thread(target=launch, daemon=True).start()
+        self.after(50, poll_result)
+
+    def _clear_cache(self) -> None:
+        """Confirm, then delete every MBS-owned file in the cache directory."""
+
+        if self._clearing:
+            return
+        try:
+            pending = web_source_cache_stats(self._cache_dir)
+        except Exception as exc:
+            self._status_var.set(f"The cache could not be inspected: {exc}")
+            return
+        if (
+            pending.picture_count == 0
+            and pending.sidecar_count == 0
+            and pending.temp_file_count == 0
+            and pending.total_bytes == 0
+        ):
+            self._status_var.set("The cache is already empty; there is nothing to clear.")
+            return
+        message = (
+            f"Delete every cached web picture, feed record, and interrupted-download temp file in\n{self._cache_dir}?\n\n"
+            f"That is {pending.picture_count} cached picture(s), "
+            f"{pending.sidecar_count} feed record(s), and "
+            f"{pending.temp_file_count} interrupted-download temp file(s), "
+            f"{_size_label(pending.total_bytes)} in total.\n\n"
+            "Settings, source folders, and generated wallpapers are not touched. "
+            "Configured web sources are re-downloaded on their next refresh or switch."
+        )
+        if not messagebox.askyesno("Clear Web Picture Cache", message, parent=self):
+            self._status_var.set("Clearing the cache was cancelled; nothing was deleted.")
+            return
+        self._clearing = True
+        self._set_clear_enabled(False)
+        self._status_var.set("Clearing the cache...")
+        result_queue: queue.Queue[tuple[CacheStats | None, Exception | None]] = queue.Queue()
+
+        def launch() -> None:
+            try:
+                deleted = clear_web_source_cache(self._cache_dir)
+                result_queue.put((deleted, None))
+            except Exception as exc:
+                result_queue.put((None, exc))
+
+        def poll_result() -> None:
+            try:
+                deleted, error = result_queue.get_nowait()
+            except queue.Empty:
+                try:
+                    self.after(50, poll_result)
+                except tk.TclError:
+                    return
+                return
+            self._clearing = False
+            if not self.winfo_exists():
+                return
+            self._set_clear_enabled(True)
+            if error is not None:
+                self._status_var.set(f"The cache could not be cleared: {error}")
+                return
+            assert deleted is not None  # guaranteed when error is None
+            self.refresh()
+            self._status_var.set(
+                f"Cleared {deleted.picture_count} picture(s) and {deleted.sidecar_count} feed record(s) "
+                f"({_size_label(deleted.total_bytes)}) from the cache."
+            )
 
         threading.Thread(target=launch, daemon=True).start()
         self.after(50, poll_result)

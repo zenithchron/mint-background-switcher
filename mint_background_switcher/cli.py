@@ -24,7 +24,13 @@ from .monitor import detect_monitors
 from .overlays import DEFAULT_OVERLAY_CALENDAR_POSITION, overlays_enabled, read_picture_info, render_overlay_preview
 from .paths import config_file, state_file, startup_guard_file, startup_log_file
 from .rescue import run_rescue
-from .sources import all_web_source_entries, list_cached_pictures, web_source_cache_dir
+from .sources import (
+    all_web_source_entries,
+    clear_web_source_cache,
+    list_cached_pictures,
+    web_source_cache_dir,
+    web_source_cache_stats,
+)
 from .service import (
     NoCurrentWallpaperError,
     NoPreviousWallpaperError,
@@ -275,6 +281,22 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=200,
         help="Maximum number of pictures to list (1-1000, default 200)",
+    )
+
+    cache = sub.add_parser(
+        "cache",
+        help="Inspect or clear the shared web source picture cache (all profiles)",
+    )
+    cache_sub = cache.add_subparsers(dest="cache_command", required=True)
+    cache_sub.add_parser("info", help="Report the cache directory, picture count, and disk usage")
+    cache_clear = cache_sub.add_parser(
+        "clear",
+        help="Delete every cached web picture and feed record from the shared cache",
+    )
+    cache_clear.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be deleted without changing anything",
     )
 
     overlay_info = sub.add_parser(
@@ -566,6 +588,55 @@ def main(argv: list[str] | None = None) -> int:
             return run_cached_pictures_gui(limit=args.limit)
         except (ValueError, WorkingDirectoryError, RuntimeError) as exc:
             print(f"cached-pictures failed: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "cache":
+        try:
+            config = load_config(create=False)
+            cache_dir = web_source_cache_dir(configured_working_directory(config))
+        except (ValueError, WorkingDirectoryError) as exc:
+            print(f"cache failed: {exc}", file=sys.stderr)
+            return 1
+        try:
+            if args.cache_command == "info":
+                print(json.dumps(web_source_cache_stats(cache_dir).to_dict(), indent=2, sort_keys=True))
+                return 0
+            before = web_source_cache_stats(cache_dir)
+            deleted = None if args.dry_run else clear_web_source_cache(cache_dir)
+            after = web_source_cache_stats(cache_dir)
+            payload: dict[str, object] = {
+                "dry_run": args.dry_run,
+                "cache_dir": str(cache_dir),
+            }
+            if args.dry_run:
+                payload.update(
+                    {
+                        "would_delete_pictures": before.picture_count,
+                        "would_delete_feed_sidecars": before.sidecar_count,
+                        "would_delete_temp_files": before.temp_file_count,
+                        "would_delete_bytes": before.total_bytes,
+                    }
+                )
+            else:
+                assert deleted is not None  # set whenever not a dry run
+                payload.update(
+                    {
+                        "deleted_pictures": deleted.picture_count,
+                        "deleted_feed_sidecars": deleted.sidecar_count,
+                        "deleted_temp_files": deleted.temp_file_count,
+                        "deleted_bytes": deleted.total_bytes,
+                    }
+                )
+            payload.update(
+                {
+                    "remaining_pictures": after.picture_count,
+                    "remaining_feed_sidecars": after.sidecar_count,
+                    "remaining_bytes": after.total_bytes,
+                }
+            )
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        except OSError as exc:
+            print(f"cache failed: {exc}", file=sys.stderr)
             return 1
     if args.command == "overlay-info":
         info = read_picture_info(Path(args.image))

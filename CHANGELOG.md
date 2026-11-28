@@ -4,6 +4,20 @@ All notable changes to Mint Background Switcher will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning for public releases.
 
+## [0.2.41] - 2026-11-28
+
+### Added
+
+- **Web cache management** (JBS cache-controls parity; roadmap section 7 "Administration and optional parity"):
+  - The cached picture browser (**Settings → Sources → Web picture sources → Cached Pictures…**, the tray **Cached Pictures** item, and `cached-pictures`) now shows the cache's total on-disk size in its header (for example "12 cached web source pictures in /path/to/web_sources — 3.2 MB used"), recomputed on every refresh.
+  - The browser gains a **Clear Cache…** button: a confirmation dialog shows exactly what will be removed — cached pictures, `.images.json` feed records, and `.part` interrupted-download temp files, each with its count, plus the total size — and names the cache folder. On confirmation the clear runs in a background thread (the window never freezes), shows a busy status line, then reports what it removed and refreshes the listing. An empty cache reports "already empty" with no dialog, and a clear failure leaves every file in place with a one-line error status.
+  - Ownership-safe deletion: only files the cache itself creates are ever removed — the 20-hex cache images, `.images.json` feed records, and `.part` temp files. The cache folder itself, subdirectories, and any unrelated files are never touched, and the clear skips symlinked directories entirely.
+  - CLI: `mint-background-switcher cache info` prints JSON statistics for the cache (`cache_dir`, `pictures`, `picture_bytes`, `feed_sidecars`, `sidecar_bytes`, `temp_files`, `temp_file_bytes`, `total_bytes`), and `mint-background-switcher cache clear [--dry-run]` performs the same ownership-safe clear for scripts with JSON output reporting deleted and remaining counts plus byte totals; `--dry-run` reports what would be deleted without changing anything.
+
+### Changed
+
+- Bumped the package version to `0.2.41`.
+
 ## [0.2.40] - 2026-11-27
 
 ### Added

@@ -34,7 +34,7 @@ Design notes:
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -310,6 +310,115 @@ def list_cached_pictures(
         )
     pictures.sort(key=lambda picture: (-picture.mtime, picture.name))
     return pictures[:bounded]
+
+
+@dataclass(frozen=True, slots=True)
+class CacheStats:
+    """What the shared web source cache directory currently holds.
+
+    Only the files MBS owns in the cache are counted: 20-hex cache images,
+    feed sidecars, and interrupted-download temp files. Anything else that
+    happens to live in the folder is not part of the cache and is never
+    counted or cleared.
+    """
+
+    cache_dir: str
+    picture_count: int = 0
+    picture_bytes: int = 0
+    sidecar_count: int = 0
+    sidecar_bytes: int = 0
+    temp_file_count: int = 0
+    temp_file_bytes: int = 0
+
+    @property
+    def total_bytes(self) -> int:
+        return self.picture_bytes + self.sidecar_bytes + self.temp_file_bytes
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cache_dir": self.cache_dir,
+            "pictures": self.picture_count,
+            "picture_bytes": self.picture_bytes,
+            "feed_sidecars": self.sidecar_count,
+            "sidecar_bytes": self.sidecar_bytes,
+            "temp_files": self.temp_file_count,
+            "temp_file_bytes": self.temp_file_bytes,
+            "total_bytes": self.total_bytes,
+        }
+
+
+def _cache_owned_files(cache_dir: Path) -> list[tuple[Path, str, int]]:
+    """List the MBS-owned files of the cache directory as ``(path, kind, size)``.
+
+    ``kind`` is ``"picture"``, ``"sidecar"``, or ``"temp"``. A missing or
+    unreadable directory yields an empty list; unreadable entries are
+    skipped. Subdirectories and files that do not match the cache's own
+    naming scheme are never reported.
+    """
+    try:
+        entries = list(cache_dir.iterdir())
+    except OSError:
+        return []
+    owned: list[tuple[Path, str, int]] = []
+    for path in entries:
+        try:
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+        except OSError:
+            continue
+        name = path.name
+        if _CACHE_FILE_RE.match(name):
+            owned.append((path, "picture", size))
+        elif _FEED_SIDECAR_RE.match(name):
+            owned.append((path, "sidecar", size))
+        elif name.startswith(".") and name.endswith(".part"):
+            owned.append((path, "temp", size))
+    return owned
+
+
+def web_source_cache_stats(cache_dir: Path | str) -> CacheStats:
+    """Report what the shared web source cache currently holds.
+
+    Fail-open: a missing or unreadable cache directory reports zero
+    everywhere, the same way ``list_cached_pictures`` treats it as empty.
+    """
+    cache = Path(cache_dir)
+    stats = CacheStats(cache_dir=str(cache))
+    for _path, kind, size in _cache_owned_files(cache):
+        if kind == "picture":
+            stats = replace(stats, picture_count=stats.picture_count + 1, picture_bytes=stats.picture_bytes + size)
+        elif kind == "sidecar":
+            stats = replace(stats, sidecar_count=stats.sidecar_count + 1, sidecar_bytes=stats.sidecar_bytes + size)
+        else:
+            stats = replace(stats, temp_file_count=stats.temp_file_count + 1, temp_file_bytes=stats.temp_file_bytes + size)
+    return stats
+
+
+def clear_web_source_cache(cache_dir: Path | str) -> CacheStats:
+    """Delete every MBS-owned file in the shared web source cache.
+
+    Only the cache's own files are removed: 20-hex cache images, feed
+    sidecars, and interrupted-download temp files. Unrelated files and
+    subdirectories are never touched, and neither is the cache directory
+    itself. A missing or empty cache is a no-op. Per-file deletion
+    failures are skipped, never raised, so a clear problem can never
+    break the rest of the session. Returns the stats of what was removed.
+    """
+    cache = Path(cache_dir)
+    stats = CacheStats(cache_dir=str(cache))
+    for path, kind, size in _cache_owned_files(cache):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        if kind == "picture":
+            stats = replace(stats, picture_count=stats.picture_count + 1, picture_bytes=stats.picture_bytes + size)
+        elif kind == "sidecar":
+            stats = replace(stats, sidecar_count=stats.sidecar_count + 1, sidecar_bytes=stats.sidecar_bytes + size)
+        else:
+            stats = replace(stats, temp_file_count=stats.temp_file_count + 1, temp_file_bytes=stats.temp_file_bytes + size)
+    return stats
 
 
 def _describe_error(exc: Exception, url: str) -> str:

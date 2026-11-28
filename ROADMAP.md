@@ -61,7 +61,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 
 ### 5. History and current-wallpaper actions
 
-- Never Show Again exclusions, including one image in a composite. Shipped in `0.2.18` (whole-current-wallpaper one-click exclusion; single-image exclusion within a composite remains future work).
+- Never Show Again exclusions, including one image in a composite. Shipped in `0.2.18`: whole-current-wallpaper one-click exclusion plus the **Never Show Again** button on the Current Pictures dialog for selected entries (multi-select), which also covers excluding a single image inside a multi-picture layout.
 - Previous and redraw-current actions. Previous shipped in `0.2.27` as a per-profile 10-step history with tray, CLI, and hotkey access; redraw-current shipped in `0.2.28` as a re-apply-the-active-wallpaper action with tray, CLI, and hotkey access.
 - Shuffle current monitor assignments. Shipped in `0.2.33` as the **Shuffle Assignments** button on the Layout & Appearance per-monitor section (a pending edit kept with Save Profile / Save & Apply Now), the tray **Shuffle Monitors** item, and `shuffle-monitor [--dry-run]`: per-monitor folders are redistributed across the assigned screens (each keeps its folder count), and a live action persists the new assignment and applies a new wallpaper immediately. Clear background remains future work (the emergency Black screen is the current closest equivalent).
 - Browse recent cached pictures and navigate to their original sources. Shipped in `0.2.38` as the **Cached Pictures…** button on the Settings → Sources web picture source row, the tray **Cached Pictures** item, and `cached-pictures [--json] [--limit N]`: a read-only browser over `<working folder>/web_sources` that lists every cached picture newest first with file name, source (direct URL, `[feed] <feed URL>`, or orphan when the source was removed from the settings), date, and size, and can open a picture or its containing folder; it never deletes or prunes cache files.
@@ -78,7 +78,7 @@ Migrate the existing NASA and Wikimedia collection downloaders onto the shared p
 ### 7. Administration and optional parity
 
 - Settings import/export shipped in `0.2.20` as **Settings → Storage → Import / Export** (export every profile, folder, and per-profile option to a versioned JSON file; import validates first and applies after a confirmation). Reset to defaults shipped in `0.2.30` as **Reset to Defaults...** on the same page (plus `reset-defaults [--dry-run]` CLI): every profile is replaced by the factory default profile with every option at its default value, while the working-folder setting is kept and the rotation state is untouched.
-- First-run guidance, integrated help, diagnostics, and cache controls.
+- First-run guidance, integrated help, and diagnostics. Cache controls shipped in `0.2.41`: the cached picture browser shows the cache's total on-disk size and a **Clear Cache…** button (confirmation dialog, background-thread clear) that removes only cache-owned files — the 20-hex cache images, `.images.json` feed records, and `.part` interrupted-download temp files — while keeping the cache folder, subdirectories, and foreign files untouched; `cache info` and `cache clear [--dry-run]` give scripts machine-readable statistics and the same ownership-safe clear.
 - Proxy support, localization, and optional Cinnamon lock-screen integration.
 - Provider-specific or sharing conveniences only when they have clear current value.
 
